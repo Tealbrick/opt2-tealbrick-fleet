@@ -13,7 +13,7 @@ type Person = Dir["people"][number];
 type Agent = Dir["agents"][number];
 type Role = "member" | "lead";
 
-/** Shell page id → path under the base `/a/fleet/` (manifest `ui.launchPath` = "/"). */
+/** Shell page id → path under the base `/a/fleet/` (manifest `ui.launchPath` = `ui.configurePath` = "/"). */
 const PATHS: Record<string, string> = { teams: "./", people: "./people", agents: "./agents", identities: "./identities", holds: "./holds" };
 const PAGES = [
   { id: "teams", label: "Teams" },

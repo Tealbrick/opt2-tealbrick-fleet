@@ -35,6 +35,12 @@ test("manifest validates", () => {
   assert.equal(v.ok, true, v.ok ? "" : JSON.stringify(v.errors));
 });
 
+test("the UI is openable from Portal: launchPath and configurePath both declared (QA S3)", () => {
+  // Portal Core derives `hasConfigureUi` from ui.configurePath and the GUI's Open control needs it.
+  assert.equal(manifest.ui?.launchPath, "/");
+  assert.equal(manifest.ui?.configurePath, "/");
+});
+
 test("the generated kit matches the manifest and every operation has exactly one handler", () => {
   assert.equal(MANIFEST_DIGEST, manifestDigest(manifest), "kit is stale: run node --run kit");
   const ids = manifest.operations.map((o) => o.id).sort();
