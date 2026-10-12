@@ -1,0 +1,1844 @@
+{
+  "$schema": "https://spec.opt2.tealbrick.com/manifest.schema.json",
+  "schema": "tealbrick.miniapp/2",
+  "id": "fleet",
+  "name": "Organization Plane",
+  "summary": "Organization Plane is your workspace directory: teams, people, who owns which agent, and people's channel handles.",
+  "description": "The workspace directory for your agents and the people they work with.\n\n- **Teams:** people and agents, each with a role (member or lead).\n- **People:** directory entries (not sign-ins) with their Buzz, Slack and Telegram handles, so a message sender becomes a known person.\n- **Agents:** every workspace agent, with its owner, role and teams.\n\nOther apps (for example Rules) read these facts. Organization Plane holds no policy and no credentials.",
+  "version": "0.1.0",
+  "sdkMajor": 1,
+  "publisher": {
+    "name": "Teal Brick opt2"
+  },
+  "source": {
+    "repo": "https://github.com/Martin-Atrin/opt2-tealbrick-fleet",
+    "license": "MIT"
+  },
+  "icon": {
+    "svgPath": "M12 4a3 3 0 1 0 0 6a3 3 0 1 0 0-6z M5 13a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5z M19 13a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5z M12 10v3 M12 13l-5 2 M12 13l5 2",
+    "viewBox": "0 0 24 24"
+  },
+  "discovery": {
+    "category": "productivity",
+    "intents": [
+      "set up teams for my agents",
+      "who owns this agent",
+      "which team is this person in",
+      "map a Buzz or Slack sender to a person"
+    ],
+    "keywords": [
+      "teams",
+      "people",
+      "directory",
+      "organization",
+      "fleet",
+      "owners"
+    ]
+  },
+  "runtime": {
+    "build": {
+      "context": ".",
+      "dockerfile": "Dockerfile"
+    },
+    "port": 8080,
+    "healthPath": "/tb/v1/health",
+    "resources": {
+      "cpu": 0.25,
+      "memoryMb": 256
+    },
+    "volumes": [
+      {
+        "id": "data",
+        "mountPath": "/data",
+        "sizeGb": 1,
+        "purpose": "data"
+      },
+      {
+        "id": "backup",
+        "mountPath": "/backup",
+        "sizeGb": 2,
+        "purpose": "backup"
+      }
+    ]
+  },
+  "operations": [
+    {
+      "id": "teams_list",
+      "title": "List teams",
+      "description": "List the workspace teams with their members (people with their channel handles, agents), oldest first. Optional: only teams with a tag. Page with cursor = nextCursor.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "tag": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_.-]{0,39}$"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "teams",
+          "nextCursor"
+        ],
+        "properties": {
+          "teams": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "name",
+                "description",
+                "tags",
+                "people",
+                "agents",
+                "updatedAt",
+                "members"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "people": {
+                  "type": "integer"
+                },
+                "agents": {
+                  "type": "integer"
+                },
+                "updatedAt": {
+                  "type": "string"
+                },
+                "members": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "kind",
+                      "id",
+                      "name",
+                      "role"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "enum": [
+                          "person",
+                          "agent"
+                        ]
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "role": {
+                        "enum": [
+                          "member",
+                          "lead"
+                        ]
+                      },
+                      "handles": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "agent"
+    },
+    {
+      "id": "team_get",
+      "title": "Get team",
+      "description": "One team with its members (people and agents, each with a role). Give the team id or its exact name.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "team"
+        ],
+        "properties": {
+          "team": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "team"
+        ],
+        "properties": {
+          "team": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "description",
+              "tags",
+              "people",
+              "agents",
+              "updatedAt",
+              "members"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "people": {
+                "type": "integer"
+              },
+              "agents": {
+                "type": "integer"
+              },
+              "updatedAt": {
+                "type": "string"
+              },
+              "members": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "id",
+                    "name",
+                    "role"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "person",
+                        "agent"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "enum": [
+                        "member",
+                        "lead"
+                      ]
+                    },
+                    "handles": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "agent"
+    },
+    {
+      "id": "directory_get",
+      "title": "Get directory",
+      "description": "The whole workspace directory: teams with members, people with channel handles and teams, agents with owner, role and teams. Pass sinceRevision to get only `unchanged: true` when nothing changed.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "sinceRevision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "revision",
+          "teams",
+          "people",
+          "agents",
+          "unchanged"
+        ],
+        "properties": {
+          "revision": {
+            "type": "integer"
+          },
+          "teams": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "name",
+                "description",
+                "tags",
+                "people",
+                "agents",
+                "updatedAt",
+                "members"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "people": {
+                  "type": "integer"
+                },
+                "agents": {
+                  "type": "integer"
+                },
+                "updatedAt": {
+                  "type": "string"
+                },
+                "members": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "kind",
+                      "id",
+                      "name",
+                      "role"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "enum": [
+                          "person",
+                          "agent"
+                        ]
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "role": {
+                        "enum": [
+                          "member",
+                          "lead"
+                        ]
+                      },
+                      "handles": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "people": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "name",
+                "email",
+                "title",
+                "status",
+                "tags",
+                "handles",
+                "teams",
+                "updatedAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "email": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "title": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "departed"
+                  ]
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "handles": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "teams": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "name",
+                      "role"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "role": {
+                        "enum": [
+                          "member",
+                          "lead"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "updatedAt": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "agents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "name",
+                "mode",
+                "status",
+                "owner",
+                "role",
+                "tags",
+                "teams",
+                "updatedAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "paused",
+                    "removed"
+                  ]
+                },
+                "owner": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "name"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "role": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "teams": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "name",
+                      "role"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "role": {
+                        "enum": [
+                          "member",
+                          "lead"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "updatedAt": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "unchanged": {
+            "type": "boolean"
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "agent"
+    },
+    {
+      "id": "resolve_sender",
+      "title": "Resolve sender",
+      "description": "Find the person behind a channel handle and that person's teams. handle = \"<channel>:<value>\": buzz:<npub>, slack:<user id>, telegram:<user id> (a bare npub also works). A departed person has no teams.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "handle"
+        ],
+        "properties": {
+          "handle": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 140
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "found",
+          "person",
+          "teams"
+        ],
+        "properties": {
+          "found": {
+            "type": "boolean"
+          },
+          "person": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "name",
+                  "status"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "active",
+                      "departed"
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "teams": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "name",
+                "role"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "role": {
+                  "enum": [
+                    "member",
+                    "lead"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "agent"
+    },
+    {
+      "id": "overview_get",
+      "title": "Directory overview",
+      "description": "Teams, people and agents for the owner's pages.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {}
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "revision",
+          "teams",
+          "people",
+          "agents"
+        ],
+        "properties": {
+          "revision": {
+            "type": "integer"
+          },
+          "teams": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "name",
+                "description",
+                "tags",
+                "people",
+                "agents",
+                "updatedAt",
+                "members"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "people": {
+                  "type": "integer"
+                },
+                "agents": {
+                  "type": "integer"
+                },
+                "updatedAt": {
+                  "type": "string"
+                },
+                "members": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "kind",
+                      "id",
+                      "name",
+                      "role"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "enum": [
+                          "person",
+                          "agent"
+                        ]
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "role": {
+                        "enum": [
+                          "member",
+                          "lead"
+                        ]
+                      },
+                      "handles": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "people": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "name",
+                "email",
+                "title",
+                "status",
+                "tags",
+                "handles",
+                "teams",
+                "updatedAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "email": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "title": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "departed"
+                  ]
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "handles": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "teams": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "name",
+                      "role"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "role": {
+                        "enum": [
+                          "member",
+                          "lead"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "updatedAt": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "agents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "name",
+                "mode",
+                "status",
+                "owner",
+                "role",
+                "tags",
+                "teams",
+                "updatedAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "paused",
+                    "removed"
+                  ]
+                },
+                "owner": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "name"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "role": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "teams": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "name",
+                      "role"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "role": {
+                        "enum": [
+                          "member",
+                          "lead"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "updatedAt": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "team_set",
+      "title": "Save team",
+      "description": "Create a team (no id) or update one (id).",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9_.-]{0,39}$"
+            },
+            "maxItems": 16,
+            "uniqueItems": true
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "team"
+        ],
+        "properties": {
+          "team": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "description",
+              "tags",
+              "people",
+              "agents",
+              "updatedAt"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "people": {
+                "type": "integer"
+              },
+              "agents": {
+                "type": "integer"
+              },
+              "updatedAt": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "create",
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "required",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "team_delete",
+      "title": "Delete team",
+      "description": "Delete a team and its memberships. People and agents stay.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "deleted"
+        ],
+        "properties": {
+          "deleted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "crud": [
+        "delete"
+      ],
+      "effect": "destructive",
+      "holdFamily": "destructive",
+      "idempotency": "supported",
+      "receipt": true,
+      "audience": "person"
+    },
+    {
+      "id": "person_set",
+      "title": "Save person",
+      "description": "Create a directory entry for a person (no id) or update one (id). Handles replace the person's channel handles.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "pattern": "^[^@\\s]+@[^@\\s]+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "status": {
+            "enum": [
+              "active",
+              "departed"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9_.-]{0,39}$"
+            },
+            "maxItems": 16,
+            "uniqueItems": true
+          },
+          "handles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 140,
+              "pattern": "^(buzz|slack|telegram):\\S+$"
+            },
+            "maxItems": 10
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "person"
+        ],
+        "properties": {
+          "person": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "email",
+              "title",
+              "status",
+              "tags",
+              "handles",
+              "teams",
+              "updatedAt"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "email": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "title": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "active",
+                  "departed"
+                ]
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "handles": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "teams": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "name",
+                    "role"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "enum": [
+                        "member",
+                        "lead"
+                      ]
+                    }
+                  }
+                }
+              },
+              "updatedAt": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "create",
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "required",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "person_delete",
+      "title": "Delete person",
+      "description": "Delete a person's directory entry, handles and memberships. Agents they owned get no owner.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "deleted"
+        ],
+        "properties": {
+          "deleted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "crud": [
+        "delete"
+      ],
+      "effect": "destructive",
+      "holdFamily": "destructive",
+      "idempotency": "supported",
+      "receipt": true,
+      "audience": "person"
+    },
+    {
+      "id": "members_set",
+      "title": "Set team members",
+      "description": "Replace a team's members: people and agents, each with a role (member or lead).",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "team",
+          "people",
+          "agents"
+        ],
+        "properties": {
+          "team": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "people": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "role"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "role": {
+                  "enum": [
+                    "member",
+                    "lead"
+                  ]
+                }
+              }
+            },
+            "maxItems": 500
+          },
+          "agents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "role"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "role": {
+                  "enum": [
+                    "member",
+                    "lead"
+                  ]
+                }
+              }
+            },
+            "maxItems": 500
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "team"
+        ],
+        "properties": {
+          "team": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "description",
+              "tags",
+              "people",
+              "agents",
+              "updatedAt",
+              "members"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "people": {
+                "type": "integer"
+              },
+              "agents": {
+                "type": "integer"
+              },
+              "updatedAt": {
+                "type": "string"
+              },
+              "members": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "id",
+                    "name",
+                    "role"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "person",
+                        "agent"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "enum": [
+                        "member",
+                        "lead"
+                      ]
+                    },
+                    "handles": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "supported",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "agent_set",
+      "title": "Set agent owner and role",
+      "description": "Set who owns an agent (a person in the directory, or none), its role and tags.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "agent"
+        ],
+        "properties": {
+          "agent": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "role": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9_.-]{0,39}$"
+            },
+            "maxItems": 16,
+            "uniqueItems": true
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "agent"
+        ],
+        "properties": {
+          "agent": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "mode",
+              "status",
+              "owner",
+              "role",
+              "tags",
+              "teams",
+              "updatedAt"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "mode": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "active",
+                  "paused",
+                  "removed"
+                ]
+              },
+              "owner": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "name"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "role": {
+                "type": "string"
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "teams": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "name",
+                    "role"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "enum": [
+                        "member",
+                        "lead"
+                      ]
+                    }
+                  }
+                }
+              },
+              "updatedAt": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "supported",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "identities_view",
+      "title": "Identities",
+      "description": "Which channel identities belong to which people and agents. Agent identities issued by Connect need Connect with identities_list.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {}
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "connect",
+          "people",
+          "agents"
+        ],
+        "properties": {
+          "connect": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "note",
+              "operation",
+              "minVersion"
+            ],
+            "properties": {
+              "status": {
+                "enum": [
+                  "available",
+                  "unavailable"
+                ]
+              },
+              "note": {
+                "type": "string"
+              },
+              "operation": {
+                "type": "string"
+              },
+              "minVersion": {
+                "type": "string"
+              }
+            }
+          },
+          "people": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "handle",
+                "channel",
+                "person"
+              ],
+              "properties": {
+                "handle": {
+                  "type": "string"
+                },
+                "channel": {
+                  "enum": [
+                    "buzz",
+                    "slack",
+                    "telegram"
+                  ]
+                },
+                "person": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "agents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "agent",
+                "channel",
+                "identity",
+                "account"
+              ],
+              "properties": {
+                "agent": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "channel": {
+                  "type": "string"
+                },
+                "identity": {
+                  "type": "string"
+                },
+                "account": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person"
+    }
+  ],
+  "hooks": [
+    {
+      "id": "fleet_facts",
+      "title": "Add team and owner facts",
+      "phase": "context",
+      "order": -100,
+      "match": {
+        "products": [
+          "*"
+        ]
+      },
+      "timeoutMs": 1000
+    }
+  ],
+  "needsAgentDirectory": true,
+  "skills": [
+    {
+      "id": "use-fleet",
+      "title": "How to use Organization Plane",
+      "file": "skills/use-fleet/SKILL.md"
+    }
+  ],
+  "backups": {
+    "schedule": "30 2 * * *",
+    "retain": 7
+  },
+  "ui": {
+    "launchPath": "/"
+  }
+}

@@ -1,0 +1,31 @@
+# dependencies and build output
+node_modules/
+dist/
+gen/
+build/
+out/
+coverage/
+*.tsbuildinfo
+*.tgz
+.data/
+
+# secrets: never commit (see README "No secrets policy")
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.p8
+.railway/
+secrets/
+
+# local noise
+.DS_Store
+*.log
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# opt2 CI runner scratch
+.tb-ci/
