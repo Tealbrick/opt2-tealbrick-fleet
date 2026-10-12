@@ -27,10 +27,11 @@ This repository is public. It must never contain secrets or personal data:
 | Agent ops (read) | `teams_list`, `team_get`, `directory_get`, `resolve_sender` | MCP tools `fleet__<id>`; also companion targets for other apps (Rules' read model) |
 | Person ops (owner UI) | `overview_get`, `team_set`, `team_delete`, `person_set`, `person_delete`, `members_set`, `agent_set`, `identities_view` | the app's own pages: Teams, People, Agents, Identities, Holds |
 | Context hook | `fleet_facts` (order -100, every product) | adds `fleet.requester`, `fleet.requesterTeams` (from the `tb.onBehalfOf` claim), `fleet.agentOwner`, `fleet.agentTeams` |
-| Agent directory | `needsAgentDirectory: true` | agents come from the instance slice; `agentAdded` / `agentRemoved` keep `fleet_agents` in sync |
+| Agent directory | `needsAgentDirectory: true` | agents come from the instance slice; `events.agentsChanged` (full list on every change: add, re-add, rename, pause, removal) keeps `fleet_agents` in sync |
 
 - **One handle format:** `"<channel>:<value>"` (`buzz:npub1…`, `slack:U…`, `telegram:123…`), equal to the
-  `tb.onBehalfOf` `channel_sender` claim id. A Buzz 64-hex key is stored as its npub; a bare npub reads as `buzz:`.
+  `tb.onBehalfOf` `channel_sender` claim id, split by the shared `parseChannelSender` (`@opt2-tealbrick/manifest`).
+  `buzz:<64-hex key>` is stored as its npub; a bare npub reads as `buzz:`.
 - **Narrow, never widen:** a departed person resolves but has no teams; a removed agent has no facts; the requester
   carries the claim's `verified` flag.
 - **Revision:** every change moves `revision`; `directory_get {sinceRevision}` answers `unchanged: true` when nothing moved.

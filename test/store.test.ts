@@ -17,18 +17,18 @@ const code = (fn: () => unknown): string => {
   return "no error";
 };
 
-test("handles: one format, Buzz npub checksum, hex → npub, Slack and Telegram ids", () => {
+test("handles: shared channel_sender split, Buzz npub checksum, hex → npub, Slack and Telegram ids", () => {
   assert.equal(npubFromHex(NOSTR.hex), NOSTR.npub);
   assert.equal(isNpub(NOSTR.npub), true);
   assert.equal(isNpub(`${NOSTR.npub.slice(0, -1)}q`), false, "bad checksum");
   assert.equal(normalizeHandle(`buzz:${NOSTR.npub}`), `buzz:${NOSTR.npub}`);
   assert.equal(normalizeHandle(NOSTR.npub), `buzz:${NOSTR.npub}`, "bare npub = buzz");
-  assert.equal(normalizeHandle(`BUZZ:nostr:${NOSTR.npub.toUpperCase()}`), `buzz:${NOSTR.npub}`);
+  assert.equal(normalizeHandle(`buzz:${NOSTR.npub.toUpperCase()}`), `buzz:${NOSTR.npub}`);
   assert.equal(normalizeHandle(`buzz:${NOSTR.hex}`), `buzz:${NOSTR.npub}`);
   assert.equal(normalizeHandle("slack:u01abcd2ef"), "slack:U01ABCD2EF");
   assert.equal(normalizeHandle("telegram:123456789"), "telegram:123456789");
   assert.equal(normalizeHandle("telegram:-1001234"), "telegram:-1001234");
-  for (const bad of ["", "buzz:npub1xyz", "slack:not an id", "telegram:12a", "email:a@b.c", "U01ABCD2EF"]) assert.equal(normalizeHandle(bad), null, bad);
+  for (const bad of ["", "buzz:npub1xyz", "slack:not an id", "telegram:12a", "email:a@b.c", "U01ABCD2EF", NOSTR.hex, "BUZZ:x"]) assert.equal(normalizeHandle(bad), null, bad);
 });
 
 test("teams: create, rename, unique names, tag filter, cursor paging, delete", () => {
@@ -76,7 +76,7 @@ test("people: handles are unique per person, normalized, replaced as a set; inva
 
 test("members, agent owner and resolve_sender for a Buzz npub (J3 sender → person → teams)", () => {
   const db = migratedDb();
-  store.agentAdded(db, AGENT_A);
+  store.syncAgents(db, [AGENT_A]);
   const ann = store.setPerson(db, { name: "Ann", handles: [`buzz:${NOSTR.npub}`] });
   const sup = store.setTeam(db, { name: "Support" });
   const team = store.setMembers(db, { team: sup.id, people: [{ id: ann.id, role: "lead" }], agents: [{ id: AGENT_A.id, role: "member" }] });
@@ -109,41 +109,40 @@ test("members, agent owner and resolve_sender for a Buzz npub (J3 sender → per
   assert.equal(store.resolveSender(db, NOSTR.npub).found, false);
 });
 
-test("agents stay in sync with the slice: added, removed (kept with owner/teams), back on a verified call", () => {
+test("agents stay in sync with the slice (agentsChanged): add, remove (kept), re-add, rename, pause; no-op keeps the revision", () => {
   const db = migratedDb();
-  store.agentAdded(db, AGENT_A);
-  store.agentAdded(db, AGENT_B);
+  store.syncAgents(db, [AGENT_A, AGENT_B]);
   const sup = store.setTeam(db, { name: "Support" });
   store.setMembers(db, { team: sup.id, people: [], agents: [{ id: AGENT_B.id, role: "member" }] });
   const rev = store.revision(db);
+  store.syncAgents(db, [AGENT_A, AGENT_B]);
+  assert.equal(store.revision(db), rev, "the same list changes nothing");
 
-  store.agentRemoved(db, AGENT_B.id);
+  store.syncAgents(db, [AGENT_A]);
   assert.equal(store.getAgent(db, AGENT_B.id).status, "removed");
   assert.ok(store.revision(db) > rev);
   assert.deepEqual(store.agentFacts(db, AGENT_B.id), { owner: null, teams: [] }, "a removed agent gives no facts");
-  const rev2 = store.revision(db);
-  store.agentRemoved(db, AGENT_B.id);
-  assert.equal(store.revision(db), rev2, "removing twice is a no-op");
 
-  store.agentSeen(db, AGENT_B.id);
-  assert.equal(store.getAgent(db, AGENT_B.id).status, "active");
+  store.syncAgents(db, [AGENT_A, AGENT_B]);
+  assert.equal(store.getAgent(db, AGENT_B.id).status, "active", "re-add");
   assert.deepEqual(
     store.agentFacts(db, AGENT_B.id).teams.map((t) => t.name),
     ["Support"],
     "owner/teams survive the round trip",
   );
-  store.agentAdded(db, { ...AGENT_A, name: "Agent A2" });
-  assert.equal(store.getAgent(db, AGENT_A.id).name, "Agent A2");
+  store.syncAgents(db, [{ ...AGENT_A, name: "Agent A2", status: "paused" }, AGENT_B]);
   assert.deepEqual(
-    store.directory(db).agents.map((a) => a.name),
-    ["Agent A2", "Agent B"],
+    store.directory(db).agents.map((a) => [a.name, a.status]),
+    [
+      ["Agent A2", "paused"],
+      ["Agent B", "active"],
+    ],
   );
 });
 
 test("fleet_facts: agent owner/teams, requester from tb.onBehalfOf (channel_sender, person, agent), unknown → null", () => {
   const db = migratedDb();
-  store.agentAdded(db, AGENT_A);
-  store.agentAdded(db, AGENT_B);
+  store.syncAgents(db, [AGENT_A, AGENT_B]);
   const ann = store.setPerson(db, { name: "Ann", handles: [NOSTR.npub] });
   const sup = store.setTeam(db, { name: "Support" });
   const ops = store.setTeam(db, { name: "Ops" });

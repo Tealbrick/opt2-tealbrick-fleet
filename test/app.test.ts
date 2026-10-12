@@ -69,7 +69,7 @@ test("boots on the SDK, serves derived routes, handlers work on the migrated tab
   t.after(close);
   const agent = { type: "agent", id: "agt_01J0000000000000000000000A", name: "Agent A", mode: "free" };
   const ctx = { db, caller: agent } as unknown as OpContext;
-  await definition.events?.agentAdded?.({ id: agent.id, name: agent.name, mode: "free", status: "active" } as never, { db } as never);
+  await definition.events?.agentsChanged?.([{ id: agent.id, name: agent.name, mode: "free", status: "active" }] as never, { db } as never);
   const person = { db, caller: { type: "person", id: "per_01J0000000000000000000000P", name: "owner", mode: null } } as unknown as OpContext;
   const team = (await handlers.team_set.run({ name: "Support" }, person)) as { team: { id: string } };
   await handlers.members_set.run({ team: team.team.id, people: [], agents: [{ id: agent.id, role: "member" }] }, person);

@@ -384,36 +384,33 @@ export function setAgent(db: Db, input: { agent: string; owner?: string | null; 
   });
 }
 
-// ── agents from the instance slice (events) ────────────────────────────────────────────────────────────────────
-
-/** events.agentAdded (first sight, SDK-API §7.2): insert, or bring back a removed agent with its owner/teams. */
-export function agentAdded(db: Db, a: Pick<SliceAgent, "id" | "name" | "mode" | "status">, now = Date.now()): void {
-  db.transaction(() => {
-    db.prepare(
-      `INSERT INTO fleet_agents (id, name, mode, status, first_seen, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT (id) DO UPDATE SET name = excluded.name, mode = excluded.mode, status = excluded.status, updated_at = excluded.updated_at`,
-    ).run(a.id, a.name, a.mode, a.status, now, now);
-    bump(db);
-  });
-}
-
-/** events.agentRemoved: kept (owner, role, teams stay for a re-add) but marked removed; facts treat it as unknown. */
-export function agentRemoved(db: Db, id: string, now = Date.now()): void {
-  db.transaction(() => {
-    if (db.prepare("UPDATE fleet_agents SET status = 'removed', updated_at = ? WHERE id = ? AND status <> 'removed'").run(now, id).changes > 0) bump(db);
-  });
-}
+// ── agents from the instance slice (events.agentsChanged) ──────────────────────────────────────────────────────
 
 /**
- * A verified agent caller is in the workspace now. The SDK fires agentAdded only on FIRST sight, so an agent that
- * was removed and added again would stay "removed"; any verified call from it brings it back (SDK request filed).
+ * events.agentsChanged (SDK 0.1.13): the FULL slice agent list (needsAgentDirectory = every workspace agent), once
+ * after boot and on every slice whose agents differ. Listed agents are inserted or updated (re-add, rename, pause);
+ * agents no longer listed are kept (owner, role, teams stay for a re-add) but marked removed. The revision moves only
+ * when something changed.
  */
-export function agentSeen(db: Db, id: string, now = Date.now()): void {
-  const r = db.prepare("SELECT status FROM fleet_agents WHERE id = ?").get(id);
-  if (r?.status === "removed") {
-    db.prepare("UPDATE fleet_agents SET status = 'active', updated_at = ? WHERE id = ?").run(now, id);
-    bump(db);
-  }
+export function syncAgents(db: Db, agents: readonly Pick<SliceAgent, "id" | "name" | "mode" | "status">[], now = Date.now()): void {
+  db.transaction(() => {
+    let changed = 0;
+    const listed = new Set<string>();
+    for (const a of agents) {
+      listed.add(a.id);
+      changed += db
+        .prepare(
+          `INSERT INTO fleet_agents (id, name, mode, status, first_seen, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT (id) DO UPDATE SET name = excluded.name, mode = excluded.mode, status = excluded.status, updated_at = excluded.updated_at
+           WHERE fleet_agents.name <> excluded.name OR fleet_agents.mode <> excluded.mode OR fleet_agents.status <> excluded.status`,
+        )
+        .run(a.id, a.name, a.mode, a.status, now, now).changes;
+    }
+    for (const r of db.prepare("SELECT id FROM fleet_agents WHERE status <> 'removed'").all()) {
+      if (!listed.has(String(r.id))) changed += db.prepare("UPDATE fleet_agents SET status = 'removed', updated_at = ? WHERE id = ?").run(now, r.id).changes;
+    }
+    if (changed > 0) bump(db);
+  });
 }
 
 // ── facts for the context hook ─────────────────────────────────────────────────────────────────────────────────

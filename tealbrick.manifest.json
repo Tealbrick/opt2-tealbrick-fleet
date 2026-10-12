@@ -5,7 +5,7 @@
   "name": "Organization Plane",
   "summary": "Organization Plane is your workspace directory: teams, people, who owns which agent, and people's channel handles.",
   "description": "The workspace directory for your agents and the people they work with.\n\n- **Teams:** people and agents, each with a role (member or lead).\n- **People:** directory entries (not sign-ins) with their Buzz, Slack and Telegram handles, so a message sender becomes a known person.\n- **Agents:** every workspace agent, with its owner, role and teams.\n\nOther apps (for example Rules) read these facts. Organization Plane holds no policy and no credentials.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "sdkMajor": 1,
   "publisher": {
     "name": "Teal Brick opt2"

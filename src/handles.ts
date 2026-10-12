@@ -1,6 +1,8 @@
 // Channel handles: ONE format everywhere, "<channel>:<value>", equal to the `tb.onBehalfOf` channel_sender id
-// (spec 0.1.13). Values follow what Connect reports as a message sender: Buzz = npub (bech32 of the Nostr public
-// key), Slack = user id, Telegram = numeric user id. `normalizeHandle` is the only parser; it never throws.
+// (SDK-API §18). The id is split by the shared `parseChannelSender` (@opt2-tealbrick/manifest); Fleet only
+// canonicalizes the value per channel, as Connect reports a sender: Buzz = npub (bech32 of the Nostr public key;
+// a 64-hex key is stored as its npub), Slack = user id, Telegram = numeric user id. Never throws.
+import { parseChannelSender } from "@opt2-tealbrick/manifest";
 
 export const CHANNELS = ["buzz", "slack", "telegram"] as const;
 export type Channel = (typeof CHANNELS)[number];
@@ -62,7 +64,7 @@ function normalizeValue(channel: Channel, raw: string): string | null {
   const v = raw.trim();
   switch (channel) {
     case "buzz": {
-      const s = v.toLowerCase().replace(/^nostr:/, "");
+      const s = v.toLowerCase();
       if (/^[0-9a-f]{64}$/.test(s)) return npubFromHex(s);
       return isNpub(s) ? s : null;
     }
@@ -75,17 +77,12 @@ function normalizeValue(channel: Channel, raw: string): string | null {
   }
 }
 
-/** "<channel>:<value>" (or a bare npub / nostr:npub) → canonical handle, or null when it is not a known handle. */
+/** channel_sender id (or a bare npub) → canonical handle, or null when it is not a known channel or value. */
 export function normalizeHandle(input: string): string | null {
-  const s = input.trim();
-  const i = s.indexOf(":");
-  const head = i > 0 ? s.slice(0, i).toLowerCase() : "";
-  if ((CHANNELS as readonly string[]).includes(head)) {
-    const value = normalizeValue(head as Channel, s.slice(i + 1));
-    return value ? `${head}:${value}` : null;
-  }
-  const bare = normalizeValue("buzz", s);
-  return bare ? `buzz:${bare}` : null;
+  const id = parseChannelSender(input.trim());
+  if (!id || !(CHANNELS as readonly string[]).includes(id.channel)) return null;
+  const value = normalizeValue(id.channel as Channel, id.value);
+  return value ? `${id.channel}:${value}` : null;
 }
 
 export function channelOf(handle: string): Channel {

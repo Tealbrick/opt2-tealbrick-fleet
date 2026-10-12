@@ -4,7 +4,7 @@
 // the kit that `tb-gen kit` generates from the manifest (`#kit`, built by `node --run kit`); none is written by hand.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { type AppDefinition, defineApp, type HandlerSpec, type HookHandler, type OpContext, type SdkAppDefinition } from "@opt2-tealbrick/miniapp-sdk";
+import { type AppDefinition, defineApp, type HandlerSpec, type HookHandler, type SdkAppDefinition } from "@opt2-tealbrick/miniapp-sdk";
 import {
   type AgentSetInput,
   type AgentSetOutput,
@@ -50,28 +50,20 @@ function op<I, O>(spec: HandlerSpec<I, O>): HandlerSpec {
   return spec as unknown as HandlerSpec;
 }
 
-/** Agent calls are verified (grant + call proof): the caller is in the workspace now (see store.agentSeen). */
-function seen(ctx: OpContext): void {
-  if (ctx.caller.type === "agent") store.agentSeen(ctx.db, ctx.caller.id);
-}
-
 export const handlers = {
   // ── agent audience (read) ──
   [OP.teamsList]: op<TeamsListInput, TeamsListOutput>({
     async run(input, ctx) {
-      seen(ctx);
       return store.listTeams(ctx.db, input);
     },
   }),
   [OP.teamGet]: op<TeamGetInput, TeamGetOutput>({
     async run(input, ctx) {
-      seen(ctx);
       return { team: store.getTeam(ctx.db, input.team) };
     },
   }),
   [OP.directoryGet]: op<DirectoryGetInput, DirectoryGetOutput>({
     async run(input, ctx) {
-      seen(ctx);
       const rev = store.revision(ctx.db);
       if (input.sinceRevision !== undefined && input.sinceRevision === rev) return { revision: rev, unchanged: true, teams: [], people: [], agents: [] };
       return { ...store.directory(ctx.db), unchanged: false };
@@ -79,7 +71,6 @@ export const handlers = {
   }),
   [OP.resolveSender]: op<ResolveSenderInput, ResolveSenderOutput>({
     async run(input, ctx) {
-      seen(ctx);
       return store.resolveSender(ctx.db, input.handle);
     },
   }),
@@ -139,7 +130,6 @@ export const handlers = {
 
 export const hooks: Record<string, HookHandler> = {
   async fleet_facts(req, ctx) {
-    if (req.call.caller.type === "agent") store.agentSeen(ctx.db, req.call.caller.id);
     return factsAnswer(ctx.db, req);
   },
 };
@@ -150,12 +140,9 @@ export const definition: SdkAppDefinition = {
   hooks,
   migrations: migrationsDir,
   events: {
-    // needsAgentDirectory: the slice lists every workspace agent; first sight adds it, leaving the slice removes it.
-    async agentAdded(agent, ctx) {
-      store.agentAdded(ctx.db, agent);
-    },
-    async agentRemoved(agent, ctx) {
-      store.agentRemoved(ctx.db, agent.id);
+    // needsAgentDirectory: the slice lists every workspace agent; the full list arrives on every change (SDK 0.1.13).
+    async agentsChanged(agents, ctx) {
+      store.syncAgents(ctx.db, agents);
     },
   },
 };
