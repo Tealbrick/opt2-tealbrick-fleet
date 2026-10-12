@@ -35,14 +35,15 @@ This repository is public. It must never contain secrets or personal data:
 - **Narrow, never widen:** a departed person resolves but has no teams; a removed agent has no facts; the requester
   carries the claim's `verified` flag.
 - **Revision:** every change moves `revision`; `directory_get {sinceRevision}` answers `unchanged: true` when nothing moved.
-- **Identities view (J3):** people's handles now; agent identities issued by Connect need Connect's `identities_list`
-  (C81 G6, requested). Until then the page shows "available when Connect ≥ 0.4.0".
+- **Identities view (J3, owner only):** people's handles from the directory, and the channel identities Connect
+  issued to each agent, read through Fleet's ONE companion grant (`connect.identities_list`, read). C88: only the
+  person op `identities_view` uses it; no agent op or hook fact carries those identities.
 - Harvested logic: v1 `labs/organization-plane` (person + membership subjects person|agent) and the v1 portal
   `Team` / `Membership` / `AgentGrant` / `ExternalIdentity` records, trimmed to one workspace = one tenant.
 
 ## Build
 
-Built on `@opt2-tealbrick/miniapp-sdk` from `create-tealbrick-miniapp` 0.1.5 (CI template ci-v9.1).
+Built on `@opt2-tealbrick/miniapp-sdk` from `create-tealbrick-miniapp` 0.1.5 (CI template now ci-v9.2).
 
 `tealbrick.manifest.json` is the only description of the app. The SDK derives the routes, input and output
 validation, OpenAPI, receipts, holds, idempotency, scopes, backups and status from it. You write handlers by

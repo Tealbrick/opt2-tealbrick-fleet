@@ -34,16 +34,11 @@ import {
   type TeamsListOutput,
 } from "#kit";
 import { factsAnswer } from "./facts.ts";
+import { identitiesView } from "./identities.ts";
 import * as store from "./store.ts";
 
 export const manifest = JSON.parse(readFileSync(new URL("../tealbrick.manifest.json", import.meta.url), "utf8")) as AppDefinition["manifest"];
 export const migrationsDir = fileURLToPath(new URL("../migrations", import.meta.url));
-
-/**
- * Agent identities issued by Connect come from Connect's agent-audience `identities_list` (C81 G6) through a companion
- * grant. Connect does not serve it yet; Fleet declares the companion in the release after Connect ships it.
- */
-export const CONNECT_IDENTITIES = { operation: "connect.identities_list", minVersion: "0.4.0" } as const;
 
 /** Typed handler. The SDK validates `input` against the manifest schema before `run` and the output after it. */
 function op<I, O>(spec: HandlerSpec<I, O>): HandlerSpec {
@@ -114,16 +109,9 @@ export const handlers = {
     },
   }),
   [OP.identitiesView]: op<IdentitiesViewInput, IdentitiesViewOutput>({
+    // Owner only (person op). C88: never exposed to agents.
     async run(_input, ctx) {
-      return {
-        connect: {
-          status: "unavailable",
-          note: `Agent identities issued by Connect are shown when Connect ≥ ${CONNECT_IDENTITIES.minVersion} is deployed in this workspace.`,
-          ...CONNECT_IDENTITIES,
-        },
-        people: store.peopleHandles(ctx.db),
-        agents: [],
-      };
+      return identitiesView(ctx.db, ctx.callApp.bind(ctx));
     },
   }),
 } satisfies Record<OpId, HandlerSpec>;

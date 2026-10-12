@@ -5,7 +5,7 @@
   "name": "Organization Plane",
   "summary": "Organization Plane is your workspace directory: teams, people, who owns which agent, and people's channel handles.",
   "description": "The workspace directory for your agents and the people they work with.\n\n- **Teams:** people and agents, each with a role (member or lead).\n- **People:** directory entries (not sign-ins) with their Buzz, Slack and Telegram handles, so a message sender becomes a known person.\n- **Agents:** every workspace agent, with its owner, role and teams.\n\nOther apps (for example Rules) read these facts. Organization Plane holds no policy and no credentials.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "sdkMajor": 1,
   "publisher": {
     "name": "Teal Brick opt2"
@@ -1671,7 +1671,7 @@
     {
       "id": "identities_view",
       "title": "Identities",
-      "description": "Which channel identities belong to which people and agents. Agent identities issued by Connect need Connect with identities_list.",
+      "description": "Which channel identities belong to which people (directory handles) and which Connect issued to which agents. Owner only.",
       "input": {
         "type": "object",
         "additionalProperties": false,
@@ -1692,9 +1692,7 @@
             "additionalProperties": false,
             "required": [
               "status",
-              "note",
-              "operation",
-              "minVersion"
+              "note"
             ],
             "properties": {
               "status": {
@@ -1704,12 +1702,6 @@
                 ]
               },
               "note": {
-                "type": "string"
-              },
-              "operation": {
-                "type": "string"
-              },
-              "minVersion": {
                 "type": "string"
               }
             }
@@ -1762,8 +1754,7 @@
               "required": [
                 "agent",
                 "channel",
-                "identity",
-                "account"
+                "identity"
               ],
               "properties": {
                 "agent": {
@@ -1787,16 +1778,6 @@
                 },
                 "identity": {
                   "type": "string"
-                },
-                "account": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
                 }
               }
             }
@@ -1824,6 +1805,18 @@
         ]
       },
       "timeoutMs": 1000
+    }
+  ],
+  "companions": [
+    {
+      "product": "connect",
+      "operations": [
+        "identities_list"
+      ],
+      "crud": [
+        "read"
+      ],
+      "purpose": "Show the owner which channel identities Connect issued to which agents (Identities page; never shown to agents)."
     }
   ],
   "needsAgentDirectory": true,

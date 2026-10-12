@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { manifestDigest, validateManifest } from "@opt2-tealbrick/manifest";
-import { type Db, defineApp, type OpContext, startApp } from "@opt2-tealbrick/miniapp-sdk";
+import { type Db, defineApp, type OpContext, startApp, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { MANIFEST_DIGEST, OP } from "#kit";
 import { definition, handlers, hooks, manifest } from "../src/app.ts";
 
@@ -89,7 +89,7 @@ test("boots on the SDK, serves derived routes, handlers work on the migrated tab
   assert.equal(d1.agents.length, 1);
   const d2 = (await handlers.directory_get.run({ sinceRevision: d1.revision }, ctx)) as { unchanged: boolean; teams: unknown[] };
   assert.deepEqual([d2.unchanged, d2.teams.length], [true, 0]);
-  const ids = (await handlers.identities_view.run({}, person)) as { connect: { status: string; minVersion: string } };
+  const ids = (await handlers.identities_view.run({}, { ...person, callApp: async () => { throw new TbError("no_bridge", "x", 503); } } as unknown as OpContext)) as { connect: { status: string } };
   assert.equal(ids.connect.status, "unavailable");
   const facts = (await hooks.fleet_facts?.({ phase: "context", call: { caller: { type: "agent", id: agent.id } }, context: {} } as never, { db } as never)) as {
     add: Record<string, unknown>;

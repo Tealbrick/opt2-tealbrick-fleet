@@ -354,11 +354,12 @@ function Identities() {
         ))}
       </ul>
       <h3>Agents</h3>
-      {ids.connect.status === "unavailable" ? <Notice tone="action">{ids.connect.note}</Notice> : null}
+      <p>Channel identities Connect issued to your agents. Only you see this page.</p>
+      {ids.connect.note ? <Notice tone={ids.connect.status === "available" ? "ok" : "action"}>{ids.connect.note}</Notice> : null}
       <ul>
         {ids.agents.map((a) => (
           <li key={`${a.agent.id}:${a.channel}:${a.identity}`}>
-            <strong>{a.agent.name}</strong> <Tag>{a.channel}</Tag> {a.identity} {a.account ? `(${a.account})` : ""}
+            <strong>{a.agent.name}</strong> <Tag>{a.channel}</Tag> {a.identity.startsWith(`${a.channel}:`) ? a.identity.slice(a.channel.length + 1) : a.identity}
           </li>
         ))}
       </ul>
