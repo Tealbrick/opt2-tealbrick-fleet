@@ -1,0 +1,17 @@
+/* Organization Plane: app-specific layout only (team cards, person and handle rows). The page layout helpers
+   (.page-head, .ruled, .item, .kv) come from pages.css, everything else from the kit. Tokens only. */
+
+.head-text { gap: var(--tb-s2); }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: var(--tb-s3); }
+.cards > .tb-card { display: grid; gap: 10px; align-content: start; min-width: 0; }
+.cards h3 { font-size: 1.0625rem; font-weight: var(--tb-weight-head); line-height: 22px; overflow-wrap: anywhere; }
+.card-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--tb-s2) var(--tb-s3); }
+.tb-row.tight { gap: 6px; }
+
+.item h3 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.item p.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.item .tb-swatch.is-person { --tone: var(--tb-brick); }
+.handle { min-width: 0; overflow-wrap: anywhere; }
+
+.sub-head { font-size: var(--tb-text-title); font-weight: var(--tb-weight-head); line-height: 28px; }
