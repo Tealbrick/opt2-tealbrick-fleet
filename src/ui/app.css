@@ -6,12 +6,19 @@
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: var(--tb-s3); }
 .cards > .tb-card { display: grid; gap: 10px; align-content: start; min-width: 0; }
 .cards h3 { font-size: 1.0625rem; font-weight: var(--tb-weight-head); line-height: 22px; overflow-wrap: anywhere; }
-.card-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--tb-s2) var(--tb-s3); }
+.card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--tb-s3); }
 .tb-row.tight { gap: 6px; }
 
 .item h3 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+/* this app's own lists (.dir): the mockup's inline space (~5px) between a name and its title or tags, and between a
+   channel tag and its value. Template markup (Holds) keeps the shared spacing. */
+.dir .item h3 { column-gap: calc(var(--tb-s1) + 1px); }
+.dir .item .meta { column-gap: calc(var(--tb-s1) + 1px); }
+/* a person's handles: one mono line joined with " · " (the separators are text, not flex items) */
+.dir .item .meta.handles { display: block; overflow-wrap: anywhere; }
 .item p.chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .item .tb-swatch.is-person { --tone: var(--tb-brick); }
 .handle { min-width: 0; overflow-wrap: anywhere; }
+.page-note { max-width: 62ch; }
 
 .sub-head { font-size: var(--tb-text-title); font-weight: var(--tb-weight-head); line-height: 28px; }

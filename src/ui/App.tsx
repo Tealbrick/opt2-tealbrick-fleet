@@ -35,6 +35,13 @@ const csv = (s: string) =>
     .map((x) => x.trim())
     .filter(Boolean);
 
+/** Display only (the full handle stays in `title`): `buzz:npub180cvv07t…` for a long value, short handles as they are. */
+const shortHandle = (h: string) => {
+  const at = h.indexOf(":");
+  const value = at < 0 ? h : h.slice(at + 1);
+  return value.length > 20 ? `${h.slice(0, at + 1)}${value.slice(0, 13)}…` : h;
+};
+
 /** Codes whose message this app wrote as a plain sentence (src/store.ts); everything else gets the shared wording. */
 const OWN_CODES = new Set(["input_invalid", "handle_invalid", "handle_taken", "team_name_taken", "limit_reached"]);
 const GONE_CODES = new Set(["team_not_found", "person_not_found", "agent_not_found"]);
@@ -299,9 +306,7 @@ function Teams({ dir, reload }: { dir: Dir; reload: Reload }) {
                 ) : null}
               </div>
               {t.description ? <p className="tb-soft">{t.description}</p> : null}
-              {t.members.length === 0 ? (
-                <p className="tb-hint">No members.</p>
-              ) : (
+              {t.members.length === 0 ? null : (
                 <div className="tb-row tight">
                   {t.members.map((m) => (
                     <Tag key={`${m.kind}:${m.id}`} status={m.role === "lead" ? "live" : "default"}>
@@ -402,13 +407,13 @@ function People({ dir, reload }: { dir: Dir; reload: Reload }) {
       {dir.people.length === 0 ? (
         <EmptyState title="No people yet.">Add a person with New person, then give them channel handles.</EmptyState>
       ) : (
-        <div className="ruled">
+        <div className="ruled dir">
           {dir.people.map((p) => (
             <div className="item" key={p.id}>
               <Swatch className="is-person" />
               <h3>
                 {p.name}
-                {p.title ? <span className="tb-hint"> {p.title}</span> : null}
+                {p.title ? <span className="tb-hint">{p.title}</span> : null}
                 {p.status === "departed" ? <Tag status="needs-you">departed</Tag> : null}
               </h3>
               {p.teams.length ? (
@@ -419,10 +424,13 @@ function People({ dir, reload }: { dir: Dir; reload: Reload }) {
                 </p>
               ) : null}
               {p.handles.length ? (
-                <span className="meta">
-                  {p.handles.map((h) => (
-                    <span className="mono handle" key={h}>
-                      {h}
+                <span className="meta mono handles">
+                  {p.handles.map((h, i) => (
+                    <span key={h}>
+                      {i ? " · " : null}
+                      <span className="handle" title={h}>
+                        {shortHandle(h)}
+                      </span>
                     </span>
                   ))}
                 </span>
@@ -473,11 +481,11 @@ function Agents({ dir, reload }: { dir: Dir; reload: Reload }) {
   const [edit, setEdit] = useState<Agent | null>(null);
   return (
     <section className="app-page" aria-label="Agents">
-      <PageHead title="Agents" lede="Every agent in this workspace, with its owner, role and teams." />
+      <PageHead title="Agents" />
       {dir.agents.length === 0 ? (
         <EmptyState title="No agents in this workspace yet.">Agents appear here when you add them in Portal.</EmptyState>
       ) : (
-        <div className="ruled">
+        <div className="ruled dir">
           {dir.agents.map((a) => (
             <div className="item" key={a.id}>
               <Swatch />
@@ -507,12 +515,15 @@ function Agents({ dir, reload }: { dir: Dir; reload: Reload }) {
 // ── Identities ──────────────────────────────────────────────────────────────
 
 const bare = (channel: string, id: string) => (id.startsWith(`${channel}:`) ? id.slice(channel.length + 1) : id);
+/** Display only (the full value stays in `title`): a long key shows its head and tail, `npub1q8x…h6w6`. */
+const shortId = (id: string) => (id.length > 20 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id);
 
 function Identities() {
   const { data: ids, error, loading, reload } = useLoad(loadIdentities);
   return (
     <section className="app-page" aria-label="Identities">
-      <PageHead title="Identities" lede="Channel identities Connect issued to your agents. Only you see this page." />
+      <PageHead title="Identities" />
+      <p className="tb-soft page-note">Channel identities Connect issued to your agents. Only you see this page.</p>
       {error ? <LoadFailed message={error} retrying={loading} onRetry={() => void reload()} /> : null}
       {ids === null ? (
         error ? null : <Loading what="identities" />
@@ -523,38 +534,25 @@ function Identities() {
               {ids.connect.note}
             </Notice>
           ) : null}
-          <h2 className="sub-head">Agents</h2>
           {ids.agents.length === 0 ? (
             <EmptyState title="No channel identities issued yet." />
           ) : (
-            <div className="ruled">
-              {ids.agents.map((a) => (
-                <div className="item" key={`${a.agent.id}:${a.channel}:${a.identity}`}>
-                  <Swatch />
-                  <h3>{a.agent.name}</h3>
-                  <span className="meta">
-                    <Tag>{a.channel}</Tag>
-                    <span className="mono handle">{bare(a.channel, a.identity)}</span>
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-          <h2 className="sub-head">People</h2>
-          {ids.people.length === 0 ? (
-            <EmptyState title="No channel handles yet.">Add them on the People page.</EmptyState>
-          ) : (
-            <div className="ruled">
-              {ids.people.map((h) => (
-                <div className="item" key={h.handle}>
-                  <Swatch className="is-person" />
-                  <h3>{h.person.name}</h3>
-                  <span className="meta">
-                    <Tag>{h.channel}</Tag>
-                    <span className="mono handle">{bare(h.channel, h.handle)}</span>
-                  </span>
-                </div>
-              ))}
+            <div className="ruled dir">
+              {ids.agents.map((a) => {
+                const id = bare(a.channel, a.identity);
+                return (
+                  <div className="item" key={`${a.agent.id}:${a.channel}:${a.identity}`}>
+                    <Swatch />
+                    <h3>{a.agent.name}</h3>
+                    <span className="meta">
+                      <Tag>{a.channel}</Tag>
+                      <span className="mono handle" title={id}>
+                        {shortId(id)}
+                      </span>
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           )}
         </>

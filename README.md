@@ -35,9 +35,10 @@ This repository is public. It must never contain secrets or personal data:
 - **Narrow, never widen:** a departed person resolves but has no teams; a removed agent has no facts; the requester
   carries the claim's `verified` flag.
 - **Revision:** every change moves `revision`; `directory_get {sinceRevision}` answers `unchanged: true` when nothing moved.
-- **Identities view (J3, owner only):** people's handles from the directory, and the channel identities Connect
-  issued to each agent, read through Fleet's ONE companion grant (`connect.identities_list`, read). C88: only the
-  person op `identities_view` uses it; no agent op or hook fact carries those identities.
+- **Identities view (J3, owner only):** the channel identities Connect issued to each agent, read through Fleet's ONE
+  companion grant (`connect.identities_list`, read). `identities_view` also returns people's handles; the page shows
+  them on People, not here (C185). C88: only the person op `identities_view` uses it; no agent op or hook fact
+  carries those identities.
 - Harvested logic: v1 `labs/organization-plane` (person + membership subjects person|agent) and the v1 portal
   `Team` / `Membership` / `AgentGrant` / `ExternalIdentity` records, trimmed to one workspace = one tenant.
 
