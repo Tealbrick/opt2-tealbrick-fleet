@@ -14,7 +14,7 @@ This repository is private. Treat it as if it could become public. It must never
 - No API keys, tokens, passwords, private keys, deployment secrets, `.env` files or connection strings. Use `.env.example` with placeholder values only.
 - Runtime secrets live in the deployment platform (Railway variables) and are copied between services without printing them.
 - No personal names, private agent configurations or customer data. Test data uses invented names and the public NIP-19 example key.
-- Every push runs a secret scan (gitleaks, the `secret-scan` step in `.woodpecker/ci.yaml`). Optional local guard: `pre-commit install`.
+- Every pull request, every push to `main` and every tag runs a secret scan (gitleaks, the `secret-scan` step in `.woodpecker/ci.yaml`). GitHub secret scanning and push protection are not enabled on this repository, so the CI scan is the guard. Optional local guard: `pre-commit install` (`.pre-commit-config.yaml` runs gitleaks).
 - If a secret is committed anyway: rotate it first, then remove it from history.
 
 ## What it does
@@ -31,7 +31,7 @@ This repository is private. Treat it as if it could become public. It must never
 - **Revision:** every change moves `revision`; `directory_get {sinceRevision}` answers `unchanged: true` when nothing moved.
 - **Privacy:** the agent-audience op `directory_get` returns people records including `email`; `teams_list`, `team_get` and `resolve_sender` do not.
 - **Identities view (owner only):** the channel identities Connect issued to each agent, read through Fleet's one companion grant (`connect.identities_list`, read). `identities_view` also returns people's handles; the page shows them on People, not on Identities. Only the person op `identities_view` uses the grant; no agent op or hook fact carries those identities. Without Connect the page shows an `unavailable` note.
-- Design source: the v1 `labs/organization-plane` (person + membership subjects person|agent) and the v1 portal `Team` / `Membership` / `AgentGrant` / `ExternalIdentity` records, trimmed to one workspace = one tenant.
+- Design source: the v1 `labs/organization-plane` (person + membership subjects person|agent) and the v1 portal `Team` / `Membership` / `AgentGrant` / `ExternalIdentity` records, trimmed to one workspace = one tenant (UNVERIFIED: the v1 sources are not in this repository).
 
 ## Build
 
