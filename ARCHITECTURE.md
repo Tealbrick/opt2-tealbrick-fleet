@@ -1,6 +1,6 @@
 # Organization Plane (Tealbrick mini app): architecture
 
-State: verified against the repo on 2026-10-16. Claims cite paths in this repo. Anything not verified is marked UNVERIFIED. For the whole system see the system `ARCHITECTURE.md` and `SYSTEM-OVERVIEW.md`.
+State: verified against the repo on 2026-10-17. Claims cite paths in this repo. Anything not verified is marked UNVERIFIED. For the whole system see `engineering/ARCHITECTURE.md` and `engineering/SYSTEM-OVERVIEW.md` in the private repo `Tealbrick/opt2-tealbrick-docs`.
 
 ## Common app pattern (verified for all seven apps)
 
@@ -61,10 +61,9 @@ Port 8080. 0.25 cpu, 256 MB. Data 1 GB plus backup 2 GB. Backup cron `30 2 * * *
 
 miniapp-sdk 0.1.22, manifest 0.1.18, conformance 0.1.18, ui 0.2.4.
 
-All `@opt2-tealbrick/*` pins use dist-host tarball URLs. Upgrade safety (SDK 0.1.25: pre-update snapshot, migration lock, failed mode) is in this app only where the pin above says 0.1.25 (dev channel, RS-3 candidates). The other apps re-pin in RS-3 (dev channel first, stable after the qa1 soak). Until then Core can roll back an update of such an app only as an image (no data restore).
+All `@opt2-tealbrick/*` pins use dist-host tarball URLs. Upgrade safety (SDK 0.1.25: pre-update snapshot, migration lock, failed mode) is not in this app: it pins SDK 0.1.22 (connect, evolution, inbox, kanban, knowledge and rules pin 0.1.25 on `main`, dev channel). Until Fleet re-pins, Core can roll back an update of it only as an image (no data restore).
 
 ## Known gaps
 
-- README cites ci-v9.2 (actual ci-v9.9) and a historic template version.
 - Governance (merge with the mesh trust topology) is a design, not code.
 - Agent-readable emails: review before Governance ships.
