@@ -158,6 +158,7 @@ test("fleet_facts: agent owner/teams, requester from tb.onBehalfOf (channel_send
   assert.deepEqual(plain, {
     "fleet.requester": null,
     "fleet.requester.trust": null,
+    "fleet.requester.verified": false,
     "fleet.requesterTeams": [],
     "fleet.agentOwner": { id: ann.id, name: "Ann" },
     "fleet.agentTeams": [{ id: sup.id, name: "Support", role: "lead" }],

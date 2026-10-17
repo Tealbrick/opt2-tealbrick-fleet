@@ -20,7 +20,7 @@ export interface FeedMember {
 }
 export interface FeedTeam {
   id: string;
-  name: string;
+  name?: string;
   members: FeedMember[];
 }
 export interface FeedContact {
@@ -40,9 +40,28 @@ export type DirectoryFeed =
   | { v: 1; revision: number; unchanged: false; teams: FeedTeam[]; contacts: FeedContact[]; agents: FeedAgent[] }
   | { v: 1; revision: number; unchanged: true };
 
+/** Transient: the directory is larger than the contract carries. 503 so a reader keeps its last good copy and retries. */
 const tooLarge = (what: string, cap: number): never => {
-  throw new TbError("feed_too_large", `the directory has more than ${cap} ${what}; the feed contract fleet.directory_feed/1 cannot carry it`, 413);
+  throw new TbError("feed_too_large", `the directory has more than ${cap} ${what}; the feed contract fleet.directory_feed/1 cannot carry it`, 503);
 };
+
+// Field rules of the frozen schema (a test compares these with test/contracts/fleet.directory_feed.1.schema.json).
+export const AGENT_ID_PATTERN = /^agt_[0-9A-HJKMNP-TV-Z]{26}$/;
+export const HANDLE_PATTERN = /^(buzz:npub1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]{58}|slack:[UW][A-Z0-9]{2,30}|telegram:-?[1-9][0-9]{0,19})$/;
+export const ID_MAX = 64;
+export const TEAM_NAME_MAX = 80;
+const validId = (id: string): boolean => id.length >= 1 && id.length <= ID_MAX;
+
+/** Warn once per skipped id (bounded memory): one bad legacy row must not flood the log on every pull. */
+const warned = new Set<string>();
+export type Warn = (msg: string, fields: Record<string, string>) => void;
+function skip(warn: Warn | undefined, what: string, id: string): void {
+  const key = `${what}:${id}`;
+  if (warned.has(key)) return;
+  if (warned.size >= 1000) warned.clear();
+  warned.add(key);
+  warn?.(`directory_feed leaves out ${what} that does not fit the contract fleet.directory_feed/1`, { what, id: id.slice(0, 80) });
+}
 
 /** Only app callers (companions such as Rules) read the feed. An agent, a person or anything else gets `no_access`. */
 export function assertFeedCaller(caller: { type: string }): void {
@@ -51,63 +70,82 @@ export function assertFeedCaller(caller: { type: string }): void {
 
 /**
  * The feed, or `{v, revision, unchanged:true}` when `sinceRevision` equals the current revision. Four indexed reads,
- * independent of the number of teams (no query per team or per person). A stored handle that is not canonical
- * (`normalizeHandle(h) !== h`) is left out: a reader refuses the whole answer for one such handle.
+ * independent of the number of teams (no query per team or per person).
+ *
+ * Rows the contract cannot carry are left out (with one warning per id), never the whole feed: a handle that is not
+ * canonical (`normalizeHandle(h) !== h` or off the schema pattern), an agent id that is not `agt_<26 Crockford>`, an
+ * id of 0 or over 64 characters. A member or owner that names a left-out row is left out too. Removed agents are
+ * listed only while a team still names them (so a reader can drop the member); they do not count against the cap.
  */
-export function directoryFeed(db: Db, input: { sinceRevision?: number }): DirectoryFeed {
+export function directoryFeed(db: Db, input: { sinceRevision?: number }, warn?: Warn): DirectoryFeed {
   const rev = revision(db);
   if (input.sinceRevision !== undefined && input.sinceRevision === rev) return { v: 1, revision: rev, unchanged: true };
-
-  const members = new Map<string, FeedMember[]>();
-  // join the subject table so a dangling member (no foreign key on subject_id) is never published
-  for (const r of db
-    .prepare(
-      `SELECT m.team_id, m.kind, m.subject_id, m.role FROM fleet_members m
-       WHERE (m.kind = 'person' AND EXISTS (SELECT 1 FROM fleet_people p WHERE p.id = m.subject_id))
-          OR (m.kind = 'agent' AND EXISTS (SELECT 1 FROM fleet_agents a WHERE a.id = m.subject_id))
-       ORDER BY m.team_id, m.kind, m.subject_id`,
-    )
-    .all()) {
-    const key = String(r.team_id);
-    const list = members.get(key) ?? [];
-    list.push({ kind: r.kind === "agent" ? "agent" : "contact", id: String(r.subject_id), role: r.role as FeedMember["role"] });
-    members.set(key, list);
-  }
-  const teams = db
-    .prepare("SELECT id, name FROM fleet_teams ORDER BY id")
-    .all()
-    .map((t): FeedTeam => ({ id: String(t.id), name: String(t.name), members: members.get(String(t.id)) ?? [] }));
-  if (teams.length > FEED_CAPS.teams) tooLarge("teams", FEED_CAPS.teams);
-  for (const t of teams) if (t.members.length > FEED_CAPS.membersPerTeam) tooLarge("members in one team", FEED_CAPS.membersPerTeam);
 
   const handles = new Map<string, string[]>();
   for (const r of db.prepare("SELECT person_id, handle FROM fleet_handles ORDER BY person_id, handle").all()) {
     const h = String(r.handle);
-    if (normalizeHandle(h) !== h) continue;
+    if (normalizeHandle(h) !== h || !HANDLE_PATTERN.test(h)) {
+      skip(warn, "a handle", h);
+      continue;
+    }
     const key = String(r.person_id);
     const list = handles.get(key) ?? [];
     list.push(h);
     handles.set(key, list);
   }
-  const contacts = db
-    .prepare("SELECT id, kind, status, trust FROM fleet_people ORDER BY id")
-    .all()
-    .map(
-      (c): FeedContact => ({
-        id: String(c.id),
-        kind: c.kind as ContactKind,
-        status: c.status as FeedContact["status"],
-        trust: c.trust as Trust,
-        handles: (handles.get(String(c.id)) ?? []).slice(0, FEED_CAPS.handlesPerContact),
-      }),
-    );
+  const contacts: FeedContact[] = [];
+  const contactIds = new Set<string>();
+  for (const c of db.prepare("SELECT id, kind, status, trust FROM fleet_people ORDER BY id").all()) {
+    const id = String(c.id);
+    if (!validId(id)) {
+      skip(warn, "a contact id", id);
+      continue;
+    }
+    contactIds.add(id);
+    contacts.push({ id, kind: c.kind as ContactKind, status: c.status as FeedContact["status"], trust: c.trust as Trust, handles: (handles.get(id) ?? []).slice(0, FEED_CAPS.handlesPerContact) });
+  }
   if (contacts.length > FEED_CAPS.contacts) tooLarge("contacts", FEED_CAPS.contacts);
 
-  const agents = db
-    .prepare("SELECT id, status, trust, owner_id FROM fleet_agents ORDER BY id")
-    .all()
-    .map((a): FeedAgent => ({ id: String(a.id), status: a.status as FeedAgent["status"], trust: a.trust as Trust, owner: a.owner_id === null ? null : String(a.owner_id) }));
+  const agents: FeedAgent[] = [];
+  const agentIds = new Set<string>();
+  for (const a of db
+    .prepare("SELECT id, status, trust, owner_id FROM fleet_agents WHERE status <> 'removed' OR id IN (SELECT subject_id FROM fleet_members WHERE kind = 'agent') ORDER BY id")
+    .all()) {
+    const id = String(a.id);
+    if (!AGENT_ID_PATTERN.test(id)) {
+      skip(warn, "an agent id", id);
+      continue;
+    }
+    agentIds.add(id);
+    const owner = a.owner_id === null ? null : String(a.owner_id);
+    agents.push({ id, status: a.status as FeedAgent["status"], trust: a.trust as Trust, owner: owner !== null && contactIds.has(owner) ? owner : null });
+  }
   if (agents.length > FEED_CAPS.agents) tooLarge("agents", FEED_CAPS.agents);
+
+  const members = new Map<string, FeedMember[]>();
+  for (const r of db.prepare("SELECT team_id, kind, subject_id, role FROM fleet_members ORDER BY team_id, kind, subject_id").all()) {
+    const id = String(r.subject_id);
+    const isAgent = r.kind === "agent";
+    if (!(isAgent ? agentIds : contactIds).has(id)) continue; // dangling or left out above
+    const key = String(r.team_id);
+    const list = members.get(key) ?? [];
+    list.push({ kind: isAgent ? "agent" : "contact", id, role: r.role as FeedMember["role"] });
+    members.set(key, list);
+  }
+  const teams: FeedTeam[] = [];
+  for (const t of db.prepare("SELECT id, name FROM fleet_teams ORDER BY id").all()) {
+    const id = String(t.id);
+    if (!validId(id)) {
+      skip(warn, "a team id", id);
+      continue;
+    }
+    const name = String(t.name);
+    const fits = name.length >= 1 && name.length <= TEAM_NAME_MAX;
+    if (!fits) skip(warn, "a team name", id); // the name is optional in the contract: leave only the name out
+    teams.push({ id, ...(fits ? { name } : {}), members: members.get(id) ?? [] });
+  }
+  if (teams.length > FEED_CAPS.teams) tooLarge("teams", FEED_CAPS.teams);
+  for (const t of teams) if (t.members.length > FEED_CAPS.membersPerTeam) tooLarge("members in one team", FEED_CAPS.membersPerTeam);
 
   return { v: 1, revision: rev, unchanged: false, teams, contacts, agents };
 }

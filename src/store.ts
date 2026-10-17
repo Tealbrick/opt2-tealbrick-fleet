@@ -67,6 +67,9 @@ export interface Directory {
   agents: Agent[];
 }
 
+/** Teams per `teams` list in an agent answer (resolve_sender, hook facts): the manifest declares maxItems 50. */
+export const MAX_TEAMS_PER_ANSWER = 50;
+
 /** Size limits of one directory (lean: a workspace, not an enterprise HR system). */
 export const LIMITS = { teams: 500, people: 2000, handlesPerPerson: 10 } as const;
 
@@ -234,7 +237,8 @@ export function resolveSender(db: Db, handle: string): Resolved {
   if (!r) return { found: false, person: null, contact: null, teams: [] };
   const contact = toContact(r);
   const person = contact.kind === "person" ? { id: contact.id, name: contact.name, status: contact.status } : null;
-  return { found: true, person, contact, teams: hasTeamFacts(contact) ? teamsOf(db, "person", contact.id) : [] };
+  // resolve_sender declares at most 50 teams: the first 50 in the stable order of teamsOf (name, id)
+  return { found: true, person, contact, teams: hasTeamFacts(contact) ? teamsOf(db, "person", contact.id).slice(0, MAX_TEAMS_PER_ANSWER) : [] };
 }
 
 export interface Identities {
@@ -455,9 +459,9 @@ export function agentTrust(db: Db, id: string): Trust | null {
   return r ? (r.trust as Trust) : null;
 }
 
-/** An active directory contact by Fleet id → trust + teams (none while blocked); departed or unknown → null. */
+/** A directory contact by Fleet id → trust + teams (none while departed or blocked); unknown → null. A departed contact still reports its trust. */
 export function personFacts(db: Db, id: string): { contact: Contact; teams: TeamRef[] } | null {
-  const r = db.prepare("SELECT id, name, status, kind, trust FROM fleet_people WHERE id = ? AND status = 'active'").get(id);
+  const r = db.prepare("SELECT id, name, status, kind, trust FROM fleet_people WHERE id = ?").get(id);
   if (!r) return null;
   const contact = toContact(r);
   return { contact, teams: hasTeamFacts(contact) ? teamsOf(db, "person", id) : [] };

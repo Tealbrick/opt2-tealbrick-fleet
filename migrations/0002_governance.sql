@@ -19,3 +19,6 @@ CREATE TABLE fleet_review_policy (
   value INTEGER NOT NULL CHECK (value >= 1 AND value <= 3650)
 );
 INSERT INTO fleet_review_policy (key, value) VALUES ('agent_days', 90), ('contact_days', 180);
+
+-- The directory changed in kind (new fields, trust): the revision moves, so a reader that cached the old one pulls again.
+UPDATE fleet_meta SET value = value + 1 WHERE key = 'revision';

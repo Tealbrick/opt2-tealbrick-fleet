@@ -26,12 +26,12 @@ Governance (0.2.0; formerly Organization Plane) is the workspace directory and i
 - Agent read: `teams_list`, `team_get`, `directory_get` (the whole directory; `sinceRevision` returns `unchanged:true`), `resolve_sender` (channel handle to contact, trust and teams; the 0.1.10 `person` field is kept but deprecated, null for outside agents).
 - App read: `directory_feed` (audience `agent` in the manifest for now; the handler refuses every caller that is not an app with `no_access` 403; sinceRevision gives `{v, revision, unchanged:true}`).
 - Person read: `overview_get`, `identities_view`. Person write: `team_set`, `person_set`, `members_set`, `agent_set`. Person destructive (held): `team_delete`, `person_delete`.
-- **Privacy:** the agent-audience op `directory_get` still returns people records including `email` (kept unchanged in 0.2.0; lean in 0.2.1). `teams_list`, `team_get`, `resolve_sender` and `directory_feed` do not.
+- **Privacy (0.2.0):** `teams_list`, `team_get` and `directory_get` are NOT lean yet. They still return what 0.1.10 returned: `directory_get` has people with `email`, `title`, `tags` and `handles`, and the three ops show member `handles`, team and agent `tags`. They become lean in 0.2.1, after Rules 0.3.0 reads the feed (agent-readable PII is a known gap until then). `resolve_sender` returns no email, title, tag or handle of others; `directory_feed` carries no email, title or tag.
 
 ## Scopes, hooks and companions
 
 - **Scopes:** None. `needsAgentDirectory: true`; `events.agentsChanged` keeps `fleet_agents` in sync.
-- **Hooks:** `fleet_facts`, phase `context`, order -100, match all products, timeout 1000 ms. Adds `fleet.requester` (with `trust`), `fleet.requester.trust`, `fleet.requesterTeams` (from the bridge-copied, unverified `tb.onBehalfOf` claim; narrow only), `fleet.agentOwner`, `fleet.agentTeams` (at most 50).
+- **Hooks:** `fleet_facts`, phase `context`, order -100, match all products, timeout 1000 ms. Adds `fleet.requester` (with `trust`), `fleet.requester.trust`, `fleet.requester.verified` (the claim's flag; false without a requester), `fleet.requesterTeams` (from the bridge-copied, unverified `tb.onBehalfOf` claim; narrow only), `fleet.agentOwner`, `fleet.agentTeams` (at most 50).
 - **Companion grants it asks for:** `connect.identities_list` (read), used only by the person op `identities_view`. It is never exposed to agents or hooks (C88). Missing Connect gives an `unavailable` note, not an error.
 
 ## Settings, keys and environment
@@ -67,5 +67,7 @@ All `@opt2-tealbrick/*` pins use dist-host tarball URLs. Upgrade safety (SDK 0.1
 ## Known gaps
 
 - Governance is built in sprints (DESIGN §8). 0.2.0 (S1) has the name, trust state, the feed for apps and `resolve_sender` with trust. Reviews, topology and contact rules (0.2.1 to 0.2.3) are not built; there is no UI for trust yet.
-- Agent-readable emails: `directory_get` still returns them in 0.2.0; the lean version is 0.2.1, after Rules reads the feed.
+- Agent-readable PII: `directory_get` (email, title, tags, handles), `teams_list` and `team_get` (member handles, tags) are unchanged in 0.2.0; the lean versions are 0.2.1, after Rules 0.3.0 reads the feed.
+- Rollback of a failed 0.2.0 update is by the SDK pre-update snapshot (E3, restores the data), not by a down migration; migration 0002 is forward-only.
+- Revision after a restore: a restore from a backup brings back an older `revision`. A reader that holds a higher one must re-pull the full feed after a restore (Rules treats an unequal revision as changed; `sinceRevision` only answers `unchanged` on equality).
 - The manifest has no `app` audience yet (G-1) and no `contracts` field (needs manifest 0.1.20 and a bridge that pins it): `directory_feed` is an agent-audience op whose handler refuses agents.

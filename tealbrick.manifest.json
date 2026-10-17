@@ -818,7 +818,6 @@
                   "additionalProperties": false,
                   "required": [
                     "id",
-                    "name",
                     "members"
                   ],
                   "properties": {
