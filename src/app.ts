@@ -8,6 +8,8 @@ import { type AppDefinition, defineApp, type HandlerSpec, type HookHandler, type
 import {
   type AgentSetInput,
   type AgentSetOutput,
+  type DirectoryFeedInput,
+  type DirectoryFeedOutput,
   type DirectoryGetInput,
   type DirectoryGetOutput,
   type IdentitiesViewInput,
@@ -34,6 +36,7 @@ import {
   type TeamsListOutput,
 } from "#kit";
 import { factsAnswer } from "./facts.ts";
+import { assertFeedCaller, directoryFeed } from "./feed.ts";
 import { identitiesView } from "./identities.ts";
 import * as store from "./store.ts";
 
@@ -46,7 +49,7 @@ function op<I, O>(spec: HandlerSpec<I, O>): HandlerSpec {
 }
 
 export const handlers = {
-  // ── agent audience (read) ──
+  // ── agent audience (read); directory_feed is for app callers only ──
   [OP.teamsList]: op<TeamsListInput, TeamsListOutput>({
     async run(input, ctx) {
       return store.listTeams(ctx.db, input);
@@ -62,6 +65,13 @@ export const handlers = {
       const rev = store.revision(ctx.db);
       if (input.sinceRevision !== undefined && input.sinceRevision === rev) return { revision: rev, unchanged: true, teams: [], people: [], agents: [] };
       return { ...store.directory(ctx.db), unchanged: false };
+    },
+  }),
+  [OP.directoryFeed]: op<DirectoryFeedInput, DirectoryFeedOutput>({
+    // Contract fleet.directory_feed/1, for apps (Rules' read model). Agents get no_access until the manifest has an `app` audience (G-1).
+    async run(input, ctx) {
+      assertFeedCaller(ctx.caller);
+      return directoryFeed(ctx.db, input, (msg, fields) => ctx.log.warn(msg, fields));
     },
   }),
   [OP.resolveSender]: op<ResolveSenderInput, ResolveSenderOutput>({

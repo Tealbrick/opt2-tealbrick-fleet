@@ -1,13 +1,22 @@
 // Test helpers: a migrated in-memory database shaped like the SDK's Db handle (the SDK gives handlers the same
 // interface), with real transactions so a refused write leaves nothing behind.
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import type { Db } from "@opt2-tealbrick/miniapp-sdk";
 
-export function migratedDb(): Db {
-  const raw = new DatabaseSync(":memory:");
-  raw.exec("PRAGMA foreign_keys = ON;");
-  raw.exec(readFileSync(new URL("../migrations/0001_init.sql", import.meta.url), "utf8"));
+const MIGRATIONS = new URL("../migrations/", import.meta.url);
+
+/** The migration files in order, optionally only the first `count` (a database as an earlier release left it). */
+export function migrationFiles(count = Number.POSITIVE_INFINITY): { name: string; sql: string }[] {
+  return readdirSync(MIGRATIONS)
+    .filter((f) => /^\d{4}_.+\.sql$/.test(f))
+    .sort()
+    .slice(0, count)
+    .map((name) => ({ name, sql: readFileSync(new URL(name, MIGRATIONS), "utf8") }));
+}
+
+/** A Db handle (the SDK's interface) over a raw in-memory database, with real transactions. */
+export function dbOver(raw: DatabaseSync): Db {
   let depth = 0;
   return {
     exec: (sql: string) => raw.exec(sql),
@@ -28,6 +37,14 @@ export function migratedDb(): Db {
       }
     },
   };
+}
+
+/** An in-memory database with the first `count` migrations applied (default: all), like the SDK applies them. */
+export function migratedDb(count = Number.POSITIVE_INFINITY): Db {
+  const raw = new DatabaseSync(":memory:");
+  raw.exec("PRAGMA foreign_keys = ON;");
+  for (const m of migrationFiles(count)) raw.exec(`BEGIN;\n${m.sql}\nCOMMIT;`);
+  return dbOver(raw);
 }
 
 /** NIP-19 example key: hex and npub of the same public key. */

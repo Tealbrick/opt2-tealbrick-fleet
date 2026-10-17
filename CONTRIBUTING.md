@@ -1,4 +1,4 @@
-# Contributing to Organization Plane (Tealbrick mini app)
+# Contributing to Governance (Tealbrick mini app)
 
 This file is the short version. The full engineering practice is in the Tealbrick engineering handbook (`practice/ENGINEERING-HANDBOOK.md` in the private repo `Tealbrick/opt2-tealbrick-docs`). If the two disagree, the handbook wins.
 

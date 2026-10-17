@@ -1,4 +1,4 @@
-# Organization Plane app image: the ONE opt2 app Dockerfile pattern (SDK-API §15, C53). Base pinned by digest: node:24-slim
+# Governance (product id fleet) app image: the ONE opt2 app Dockerfile pattern (SDK-API §15, C53). Base pinned by digest: node:24-slim
 # (multi-arch index digest). Bump the tag and the digest together; CI pins the built image by digest in the release record.
 
 FROM node:24-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS build

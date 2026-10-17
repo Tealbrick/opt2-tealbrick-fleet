@@ -1,0 +1,151 @@
+// The directory feed for apps: contract fleet.directory_feed/1 (C230, G-3, RUL-02, FLT-02). The frozen schema and its
+// fixtures are copied to test/contracts/ (see PROVENANCE.md); every answer in the tests is validated against them.
+//
+// What the feed carries and what it never carries (C88, FLT-01): team member ids and roles; contact ids with kind, status,
+// trust and CANONICAL handles; agent ids with status, trust and the owner's contact id. No email, no title, no tag, no
+// description, no person or agent name, no review reason. Names are not data an app needs to decide: Rules matches ids.
+// A team's name is the one exception the contract allows (name?, 1-80 chars).
+import { normalizeHandle } from "@opt2-tealbrick/manifest";
+import { type Db, TbError } from "@opt2-tealbrick/miniapp-sdk";
+import { revision } from "./store.ts";
+import type { ContactKind, Trust } from "./trust.ts";
+
+/** Caps of fleet.directory_feed/1 (the schema is the authority; the test reads them from the schema too). */
+export const FEED_CAPS = { teams: 500, membersPerTeam: 4000, contacts: 2000, agents: 2000, handlesPerContact: 16 } as const;
+
+export interface FeedMember {
+  kind: "agent" | "contact";
+  id: string;
+  role: "member" | "lead";
+}
+export interface FeedTeam {
+  id: string;
+  name?: string;
+  members: FeedMember[];
+}
+export interface FeedContact {
+  id: string;
+  kind: ContactKind;
+  status: "active" | "departed";
+  trust: Trust;
+  handles: string[];
+}
+export interface FeedAgent {
+  id: string;
+  status: "active" | "paused" | "removed";
+  trust: Trust;
+  owner: string | null;
+}
+export type DirectoryFeed =
+  | { v: 1; revision: number; unchanged: false; teams: FeedTeam[]; contacts: FeedContact[]; agents: FeedAgent[] }
+  | { v: 1; revision: number; unchanged: true };
+
+/** Transient: the directory is larger than the contract carries. 503 so a reader keeps its last good copy and retries. */
+const tooLarge = (what: string, cap: number): never => {
+  throw new TbError("feed_too_large", `the directory has more than ${cap} ${what}; the feed contract fleet.directory_feed/1 cannot carry it`, 503);
+};
+
+// Field rules of the frozen schema (a test compares these with test/contracts/fleet.directory_feed.1.schema.json).
+export const AGENT_ID_PATTERN = /^agt_[0-9A-HJKMNP-TV-Z]{26}$/;
+export const HANDLE_PATTERN = /^(buzz:npub1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]{58}|slack:[UW][A-Z0-9]{2,30}|telegram:-?[1-9][0-9]{0,19})$/;
+export const ID_MAX = 64;
+export const TEAM_NAME_MAX = 80;
+const validId = (id: string): boolean => id.length >= 1 && id.length <= ID_MAX;
+
+/** Warn once per skipped id (bounded memory): one bad legacy row must not flood the log on every pull. */
+const warned = new Set<string>();
+export type Warn = (msg: string, fields: Record<string, string>) => void;
+function skip(warn: Warn | undefined, what: string, id: string): void {
+  const key = `${what}:${id}`;
+  if (warned.has(key)) return;
+  if (warned.size >= 1000) warned.clear();
+  warned.add(key);
+  warn?.(`directory_feed leaves out ${what} that does not fit the contract fleet.directory_feed/1`, { what, id: id.slice(0, 80) });
+}
+
+/** Only app callers (companions such as Rules) read the feed. An agent, a person or anything else gets `no_access`. */
+export function assertFeedCaller(caller: { type: string }): void {
+  if (caller.type !== "app") throw new TbError("no_access", "directory_feed is for apps only", 403);
+}
+
+/**
+ * The feed, or `{v, revision, unchanged:true}` when `sinceRevision` equals the current revision. Four indexed reads,
+ * independent of the number of teams (no query per team or per person).
+ *
+ * Rows the contract cannot carry are left out (with one warning per id), never the whole feed: a handle that is not
+ * canonical (`normalizeHandle(h) !== h` or off the schema pattern), an agent id that is not `agt_<26 Crockford>`, an
+ * id of 0 or over 64 characters. A member or owner that names a left-out row is left out too. Removed agents are
+ * listed only while a team still names them (so a reader can drop the member); they do not count against the cap.
+ */
+export function directoryFeed(db: Db, input: { sinceRevision?: number }, warn?: Warn): DirectoryFeed {
+  const rev = revision(db);
+  if (input.sinceRevision !== undefined && input.sinceRevision === rev) return { v: 1, revision: rev, unchanged: true };
+
+  const handles = new Map<string, string[]>();
+  for (const r of db.prepare("SELECT person_id, handle FROM fleet_handles ORDER BY person_id, handle").all()) {
+    const h = String(r.handle);
+    if (normalizeHandle(h) !== h || !HANDLE_PATTERN.test(h)) {
+      skip(warn, "a handle", h);
+      continue;
+    }
+    const key = String(r.person_id);
+    const list = handles.get(key) ?? [];
+    list.push(h);
+    handles.set(key, list);
+  }
+  const contacts: FeedContact[] = [];
+  const contactIds = new Set<string>();
+  for (const c of db.prepare("SELECT id, kind, status, trust FROM fleet_people ORDER BY id").all()) {
+    const id = String(c.id);
+    if (!validId(id)) {
+      skip(warn, "a contact id", id);
+      continue;
+    }
+    contactIds.add(id);
+    contacts.push({ id, kind: c.kind as ContactKind, status: c.status as FeedContact["status"], trust: c.trust as Trust, handles: (handles.get(id) ?? []).slice(0, FEED_CAPS.handlesPerContact) });
+  }
+  if (contacts.length > FEED_CAPS.contacts) tooLarge("contacts", FEED_CAPS.contacts);
+
+  const agents: FeedAgent[] = [];
+  const agentIds = new Set<string>();
+  for (const a of db
+    .prepare("SELECT id, status, trust, owner_id FROM fleet_agents WHERE status <> 'removed' OR id IN (SELECT subject_id FROM fleet_members WHERE kind = 'agent') ORDER BY id")
+    .all()) {
+    const id = String(a.id);
+    if (!AGENT_ID_PATTERN.test(id)) {
+      skip(warn, "an agent id", id);
+      continue;
+    }
+    agentIds.add(id);
+    const owner = a.owner_id === null ? null : String(a.owner_id);
+    agents.push({ id, status: a.status as FeedAgent["status"], trust: a.trust as Trust, owner: owner !== null && contactIds.has(owner) ? owner : null });
+  }
+  if (agents.length > FEED_CAPS.agents) tooLarge("agents", FEED_CAPS.agents);
+
+  const members = new Map<string, FeedMember[]>();
+  for (const r of db.prepare("SELECT team_id, kind, subject_id, role FROM fleet_members ORDER BY team_id, kind, subject_id").all()) {
+    const id = String(r.subject_id);
+    const isAgent = r.kind === "agent";
+    if (!(isAgent ? agentIds : contactIds).has(id)) continue; // dangling or left out above
+    const key = String(r.team_id);
+    const list = members.get(key) ?? [];
+    list.push({ kind: isAgent ? "agent" : "contact", id, role: r.role as FeedMember["role"] });
+    members.set(key, list);
+  }
+  const teams: FeedTeam[] = [];
+  for (const t of db.prepare("SELECT id, name FROM fleet_teams ORDER BY id").all()) {
+    const id = String(t.id);
+    if (!validId(id)) {
+      skip(warn, "a team id", id);
+      continue;
+    }
+    const name = String(t.name);
+    const fits = name.length >= 1 && name.length <= TEAM_NAME_MAX;
+    if (!fits) skip(warn, "a team name", id); // the name is optional in the contract: leave only the name out
+    teams.push({ id, ...(fits ? { name } : {}), members: members.get(id) ?? [] });
+  }
+  if (teams.length > FEED_CAPS.teams) tooLarge("teams", FEED_CAPS.teams);
+  for (const t of teams) if (t.members.length > FEED_CAPS.membersPerTeam) tooLarge("members in one team", FEED_CAPS.membersPerTeam);
+
+  return { v: 1, revision: rev, unchanged: false, teams, contacts, agents };
+}

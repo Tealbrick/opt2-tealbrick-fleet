@@ -8,7 +8,7 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import type { IdentitiesViewOutput, MembersSetInput, OverviewGetOutput, PersonSetInput, TeamSetInput } from "#kit";
 import { errorMessage, HoldsPage, portalHref, useHoldList, useNav } from "./standard.tsx";
 
-const NAME = "Organization Plane";
+const NAME = "Governance";
 /** Where scripts/build-ui.ts puts this app's still (`stills/`, next to this module in the hashed asset directory, C61). */
 const STILLS = new URL("./stills/", import.meta.url).href;
 

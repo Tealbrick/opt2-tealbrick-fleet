@@ -1,8 +1,8 @@
 {
   "name": "opt2-tealbrick-fleet",
-  "version": "0.1.10",
+  "version": "0.2.0",
   "private": true,
-  "description": "Organization Plane: a Teal Brick opt2 miniapp.",
+  "description": "Governance: a Teal Brick opt2 miniapp (product id fleet).",
   "license": "Apache-2.0",
   "type": "module",
   "packageManager": "pnpm@9.15.4+sha512.b2dc20e2fc72b3e18848459b37359a32064663e5627a51e4c74b2c29dd8e8e0491483c3abb40789cfd578bf362fb6ba8261b05f0387d76792ed6e23ea3b1b6a0",
@@ -23,8 +23,8 @@
     "gen": "tb-gen all"
   },
   "dependencies": {
-    "@opt2-tealbrick/manifest": "https://github.com/Tealbrick/opt2-tealbrick-dist/releases/download/opt2-tealbrick-sdk-manifest-v0.1.18/opt2-tealbrick-manifest-0.1.18.tgz",
-    "@opt2-tealbrick/miniapp-sdk": "https://github.com/Tealbrick/opt2-tealbrick-dist/releases/download/opt2-tealbrick-sdk-miniapp-sdk-v0.1.22/opt2-tealbrick-miniapp-sdk-0.1.22.tgz"
+    "@opt2-tealbrick/manifest": "https://github.com/Tealbrick/opt2-tealbrick-dist/releases/download/opt2-tealbrick-sdk-manifest-v0.1.19/opt2-tealbrick-manifest-0.1.19.tgz",
+    "@opt2-tealbrick/miniapp-sdk": "https://github.com/Tealbrick/opt2-tealbrick-dist/releases/download/opt2-tealbrick-sdk-miniapp-sdk-v0.1.25/opt2-tealbrick-miniapp-sdk-0.1.25.tgz"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
