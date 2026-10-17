@@ -15,9 +15,28 @@ type Dir = OverviewGetOutput;
 type Kind = "agent" | "person" | "outside_agent";
 type Trust = "unreviewed" | "trusted" | "limited" | "blocked";
 type Verdict = "trusted" | "limited" | "blocked";
-type Subject = { kind: Kind; id: string };
+/** A directory entry (`id`) or a handle an agent asked about that is not in the directory yet (`handle`). */
+type Subject = { kind: Kind; id?: string; handle?: string };
+type Current = NonNullable<ReviewGetOutput["current"]>;
 
-export const loadReviews = () => callOp<List>("reviews_list", { limit: 100 });
+/** Open requests (all of them) and the latest verdicts: two reads, so a long history never hides an open request. */
+export async function loadReviews(): Promise<List> {
+  const [open, done] = await Promise.all([callOp<List>("reviews_list", { status: "open", limit: 200 }), callOp<List>("reviews_list", { status: "done", limit: 100 })]);
+  return { ...open, reviews: [...open.reviews, ...done.reviews] };
+}
+
+/** The open requests of one subject (several agents may ask about the same one): one row in the list. */
+type Group = { key: string; subject: Subject; name: string; handle: string | null; requests: Review[] };
+function groupRequests(open: Review[]): Group[] {
+  const groups = new Map<string, Group>();
+  for (const r of open) {
+    const key = r.subject.id ? `${r.subject.kind}:${r.subject.id}` : `${r.subject.kind}:h:${r.subjectHandle}`;
+    const g = groups.get(key) ?? { key, subject: r.subject.id ? { kind: r.subject.kind, id: r.subject.id } : { kind: r.subject.kind, handle: r.subjectHandle ?? undefined }, name: r.subject.name, handle: r.subjectHandle, requests: [] };
+    g.requests.push(r);
+    groups.set(key, g);
+  }
+  return [...groups.values()];
+}
 const loadDir = () => callOp<Dir>("overview_get", {});
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -41,12 +60,18 @@ const VERDICTS = [
 
 /** What Governance knows of a subject now, from the owner's directory view (names, handles; the owner sees these). */
 function knownAbout(dir: Dir, s: Subject) {
+  if (!s.id) return null;
   if (s.kind === "agent") {
     const a = dir.agents.find((x) => x.id === s.id);
-    return a ? { name: a.name, trust: a.trust as Trust, handles: [] as string[], owner: a.owner?.name ?? null, status: a.status as string } : null;
+    return a ? { name: a.name, trust: a.trust as Trust } : null;
   }
   const p = dir.people.find((x) => x.id === s.id);
-  return p ? { name: p.name, trust: p.trust as Trust, handles: p.handles, owner: null, status: p.status as string } : null;
+  return p ? { name: p.name, trust: p.trust as Trust } : null;
+}
+
+/** Same picture apart from the trust state (a verdict changes trust; the rest is what "changed since the last review" means). */
+function sameShown(a: Current, b: Current): boolean {
+  return JSON.stringify([a.name, a.title, a.status, a.handles, a.owner, a.teams]) === JSON.stringify([b.name, b.title, b.status, b.handles, b.owner, b.teams]);
 }
 
 const askedBy = (r: Review, dir: Dir | null): string => {
@@ -59,20 +84,24 @@ const askedBy = (r: Review, dir: Dir | null): string => {
 
 // ── the review as a StepFlow ────────────────────────────────────────────────────────────────────────────────────
 
-type FlowProps = { subject: Subject | null; request: Review | null; dir: Dir; policy: List["policy"]; onClose: () => void; onDone: () => Promise<void> };
+type FlowProps = { subject: Subject | null; requests: Review[]; dir: Dir; policy: List["policy"]; onClose: () => void; onDone: () => Promise<void> };
 
-function ReviewFlow({ subject: given, request, dir, policy, onClose, onDone }: FlowProps) {
+function ReviewFlow({ subject: given, requests, dir, policy, onClose, onDone }: FlowProps) {
   const [subject, setSubject] = useState<Subject | null>(given);
   const [got, setGot] = useState<ReviewGetOutput | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [verdict, setVerdict] = useState<Verdict | null>(null);
   const [reason, setReason] = useState("");
+  const [name, setName] = useState<string | null>(null);
   const [recordError, setRecordError] = useState<string | null>(null);
   const defaultDays = subject?.kind === "agent" ? policy.agentDays : policy.contactDays;
   const [days, setDays] = useState<string>("");
   const nextDays = Number(days || defaultDays);
+  const subjectKey = subject ? `${subject.kind}:${subject.id ?? ""}:${subject.handle ?? ""}` : "";
 
-  // the picture of the subject as it is now: the digest of THIS copy is what the verdict binds to
+  // The picture of the subject as it is NOW (fetched when the flow opens, not the one the page loaded earlier):
+  // everything the step shows comes from it, and the digest of THIS copy is what the verdict binds to.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: subjectKey stands for the subject
   useEffect(() => {
     if (!subject) return;
     let live = true;
@@ -84,9 +113,11 @@ function ReviewFlow({ subject: given, request, dir, policy, onClose, onDone }: F
     return () => {
       live = false;
     };
-  }, [subject]);
+  }, [subjectKey]);
 
-  const info = subject ? knownAbout(dir, subject) : null;
+  const cur = got?.current ?? null;
+  const pending = !!cur && cur.status === "pending";
+  const request = requests[0] ?? null;
   const options = [defaultDays, 30, 90, 180, 365]
     .filter((n, i, all) => all.indexOf(n) === i)
     .sort((a, b) => a - b)
@@ -95,18 +126,19 @@ function ReviewFlow({ subject: given, request, dir, policy, onClose, onDone }: F
     ...dir.agents.filter((a) => a.status !== "removed").map((a) => ({ value: `agent:${a.id}`, label: `${a.name} (agent)` })),
     ...dir.people.map((p) => ({ value: `${p.kind}:${p.id}`, label: `${p.name} (${p.kind === "outside_agent" ? "outside agent" : "person"})` })),
   ];
-  const changedSince =
-    got?.review?.snapshot && got.current && got.review.snapshot.digest !== got.current.digest ? `Changed since the last review on ${day(got.review.decidedAt)}: owner, teams or handles are not the same.` : null;
+  const last = got?.review;
+  const changedSince = last?.snapshot && cur && !sameShown(last.snapshot, cur) ? `Changed since the last review on ${day(last.decidedAt)}: name, owner, teams or handles are not the same.` : null;
+  const shownName = pending ? (name ?? cur?.name ?? "") : (cur?.name ?? "");
 
   const record = async (): Promise<boolean> => {
-    if (!subject || !got?.current || !verdict) return false;
+    if (!subject || !cur || !verdict) return false;
     setRecordError(null);
     try {
       await callOp("review_record", {
-        subject,
+        subject: pending ? { kind: subject.kind, handle: subject.handle ?? cur.handles[0] ?? "", ...(shownName.trim() ? { name: shownName.trim() } : {}) } : { kind: subject.kind, id: subject.id ?? "" },
         verdict,
         reason: reason.trim(),
-        snapshotDigest: got.current.digest,
+        snapshotDigest: cur.digest,
         nextReviewDays: nextDays,
         ...(request ? { request: request.id } : {}),
       });
@@ -122,20 +154,20 @@ function ReviewFlow({ subject: given, request, dir, policy, onClose, onDone }: F
       open
       size="lg"
       kicker="Governance"
-      title={info ? `Review ${info.name}` : "Review"}
+      title={cur ? `Review ${cur.name}` : "Review"}
       onClose={onClose}
       onFinish={() => void onDone()}
       steps={[
         {
           name: "Subject",
-          canNext: !!subject && !!got?.current && !!info,
+          canNext: !!cur && (!pending || shownName.trim().length > 0),
           render: () => (
             <div className="tb-stack">
               {given ? null : (
                 <Field label="Who">
                   <Select
                     options={[{ value: "", label: "Choose who to review" }, ...subjectOptions]}
-                    value={subject ? `${subject.kind}:${subject.id}` : ""}
+                    value={subject?.id ? `${subject.kind}:${subject.id}` : ""}
                     onValueChange={(v) => {
                       const at = v.indexOf(":");
                       setSubject(v ? { kind: v.slice(0, at) as Kind, id: v.slice(at + 1) } : null);
@@ -148,44 +180,58 @@ function ReviewFlow({ subject: given, request, dir, policy, onClose, onDone }: F
                   {loadError}
                 </Notice>
               ) : null}
-              {subject && !got && !loadError ? <p className="tb-soft">Loading the current picture.</p> : null}
-              {subject && info && got?.current ? (
+              {subject && !cur && !loadError ? <p className="tb-soft">Loading the current picture.</p> : null}
+              {cur ? (
                 <>
                   <p className="tb-soft">This is what Governance knows now. The record keeps this copy with your verdict.</p>
+                  {pending ? (
+                    <>
+                      <Notice tone="needs-you">
+                        <span>This handle is not in your directory. An agent asked about it. Recording a verdict adds it as a new entry with that trust state.</span>
+                      </Notice>
+                      <Field label="Name for the new entry">
+                        <TextInput value={shownName} maxLength={120} onChange={(e) => setName(e.target.value)} />
+                      </Field>
+                    </>
+                  ) : null}
                   <dl className="kv">
                     <dt>Name</dt>
-                    <dd>{info.name}</dd>
+                    <dd>{cur.name}</dd>
                     <dt>Kind</dt>
-                    <dd>{KIND_LABEL[subject.kind]}</dd>
-                    {info.owner ? (
+                    <dd>{KIND_LABEL[cur.kind]}</dd>
+                    {cur.title ? (
                       <>
-                        <dt>Owner</dt>
-                        <dd>{info.owner}</dd>
+                        <dt>{cur.kind === "agent" ? "Role" : "Title"}</dt>
+                        <dd>{cur.title}</dd>
                       </>
                     ) : null}
-                    {info.handles.length ? (
+                    {cur.ownerName ? (
+                      <>
+                        <dt>Owner</dt>
+                        <dd>{cur.ownerName}</dd>
+                      </>
+                    ) : null}
+                    {cur.handles.length ? (
                       <>
                         <dt>Handles</dt>
-                        <dd className="mono">{info.handles.join(" · ")}</dd>
+                        <dd className="mono">{cur.handles.join(" · ")}</dd>
                       </>
                     ) : null}
                     <dt>Teams</dt>
-                    <dd>{got.current.teams.length ? got.current.teams.join(", ") : "None"}</dd>
+                    <dd>{cur.teams.length ? cur.teams.join(", ") : "None"}</dd>
                     <dt>Trust now</dt>
-                    <dd>
-                      <TrustTag trust={info.trust} />
-                    </dd>
+                    <dd>{pending ? "Not in the directory" : <TrustTag trust={cur.trust} />}</dd>
                     <dt>Copy</dt>
-                    <dd className="mono">{`${got.current.digest.slice(0, 4)}…${got.current.digest.slice(-2)} · ${day(got.current.takenAt)}`}</dd>
+                    <dd className="mono">{`${cur.digest.slice(0, 4)}…${cur.digest.slice(-2)} · ${day(cur.takenAt)}`}</dd>
                   </dl>
-                  {request ? (
-                    <Notice tone="live">
-                      <span>{`Asked by ${askedBy(request, dir)} on ${day(request.createdAt)}: “${request.requestedBy.why}”. This is the asker’s claim, not a fact.`}</span>
+                  {requests.map((r) => (
+                    <Notice tone="live" key={r.id}>
+                      <span>{`Asked by ${askedBy(r, dir)} on ${day(r.createdAt)}: “${r.requestedBy.why}”. This is the asker’s claim, not a fact.`}</span>
                     </Notice>
-                  ) : null}
+                  ))}
                   {changedSince ? <Notice tone="needs-you">{changedSince}</Notice> : null}
                   <Notice tone="live">
-                    <span>Access from Portal and first contacts in Connect are not part of this copy yet. It covers owner, teams and handles.</span>
+                    <span>Access from Portal and first contacts in Connect are not part of this copy yet. It covers name, role, owner, teams and handles.</span>
                   </Notice>
                 </>
               ) : null}
@@ -220,14 +266,14 @@ function ReviewFlow({ subject: given, request, dir, policy, onClose, onDone }: F
         },
         {
           name: "Confirm",
-          nextLabel: "Record verdict",
+          nextLabel: pending ? "Add and record verdict" : "Record verdict",
           onNext: record,
           render: () => (
             <div className="tb-stack">
               <dl className="kv">
                 <dt>Subject</dt>
-                <dd>{info?.name ?? ""}</dd>
-                <dt>Verdict</dt>
+                <dd>{shownName}</dd>
+                <dt>{pending ? "Add to the directory as" : "Verdict"}</dt>
                 <dd>{verdict ? <TrustTag trust={verdict} /> : null}</dd>
                 <dt>Why</dt>
                 <dd>{reason.trim()}</dd>
@@ -279,7 +325,7 @@ export const reviewBadge = (l: List | null): number | null => (l ? l.openCount +
 export function ReviewsPage({ onChanged }: { onChanged?: () => void }) {
   const list = useLoad(loadReviews);
   const dirLoad = useLoad(loadDir);
-  const [flow, setFlow] = useState<{ subject: Subject | null; request: Review | null } | null>(null);
+  const [flow, setFlow] = useState<{ subject: Subject | null; requests: Review[] } | null>(null);
   const [schedule, setSchedule] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -292,11 +338,12 @@ export function ReviewsPage({ onChanged }: { onChanged?: () => void }) {
   const l = list.data;
   const dir = dirLoad.data;
   const error = list.error ?? dirLoad.error;
-  const dismiss = async (r: Review) => {
-    setBusy(r.id);
+  /** Dismisses every open request of the subject, one call each. */
+  const dismiss = async (g: Group) => {
+    setBusy(g.key);
     setFailure(null);
     try {
-      await callOp("review_dismiss", { id: r.id });
+      for (const r of g.requests) await callOp("review_dismiss", { id: r.id });
       await reload();
     } catch (e) {
       setFailure(changeError(e));
@@ -322,7 +369,7 @@ export function ReviewsPage({ onChanged }: { onChanged?: () => void }) {
         title="Trust reviews"
         lede="Agents can ask for a review. Only you decide. Each verdict is kept with a copy of what the subject could do at that time."
         action={
-          <Button variant="primary" onClick={() => setFlow({ subject: null, request: null })}>
+          <Button variant="primary" onClick={() => setFlow({ subject: null, requests: [] })}>
             Review someone
           </Button>
         }
@@ -337,22 +384,26 @@ export function ReviewsPage({ onChanged }: { onChanged?: () => void }) {
         <EmptyState title="Nothing waits for a review.">Open requests from agents and subjects that are due appear here.</EmptyState>
       ) : (
         <div className="ruled dir">
-          {open.map((r) => {
-            const trust = trustOf(r.subject);
+          {groupRequests(open).map((g) => {
+            const trust = trustOf(g.subject);
+            const shown = g.requests.slice(0, 3);
+            const latest = g.requests.reduce((m, r) => (r.createdAt > m ? r.createdAt : m), "");
             return (
-              <div className="item" key={r.id}>
+              <div className="item" key={g.key}>
                 <Swatch />
                 <h3>
-                  {r.subject.name}
+                  {g.name}
                   {trust ? <TrustTag trust={trust} /> : null}
+                  {g.handle ? <Tag status="open">Not in the directory</Tag> : null}
                 </h3>
-                {r.requestedBy.why ? <p>{`${askedBy(r, dir)} asks: “${r.requestedBy.why}”`}</p> : null}
-                <span className="meta">{`${KIND_LABEL[r.subject.kind]} · asked by ${askedBy(r, dir)} · ${day(r.createdAt)}`}</span>
+                {shown.map((r) => (r.requestedBy.why ? <p key={r.id}>{`${askedBy(r, dir)} asks: “${r.requestedBy.why}”`}</p> : null))}
+                {g.requests.length > shown.length ? <p>{`and ${g.requests.length - shown.length} more`}</p> : null}
+                <span className="meta">{`${KIND_LABEL[g.subject.kind]}${g.handle ? ` · ${g.handle}` : ""} · asked by ${[...new Set(g.requests.map((r) => askedBy(r, dir)))].join(", ")} · ${day(latest)}`}</span>
                 <div className="side">
-                  <Button size="sm" variant="primary" onClick={() => setFlow({ subject: { kind: r.subject.kind, id: r.subject.id }, request: r })}>
+                  <Button size="sm" variant="primary" onClick={() => setFlow({ subject: g.subject, requests: g.requests })}>
                     Review
                   </Button>
-                  <Button size="sm" disabled={busy === r.id} aria-label={`Dismiss the request for ${r.subject.name}`} onClick={() => void dismiss(r)}>
+                  <Button size="sm" disabled={busy === g.key} aria-label={`Dismiss the requests for ${g.name}`} onClick={() => void dismiss(g)}>
                     Dismiss
                   </Button>
                 </div>
@@ -370,7 +421,7 @@ export function ReviewsPage({ onChanged }: { onChanged?: () => void }) {
               <p>{d.lastReview && d.lastVerdict ? `Last review: ${TRUST_LABEL[d.lastVerdict]}. It was due on ${day(d.dueAt)}.` : "Never reviewed."}</p>
               <span className="meta">{`${KIND_LABEL[d.subject.kind]} · every ${d.subject.kind === "agent" ? l.policy.agentDays : l.policy.contactDays} days`}</span>
               <div className="side">
-                <Button size="sm" variant="primary" onClick={() => setFlow({ subject: { kind: d.subject.kind, id: d.subject.id }, request: null })}>
+                <Button size="sm" variant="primary" onClick={() => setFlow({ subject: { kind: d.subject.kind, id: d.subject.id }, requests: [] })}>
                   Review
                 </Button>
               </div>
@@ -423,9 +474,9 @@ export function ReviewsPage({ onChanged }: { onChanged?: () => void }) {
       </Card>
       {flow ? (
         <ReviewFlow
-          key={flow.request?.id ?? `${flow.subject?.kind}:${flow.subject?.id}`}
+          key={flow.requests[0]?.id ?? `${flow.subject?.kind}:${flow.subject?.id}`}
           subject={flow.subject}
-          request={flow.request}
+          requests={flow.requests}
           dir={dir}
           policy={l.policy}
           onClose={() => setFlow(null)}

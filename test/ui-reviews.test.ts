@@ -35,10 +35,28 @@ const AGENT = "agt_01J0000000000000000000000A";
 const SCOUT = "agt_01J0000000000000000000000B";
 const DIGEST = "ab".repeat(32);
 const DIGEST2 = "cd".repeat(32);
-const snap = (digest: string, teams: string[] = []) => ({ digest, takenAt: "2026-10-20T09:00:00.000Z", access: [], policy: null, contacts: 0, owner: null, teams, source: "directory_only" });
+const snap = (digest: string, over: Record<string, unknown> = {}) => ({
+  digest,
+  takenAt: "2026-10-20T09:00:00.000Z",
+  name: "Brightline intake",
+  kind: "outside_agent",
+  title: "",
+  status: "active",
+  trust: "unreviewed",
+  handles: ["slack:UBRIGHT01"],
+  owner: null,
+  ownerName: null,
+  access: [],
+  policy: null,
+  contacts: 0,
+  teams: ["Support"],
+  source: "directory_only",
+  ...over,
+});
 const review = (id: string, over: Record<string, unknown> = {}) => ({
   id,
   subject: { kind: "outside_agent", id: "psn_bright", name: "Brightline intake" },
+  subjectHandle: null,
   status: "requested",
   verdict: null,
   reason: "",
@@ -69,7 +87,7 @@ const LIST = () => ({
     review("rvw_open1"),
     review("rvw_done1", { status: "done", verdict: "blocked", reason: "Unasked sales messages.", subject: { kind: "outside_agent", id: "psn_promo", name: "PromoBot" }, decidedAt: "2026-10-01T10:00:00.000Z", reviewer: "per_1", snapshot: snap(DIGEST) }),
   ],
-  due: [{ subject: { kind: "agent", id: AGENT, name: "Front desk" }, dueAt: "2026-10-12T00:00:00.000Z", lastReview: "rvw_old", lastVerdict: "trusted", snapshot: snap(DIGEST2) }],
+  due: [{ subject: { kind: "agent", id: AGENT, name: "Front desk" }, dueAt: "2026-10-12T00:00:00.000Z", lastReview: "rvw_old", lastVerdict: "trusted" }],
   dueCount: 1,
   openCount: 1,
   policy: POLICY,
@@ -80,11 +98,11 @@ interface Stub {
   calls: { op: string; input: any }[];
   fail: Record<string, { status: number; code: string } | undefined>;
   list: ReturnType<typeof LIST>;
-  /** digest the subject has "now" (review_get answers it) */
-  current: string;
+  /** the picture review_get answers (the subject "now") */
+  current: ReturnType<typeof snap>;
   networkDown: boolean;
 }
-const stub: Stub = { calls: [], fail: {}, list: LIST(), current: DIGEST, networkDown: false };
+const stub: Stub = { calls: [], fail: {}, list: LIST(), current: snap(DIGEST), networkDown: false };
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -98,9 +116,13 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   stub.calls.push({ op, input: body.input });
   const failure = stub.fail[op];
   if (failure) return json(failure.status, { error: { code: failure.code, message: `raw upstream text for ${failure.code}`, requestId: "req_1" } });
-  if (op === "reviews_list") return json(200, { status: "ok", output: stub.list });
+  if (op === "reviews_list") {
+    const want = body.input?.status;
+    const reviews = stub.list.reviews.filter((r) => (want === "open" ? r.status === "requested" : want === "done" ? r.status === "done" : true));
+    return json(200, { status: "ok", output: { ...stub.list, reviews } });
+  }
   if (op === "overview_get") return json(200, { status: "ok", output: DIR });
-  if (op === "review_get") return json(200, { status: "ok", output: { review: null, current: snap(stub.current, ["Support"]) } });
+  if (op === "review_get") return json(200, { status: "ok", output: { review: null, current: stub.current } });
   if (op === "review_record") return json(200, { status: "ok", output: { review: review("rvw_new", { status: "done", verdict: body.input.verdict }) } });
   if (op === "review_dismiss") {
     stub.list = { ...stub.list, reviews: stub.list.reviews.filter((r) => r.id !== body.input.id), openCount: 0 };
@@ -180,7 +202,7 @@ const reset = () => {
   stub.calls = [];
   stub.fail = {};
   stub.list = LIST();
-  stub.current = DIGEST;
+  stub.current = snap(DIGEST);
   stub.networkDown = false;
   for (const d of document.querySelectorAll("dialog")) d.remove();
 };
@@ -205,6 +227,7 @@ describe("Trust reviews page", () => {
     assert.match(open?.textContent ?? "", /Unreviewed/);
     assert.match(open?.textContent ?? "", /agent Scout asks: “It wrote to me on Buzz\./);
     assert.match(open?.textContent ?? "", /Outside agent · asked by agent Scout · 14 Oct 2026/);
+    assert.equal(rows(m.host).length, 2);
     assert.ok(button(open as Element, "Review").className.includes("primary"));
     assert.ok(!button(open as Element, "Dismiss").className.includes("primary"));
     assert.match(due?.querySelector("h3")?.textContent ?? "", /Front desk.*Due.*Trusted/);
@@ -277,6 +300,7 @@ describe("Trust reviews page", () => {
     assert.deepEqual(reviewGet?.input, { subject: { kind: "outside_agent", id: "psn_bright" } });
     assert.match(d.textContent ?? "", /Brightline intake/);
     assert.match(d.textContent ?? "", /slack:UBRIGHT01/);
+    assert.match(d.textContent ?? "", /TeamsSupport/);
     assert.match(d.textContent ?? "", /Asked by agent Scout on 14 Oct 2026: “It wrote to me on Buzz\./);
     assert.match(d.textContent ?? "", /This is the asker’s claim, not a fact\./);
     assert.match(d.textContent ?? "", /abab…ab · 20 Oct 2026/);
@@ -371,6 +395,79 @@ describe("Trust reviews page", () => {
     await click(button(d, "Save"));
     assert.deepEqual(stub.calls.find((c) => c.op === "review_policy_set")?.input, { agentDays: 30, contactDays: 180, reviewNewAgents: true });
     assert.match(m.host.querySelector('[aria-label="Review schedule"]')?.textContent ?? "", /Every 30 days/);
+    await m.unmount();
+  });
+});
+
+describe("Trust reviews: fresh picture, grouped requests, handles not in the directory", () => {
+  it("the review shows the picture from the fresh review_get, not the one the page loaded; the verdict binds its digest", async () => {
+    reset();
+    stub.current = snap(DIGEST2, { name: "Brightline Clinic intake", title: "Intake bot", handles: ["slack:UBRIGHT01", "slack:UBRIGHT02"], teams: ["Ops"], trust: "limited" });
+    const m = await mount(h(ui.ReviewsPage, {}));
+    assert.match(rows(m.host)[0]?.querySelector("h3")?.textContent ?? "", /^Brightline intake/, "the page loaded the old name");
+    await click(button(rows(m.host)[0] as Element, "Review"));
+    const d = dialog();
+    assert.match(d.textContent ?? "", /NameBrightline Clinic intake/);
+    assert.match(d.textContent ?? "", /TitleIntake bot/);
+    assert.match(d.textContent ?? "", /slack:UBRIGHT01 · slack:UBRIGHT02/);
+    assert.match(d.textContent ?? "", /TeamsOps/);
+    assert.match(d.textContent ?? "", /Review Brightline Clinic intake/);
+    await fillVerdict("Blocked", "Not the clinic.");
+    await move(d, "Next");
+    await move(d, "Skip, no rule");
+    await click(button(d, "Record verdict"));
+    assert.equal(stub.calls.find((c) => c.op === "review_record")?.input.snapshotDigest, DIGEST2, "the digest of the fresh picture, not of the page load");
+    await m.unmount();
+  });
+
+  it("requests of several agents about one subject are one row; Dismiss closes each of them", async () => {
+    reset();
+    stub.list = { ...stub.list, reviews: [review("rvw_a1"), review("rvw_a2", { requestedBy: { kind: "agent", id: AGENT, why: "It spams me." }, createdAt: "2026-10-15T08:00:00.000Z" })], openCount: 2 };
+    const m = await mount(h(ui.ReviewsPage, {}));
+    const [row] = rows(m.host);
+    assert.equal(rows(m.host).length, 2, "one row for the subject, one for the due agent");
+    assert.match(row?.textContent ?? "", /agent Scout asks: “It wrote to me on Buzz/);
+    assert.match(row?.textContent ?? "", /agent Front desk asks: “It spams me\.”/);
+    assert.match(row?.textContent ?? "", /asked by agent Scout, agent Front desk · 15 Oct 2026/);
+    await click(button(row as Element, "Review"));
+    assert.equal(dialog().textContent?.match(/This is the asker’s claim, not a fact\./g)?.length, 2, "each asker's claim is shown as a claim");
+    await m.unmount();
+    reset();
+    stub.list = { ...stub.list, reviews: [review("rvw_a1"), review("rvw_a2", { requestedBy: { kind: "agent", id: AGENT, why: "It spams me." } })], openCount: 2 };
+    const m2 = await mount(h(ui.ReviewsPage, {}));
+    await click(button(rows(m2.host)[0] as Element, "Dismiss"));
+    assert.deepEqual(stub.calls.filter((c) => c.op === "review_dismiss").map((c) => c.input), [{ id: "rvw_a1" }, { id: "rvw_a2" }]);
+    await m2.unmount();
+  });
+
+  it("a handle that is not in the directory: the owner sees the handle, names the entry and adds it with the verdict", async () => {
+    reset();
+    stub.list = { ...stub.list, reviews: [review("rvw_p1", { subject: { kind: "person", id: "", name: "slack:UNEW00001" }, subjectHandle: "slack:UNEW00001" })] };
+    stub.current = snap(DIGEST2, { status: "pending", name: "slack:UNEW00001", kind: "person", handles: ["slack:UNEW00001"], teams: [], trust: "unreviewed" });
+    const m = await mount(h(ui.ReviewsPage, {}));
+    const row = rows(m.host)[0] as Element;
+    assert.match(row.querySelector("h3")?.textContent ?? "", /Not in the directory/);
+    assert.match(row.textContent ?? "", /Person · slack:UNEW00001 · asked by agent Scout/);
+    await click(button(row, "Review"));
+    assert.deepEqual(stub.calls.find((c) => c.op === "review_get")?.input, { subject: { kind: "person", handle: "slack:UNEW00001" } });
+    const d = dialog();
+    assert.match(d.textContent ?? "", /This handle is not in your directory/);
+    assert.match(d.textContent ?? "", /Trust nowNot in the directory/);
+    await type(d.querySelector("input") as Element, "  Partner clinic bot ");
+    await fillVerdict("Limited", "Confirmed by phone.");
+    await move(d, "Next");
+    await move(d, "Skip, no rule");
+    assert.match(d.textContent ?? "", /Add to the directory as/);
+    assert.match(d.textContent ?? "", /Partner clinic bot/);
+    await click(button(d, "Add and record verdict"));
+    assert.deepEqual(stub.calls.find((c) => c.op === "review_record")?.input, {
+      subject: { kind: "person", handle: "slack:UNEW00001", name: "Partner clinic bot" },
+      verdict: "limited",
+      reason: "Confirmed by phone.",
+      snapshotDigest: DIGEST2,
+      nextReviewDays: 180,
+      request: "rvw_p1",
+    });
     await m.unmount();
   });
 });
