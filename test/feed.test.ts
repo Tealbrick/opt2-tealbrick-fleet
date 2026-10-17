@@ -6,15 +6,17 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { npubFromHex, ulid, validateAgainstSchema } from "@opt2-tealbrick/manifest";
+import { ulid, validateAgainstSchema } from "@opt2-tealbrick/manifest";
 import { type Db, type Json, type OpContext, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { handlers, manifest } from "../src/app.ts";
 import { factsAnswer, factsFor } from "../src/facts.ts";
 import { AGENT_ID_PATTERN, assertFeedCaller, directoryFeed, FEED_CAPS, HANDLE_PATTERN, ID_MAX, TEAM_NAME_MAX } from "../src/feed.ts";
 import * as store from "../src/store.ts";
 import { defaultTrust } from "../src/trust.ts";
+import { bigDirectory } from "./big.ts";
 import { checkFeed, FEED_FIXTURES, FEED_SCHEMA, leaks } from "./feed-contract.ts";
 import { AGENT_A, AGENT_B, dbOver, migratedDb, migrationFiles, NOSTR } from "./helpers.ts";
+import { SECRETS, seed } from "./seed.ts";
 
 const sha256 = (b: Buffer | string) => createHash("sha256").update(b).digest("hex");
 const APP = { type: "app", id: "ins_01J0000000000000000000000R", name: "Rules & Approvals", mode: null };
@@ -33,31 +35,6 @@ const refusal = async (fn: () => unknown): Promise<{ code: string; status: numbe
   }
 };
 const manifestOp = (id: string) => manifest.operations.find((o) => o.id === id) as { input: object; output: Parameters<typeof validateAgainstSchema>[0] };
-
-// Strings that exist in the seed and must never reach an app (C88, FLT-01).
-const SECRETS = ["ann@example.com", "Chief Secret Officer", "vip-tag", "internal-only description", "secret-tag", "Ann Example", "Support", "Agent A", "triage-role"];
-
-/** A realistic directory: PII in the owner-side fields, an outside agent, a departed person, an agent-added entry. */
-function seed(db: Db) {
-  store.syncAgents(db, [AGENT_A, AGENT_B, { id: "agt_01J0000000000000000000000C", name: "Agent C", mode: "free", status: "active" }]);
-  store.syncAgents(db, [AGENT_A, { ...AGENT_B, status: "paused" }]); // C is removed
-  const ann = store.setPerson(db, {
-    name: "Ann Example",
-    email: "ann@example.com",
-    title: "Chief Secret Officer",
-    tags: ["vip-tag"],
-    handles: [`buzz:${NOSTR.hex}`, "slack:u012abcdef", "telegram:123456"], // stored canonical: npub, U012ABCDEF, 123456
-  });
-  const bo = store.setPerson(db, { name: "Bo", email: "bo@example.com", status: "departed", handles: ["telegram:-1001234567890"] });
-  const bot = store.setPerson(db, { name: "Outside Bot", kind: "outside_agent", handles: ["slack:W0BOT123"] });
-  const cy = store.setPerson(db, { name: "Cy", source: "agent", handles: ["slack:UCY00001"] });
-  const support = store.setTeam(db, { name: "Support", description: "internal-only description", tags: ["secret-tag"] });
-  const ops = store.setTeam(db, { name: "Ops" });
-  store.setMembers(db, { team: support.id, people: [{ id: ann.id, role: "lead" }, { id: bot.id, role: "member" }], agents: [{ id: AGENT_A.id, role: "member" }] });
-  store.setMembers(db, { team: ops.id, people: [{ id: cy.id, role: "member" }], agents: [{ id: AGENT_B.id, role: "lead" }] });
-  store.setAgent(db, { agent: AGENT_A.id, owner: ann.id, role: "triage-role", tags: ["vip-tag"] });
-  return { ann, bo, bot, cy, support, ops };
-}
 
 // ── the frozen contract files ──────────────────────────────────────────────────────────────────────────────────
 
@@ -224,42 +201,6 @@ test("directory_feed: more agents than the contract carries is a 503 refusal, ne
 
 // ── size and time budgets ──────────────────────────────────────────────────────────────────────────────────────
 
-/** 500 teams, 2000 people, 500 agents, 12 members per team, 2 handles per person (the limits of one workspace). */
-function bigDirectory(): { db: Db; contactIds: string[]; agentIds: string[]; slackOf: (i: number) => string } {
-  const db = migratedDb();
-  const now = Date.now();
-  const contactIds: string[] = [];
-  const agentIds: string[] = [];
-  const slackOf = (i: number) => `slack:U${String(i).padStart(7, "0")}`;
-  db.transaction(() => {
-    const person = db.prepare("INSERT INTO fleet_people (id, name, email, title, status, kind, trust, source, tags, created_at, updated_at) VALUES (?, ?, ?, 'Title', ?, ?, ?, 'owner', '[\"t\"]', ?, ?)");
-    const handle = db.prepare("INSERT INTO fleet_handles (handle, person_id, created_at) VALUES (?, ?, ?)");
-    for (let i = 0; i < store.LIMITS.people; i++) {
-      const id = `psn_${ulid(now + i)}`;
-      contactIds.push(id);
-      person.run(id, `Person ${i}`, `p${i}@example.com`, i % 17 === 0 ? "departed" : "active", i % 11 === 0 ? "outside_agent" : "person", (["unreviewed", "trusted", "limited", "blocked"] as const)[i % 4], now, now);
-      handle.run(slackOf(i), id, now);
-      handle.run(`buzz:${npubFromHex(i.toString(16).padStart(64, "0"))}`, id, now);
-    }
-    const agent = db.prepare("INSERT INTO fleet_agents (id, name, mode, status, owner_id, trust, first_seen, updated_at) VALUES (?, ?, 'free', 'active', ?, 'trusted', ?, ?)");
-    for (let i = 0; i < 500; i++) {
-      const id = `agt_${ulid(now + i)}`;
-      agentIds.push(id);
-      agent.run(id, `Agent ${i}`, contactIds[i] ?? null, now, now);
-    }
-    const team = db.prepare("INSERT INTO fleet_teams (id, name, description, tags, created_at, updated_at) VALUES (?, ?, '', '[]', ?, ?)");
-    const member = db.prepare("INSERT INTO fleet_members (team_id, kind, subject_id, role, created_at) VALUES (?, ?, ?, ?, ?)");
-    for (let t = 0; t < store.LIMITS.teams; t++) {
-      const id = `tm_${ulid(now + t)}`;
-      team.run(id, `Team ${t}`, now, now);
-      for (let k = 0; k < 10; k++) member.run(id, "person", contactIds[(t * 4 + k) % contactIds.length], k === 0 ? "lead" : "member", now);
-      for (let k = 0; k < 2; k++) member.run(id, "agent", agentIds[(t + k) % agentIds.length], "member", now);
-    }
-    db.prepare("UPDATE fleet_meta SET value = 1234 WHERE key = 'revision'").run();
-  });
-  return { db, contactIds, agentIds, slackOf };
-}
-
 /** Best of `runs` wall-clock milliseconds (a shared machine adds noise; the best run is the code's own cost). */
 const bestMs = (fn: () => void, runs = 3): number => {
   let best = Number.POSITIVE_INFINITY;
@@ -365,7 +306,8 @@ test("no agent operation writes trust: every agent op on a blocked contact leave
   const ctx = ctxOf(db, AGENT);
   for (const op of manifest.operations.filter((o) => (o as { audience?: string }).audience === "agent" && o.id !== "directory_feed")) {
     const h = (handlers as unknown as Record<string, { run(i: unknown, c: OpContext): Promise<unknown> }>)[op.id] as { run(i: unknown, c: OpContext): Promise<unknown> };
-    await h.run(op.id === "resolve_sender" ? { handle: "slack:UCY00001" } : op.id === "team_get" ? { team: s.support.id } : {}, ctx);
+    const input = op.id === "resolve_sender" ? { handle: "slack:UCY00001" } : op.id === "team_get" ? { team: s.support.id } : op.id === "review_request" ? { subject: { kind: "person", id: s.cy.id }, why: "check" } : {};
+    await h.run(input, ctx);
   }
   assert.equal(JSON.stringify(db.prepare("SELECT id, trust FROM fleet_people ORDER BY id").all()), before);
   assert.ok(before.includes('"blocked"'));
@@ -469,16 +411,17 @@ test("fleet_facts adds fleet.requester.trust (and trust inside fleet.requester);
   assert.deepEqual(Object.keys(ann).sort(), ["fleet.agentOwner", "fleet.agentTeams", "fleet.requester", "fleet.requester.trust", "fleet.requester.verified", "fleet.requesterTeams"]);
 });
 
-test("directory_get keeps the 0.1.x shape in this release (Rules 0.2.x still reads it): no trust, no kind", async () => {
+test("directory_get is lean since 0.2.1: names, titles, trust, teams, owner; no email, handles, tags, mode (deprecation: see CHANGELOG)", async () => {
   const db = migratedDb();
   seed(db);
   const out = (await handlers.directory_get.run({} as never, ctxOf(db, AGENT))) as Record<string, any>;
   assert.deepEqual(Object.keys(out).sort(), ["agents", "people", "revision", "teams", "unchanged"]);
-  assert.deepEqual(Object.keys(out.people[0]).sort(), ["email", "handles", "id", "name", "status", "tags", "teams", "title", "updatedAt"]);
-  assert.deepEqual(Object.keys(out.agents[0]).sort(), ["id", "mode", "name", "owner", "role", "status", "tags", "teams", "updatedAt"]);
+  assert.deepEqual(Object.keys(out.people[0]).sort(), ["id", "kind", "name", "status", "teams", "title", "trust", "updatedAt"]);
+  assert.deepEqual(Object.keys(out.agents[0]).sort(), ["id", "name", "owner", "role", "status", "teams", "trust", "updatedAt"]);
   assert.equal(validateAgainstSchema(manifestOp("directory_get").output, out as Json).ok, true);
-  // fire on bad: the released schema refuses the new members
-  assert.equal(validateAgainstSchema(manifestOp("directory_get").output, { ...out, people: [{ ...out.people[0], trust: "trusted" }] } as Json).ok, false);
+  // fire on bad: the schema refuses the old members
+  assert.equal(validateAgainstSchema(manifestOp("directory_get").output, { ...out, people: [{ ...out.people[0], email: "a@b.c" }] } as Json).ok, false);
+  assert.equal(validateAgainstSchema(manifestOp("directory_get").output, { ...out, agents: [{ ...out.agents[0], tags: [] }] } as Json).ok, false);
 });
 
 // ── migration 0002 ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -490,7 +433,7 @@ test("migration 0001 is unchanged (never edited after release)", () => {
 });
 
 test("migration 0002 on a 0.1.10-shaped database: old rows become trusted/owner/person, defaults are fail-closed, settings stored", () => {
-  assert.deepEqual(migrationFiles().map((m) => m.name), ["0001_init.sql", "0002_governance.sql"]);
+  assert.deepEqual(migrationFiles().map((m) => m.name).slice(0, 2), ["0001_init.sql", "0002_governance.sql"]);
   const raw = new DatabaseSync(":memory:");
   raw.exec("PRAGMA foreign_keys = ON;");
   raw.exec(migrationFiles(1)[0]?.sql ?? "");

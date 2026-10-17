@@ -26,6 +26,18 @@ import {
   type PersonSetOutput,
   type ResolveSenderInput,
   type ResolveSenderOutput,
+  type ReviewDismissInput,
+  type ReviewDismissOutput,
+  type ReviewGetInput,
+  type ReviewGetOutput,
+  type ReviewPolicySetInput,
+  type ReviewPolicySetOutput,
+  type ReviewRecordInput,
+  type ReviewRecordOutput,
+  type ReviewRequestInput,
+  type ReviewRequestOutput,
+  type ReviewsListInput,
+  type ReviewsListOutput,
   type TeamDeleteInput,
   type TeamDeleteOutput,
   type TeamGetInput,
@@ -38,6 +50,8 @@ import {
 import { factsAnswer } from "./facts.ts";
 import { assertFeedCaller, directoryFeed } from "./feed.ts";
 import { identitiesView } from "./identities.ts";
+import { leanDirectory, leanTeamGet, leanTeamsList } from "./lean.ts";
+import * as reviews from "./reviews.ts";
 import * as store from "./store.ts";
 
 export const manifest = JSON.parse(readFileSync(new URL("../tealbrick.manifest.json", import.meta.url), "utf8")) as AppDefinition["manifest"];
@@ -52,19 +66,19 @@ export const handlers = {
   // ── agent audience (read); directory_feed is for app callers only ──
   [OP.teamsList]: op<TeamsListInput, TeamsListOutput>({
     async run(input, ctx) {
-      return store.listTeams(ctx.db, input);
+      return leanTeamsList(ctx.db, input);
     },
   }),
   [OP.teamGet]: op<TeamGetInput, TeamGetOutput>({
     async run(input, ctx) {
-      return { team: store.getTeam(ctx.db, input.team) };
+      return { team: leanTeamGet(ctx.db, input.team) };
     },
   }),
   [OP.directoryGet]: op<DirectoryGetInput, DirectoryGetOutput>({
     async run(input, ctx) {
       const rev = store.revision(ctx.db);
       if (input.sinceRevision !== undefined && input.sinceRevision === rev) return { revision: rev, unchanged: true, teams: [], people: [], agents: [] };
-      return { ...store.directory(ctx.db), unchanged: false };
+      return leanDirectory(ctx.db);
     },
   }),
   [OP.directoryFeed]: op<DirectoryFeedInput, DirectoryFeedOutput>({
@@ -72,6 +86,13 @@ export const handlers = {
     async run(input, ctx) {
       assertFeedCaller(ctx.caller);
       return directoryFeed(ctx.db, input, (msg, fields) => ctx.log.warn(msg, fields));
+    },
+  }),
+  [OP.reviewRequest]: op<ReviewRequestInput, ReviewRequestOutput>({
+    // An agent asks; it can never set trust. A companion app may ask too (recorded as `system` with its instance id).
+    async run(input, ctx) {
+      const kind = ctx.caller.type === "agent" ? "agent" : ctx.caller.type === "app" ? "system" : "owner";
+      return { review: reviews.requestReview(ctx.db, { kind, id: ctx.caller.id }, input) };
     },
   }),
   [OP.resolveSender]: op<ResolveSenderInput, ResolveSenderOutput>({
@@ -118,6 +139,32 @@ export const handlers = {
       return { agent: store.setAgent(ctx.db, input) };
     },
   }),
+  [OP.reviewsList]: op<ReviewsListInput, ReviewsListOutput>({
+    async run(input, ctx) {
+      return reviews.listReviews(ctx.db, input);
+    },
+  }),
+  [OP.reviewGet]: op<ReviewGetInput, ReviewGetOutput>({
+    async run(input, ctx) {
+      return reviews.getReview(ctx.db, input);
+    },
+  }),
+  [OP.reviewRecord]: op<ReviewRecordInput, ReviewRecordOutput>({
+    // Idempotency is required by the manifest: the SDK replays a repeated key instead of recording twice.
+    async run(input, ctx) {
+      return { review: reviews.recordReview(ctx.db, ctx.caller.id, input) };
+    },
+  }),
+  [OP.reviewDismiss]: op<ReviewDismissInput, ReviewDismissOutput>({
+    async run(input, ctx) {
+      return { review: reviews.dismissReview(ctx.db, ctx.caller.id, input.id, input.why) };
+    },
+  }),
+  [OP.reviewPolicySet]: op<ReviewPolicySetInput, ReviewPolicySetOutput>({
+    async run(input, ctx) {
+      return { policy: reviews.setReviewPolicy(ctx.db, input) };
+    },
+  }),
   [OP.identitiesView]: op<IdentitiesViewInput, IdentitiesViewOutput>({
     // Owner only (person op). C88: never exposed to agents.
     async run(_input, ctx) {
@@ -140,7 +187,8 @@ export const definition: SdkAppDefinition = {
   events: {
     // needsAgentDirectory: the slice lists every workspace agent; the full list arrives on every change (SDK 0.1.13).
     async agentsChanged(agents, ctx) {
-      store.syncAgents(ctx.db, agents);
+      // one transaction: the agents are stored and a new agent gets its review request (when the policy says so)
+      ctx.db.transaction(() => reviews.requestForNewAgents(ctx.db, store.syncAgents(ctx.db, agents)));
     },
   },
 };

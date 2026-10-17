@@ -41,6 +41,8 @@ export interface TeamDetail extends Team {
 export interface Person {
   id: string;
   name: string;
+  kind: ContactKind;
+  trust: Trust;
   email: string | null;
   title: string;
   status: PersonStatus;
@@ -52,6 +54,7 @@ export interface Person {
 export interface Agent {
   id: string;
   name: string;
+  trust: Trust;
   mode: string;
   status: AgentStatus;
   owner: Ref | null;
@@ -76,7 +79,7 @@ export const LIMITS = { teams: 500, people: 2000, handlesPerPerson: 10 } as cons
 type Row = Record<string, unknown>;
 const iso = (ms: unknown) => new Date(Number(ms)).toISOString();
 const tags = (v: unknown): string[] => JSON.parse(String(v)) as string[];
-const fail = (code: string, message: string, status: number): never => {
+export const fail = (code: string, message: string, status: number): never => {
   throw new TbError(code, message, status);
 };
 
@@ -86,7 +89,7 @@ export function revision(db: Db): number {
   return Number(db.prepare("SELECT value FROM fleet_meta WHERE key = 'revision'").get()?.value ?? 0);
 }
 
-function bump(db: Db): void {
+export function bump(db: Db): void {
   db.prepare("UPDATE fleet_meta SET value = value + 1 WHERE key = 'revision'").run();
 }
 
@@ -143,6 +146,8 @@ function toPerson(db: Db, r: Row): Person {
   return {
     id,
     name: String(r.name),
+    kind: r.kind as ContactKind,
+    trust: r.trust as Trust,
     email: r.email === null ? null : String(r.email),
     title: String(r.title),
     status: r.status as PersonStatus,
@@ -158,6 +163,7 @@ function toAgent(db: Db, r: Row): Agent {
   return {
     id,
     name: String(r.name),
+    trust: r.trust as Trust,
     mode: String(r.mode),
     status: r.status as AgentStatus,
     owner: r.owner_id === null ? null : { id: String(r.owner_id), name: String(r.owner_name) },
@@ -421,14 +427,20 @@ export function setAgent(db: Db, input: { agent: string; owner?: string | null; 
  * events.agentsChanged (SDK 0.1.13): the FULL slice agent list (needsAgentDirectory = every workspace agent), once
  * after boot and on every slice whose agents differ. Listed agents are inserted or updated (re-add, rename, pause);
  * agents no longer listed are kept (owner, role, teams stay for a re-add) but marked removed. The revision moves only
- * when something changed.
+ * when something changed. Returns the agents that were never listed before (a re-add is not new).
  */
-export function syncAgents(db: Db, agents: readonly Pick<SliceAgent, "id" | "name" | "mode" | "status">[], now = Date.now()): void {
-  db.transaction(() => {
+export function syncAgents(db: Db, agents: readonly Pick<SliceAgent, "id" | "name" | "mode" | "status">[], now = Date.now()): { id: string; name: string }[] {
+  return db.transaction(() => {
     let changed = 0;
+    const known = new Set(db.prepare("SELECT id FROM fleet_agents").all().map((r) => String(r.id)));
+    const created: { id: string; name: string }[] = [];
     const listed = new Set<string>();
     for (const a of agents) {
       listed.add(a.id);
+      if (!known.has(a.id)) {
+        known.add(a.id);
+        created.push({ id: a.id, name: a.name });
+      }
       changed += db
         .prepare(
           `INSERT INTO fleet_agents (id, name, mode, status, trust, first_seen, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -441,6 +453,7 @@ export function syncAgents(db: Db, agents: readonly Pick<SliceAgent, "id" | "nam
       if (!listed.has(String(r.id))) changed += db.prepare("UPDATE fleet_agents SET status = 'removed', updated_at = ? WHERE id = ?").run(now, r.id).changes;
     }
     if (changed > 0) bump(db);
+    return created;
   });
 }
 
