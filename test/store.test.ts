@@ -2,9 +2,9 @@
 // the context-hook facts (tb.onBehalfOf requester, agent owner and teams).
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { isNpub, normalizeHandle, npubFromHex } from "@opt2-tealbrick/manifest";
 import { TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { factsFor } from "../src/facts.ts";
-import { isNpub, normalizeHandle, npubFromHex } from "../src/handles.ts";
 import * as store from "../src/store.ts";
 import { AGENT_A, AGENT_B, migratedDb, NOSTR } from "./helpers.ts";
 
@@ -91,9 +91,9 @@ test("members, agent owner and resolve_sender for a Buzz npub (J3 sender → per
   assert.equal(store.getTeam(db, sup.id).members.length, 2, "a refused members_set changes nothing");
 
   const r = store.resolveSender(db, `buzz:${NOSTR.hex}`);
-  assert.deepEqual(r, { found: true, person: { id: ann.id, name: "Ann", status: "active" }, teams: [{ id: sup.id, name: "Support", role: "lead" }] });
-  assert.deepEqual(store.resolveSender(db, "slack:U999"), { found: false, person: null, teams: [] });
-  assert.deepEqual(store.resolveSender(db, "garbage"), { found: false, person: null, teams: [] });
+  assert.deepEqual(r, { found: true, contact: { id: ann.id, name: "Ann", kind: "person", status: "active", trust: "trusted" }, teams: [{ id: sup.id, name: "Support", role: "lead" }] });
+  assert.deepEqual(store.resolveSender(db, "slack:U999"), { found: false, contact: null, teams: [] });
+  assert.deepEqual(store.resolveSender(db, "garbage"), { found: false, contact: null, teams: [] });
 
   const a = store.setAgent(db, { agent: AGENT_A.id, owner: ann.id, role: "triage" });
   assert.deepEqual(a.owner, { id: ann.id, name: "Ann" });
@@ -157,12 +157,13 @@ test("fleet_facts: agent owner/teams, requester from tb.onBehalfOf (channel_send
   const plain = call({ type: "agent", id: AGENT_A.id });
   assert.deepEqual(plain, {
     "fleet.requester": null,
+    "fleet.requester.trust": null,
     "fleet.requesterTeams": [],
     "fleet.agentOwner": { id: ann.id, name: "Ann" },
     "fleet.agentTeams": [{ id: sup.id, name: "Support", role: "lead" }],
   });
   const viaBuzz = call({ type: "agent", id: AGENT_B.id }, obo("channel_sender", `buzz:${NOSTR.npub}`));
-  assert.deepEqual(viaBuzz["fleet.requester"], { kind: "person", id: ann.id, name: "Ann", verified: false });
+  assert.deepEqual(viaBuzz["fleet.requester"], { kind: "person", id: ann.id, name: "Ann", trust: "trusted", verified: false });
   assert.deepEqual(viaBuzz["fleet.requesterTeams"], [{ id: sup.id, name: "Support", role: "member" }]);
   assert.deepEqual(viaBuzz["fleet.agentTeams"], [{ id: ops.id, name: "Ops", role: "member" }]);
   assert.equal(call({ type: "agent", id: AGENT_B.id }, obo("person", ann.id, true))["fleet.requester"]?.verified, true);

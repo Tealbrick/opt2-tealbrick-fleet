@@ -3,9 +3,9 @@
 // Harvested from v1 (labs/organization-plane store/types: person + membership subjects "person" | "agent";
 // portal Team / Membership / AgentGrant / ExternalIdentity), trimmed to one workspace = one tenant: no companies,
 // tenants, roles-per-tenant or license; people are directory entries, never sign-ins (C84).
-import { ulid } from "@opt2-tealbrick/manifest";
+import { type HandleChannel, handleChannel, normalizeHandle, ulid } from "@opt2-tealbrick/manifest";
 import { type Db, type SliceAgent, TbError } from "@opt2-tealbrick/miniapp-sdk";
-import { type Channel, channelOf, normalizeHandle } from "./handles.ts";
+import { type ContactKind, defaultTrust, type Source, type Trust } from "./trust.ts";
 
 export type Role = "member" | "lead";
 export type PersonStatus = "active" | "departed";
@@ -204,30 +204,45 @@ export function directory(db: Db): Directory {
   };
 }
 
+export interface Contact {
+  id: string;
+  name: string;
+  kind: ContactKind;
+  status: PersonStatus;
+  trust: Trust;
+}
+
 export interface Resolved {
   found: boolean;
-  person: { id: string; name: string; status: PersonStatus } | null;
+  contact: Contact | null;
   teams: TeamRef[];
 }
 
-/** Handle → person + teams. A departed person is found but has no teams (facts narrow, never widen). */
+const toContact = (r: Row): Contact => ({ id: String(r.id), name: String(r.name), kind: r.kind as ContactKind, status: r.status as PersonStatus, trust: r.trust as Trust });
+
+/** A contact has team facts only while it is active and not blocked (facts narrow, never widen). */
+export const hasTeamFacts = (c: Pick<Contact, "status" | "trust">): boolean => c.status === "active" && c.trust !== "blocked";
+
+/** Handle → contact (a person or an outside agent) with its trust + teams. A departed or blocked contact is found but has no teams. */
 export function resolveSender(db: Db, handle: string): Resolved {
   const h = normalizeHandle(handle);
-  const r = h ? db.prepare("SELECT p.id, p.name, p.status FROM fleet_handles h JOIN fleet_people p ON p.id = h.person_id WHERE h.handle = ?").get(h) : undefined;
-  if (!r) return { found: false, person: null, teams: [] };
-  const person = { id: String(r.id), name: String(r.name), status: r.status as PersonStatus };
-  return { found: true, person, teams: person.status === "active" ? teamsOf(db, "person", person.id) : [] };
+  const r = h
+    ? db.prepare("SELECT p.id, p.name, p.status, p.kind, p.trust FROM fleet_handles h JOIN fleet_people p ON p.id = h.person_id WHERE h.handle = ?").get(h)
+    : undefined;
+  if (!r) return { found: false, contact: null, teams: [] };
+  const contact = toContact(r);
+  return { found: true, contact, teams: hasTeamFacts(contact) ? teamsOf(db, "person", contact.id) : [] };
 }
 
 export interface Identities {
-  people: { handle: string; channel: Channel; person: Ref }[];
+  people: { handle: string; channel: HandleChannel; person: Ref }[];
 }
 
 export function peopleHandles(db: Db): Identities["people"] {
   return db
     .prepare("SELECT h.handle, p.id, p.name FROM fleet_handles h JOIN fleet_people p ON p.id = h.person_id ORDER BY p.name COLLATE NOCASE, h.handle")
     .all()
-    .map((r) => ({ handle: String(r.handle), channel: channelOf(String(r.handle)), person: { id: String(r.id), name: String(r.name) } }));
+    .map((r) => ({ handle: String(r.handle), channel: handleChannel(String(r.handle)) as HandleChannel, person: { id: String(r.id), name: String(r.name) } }));
 }
 
 // ── writes (owner, person ops) ─────────────────────────────────────────────────────────────────────────────────
@@ -279,6 +294,10 @@ export function deleteTeam(db: Db, id: string): boolean {
 
 export interface PersonInput {
   id?: string;
+  /** Not an operation input yet (person_set stays as released); the store is ready for outside agents. */
+  kind?: ContactKind;
+  /** Who creates the entry (default owner). Decides the start trust (`defaultTrust`); ignored on update. */
+  source?: Source;
   name: string;
   email?: string | null;
   title?: string;
@@ -301,11 +320,12 @@ export function setPerson(db: Db, input: PersonInput, now = Date.now()): Person 
     let id = input.id;
     if (id) {
       const old = db.prepare("SELECT * FROM fleet_people WHERE id = ?").get(id) ?? fail("person_not_found", "no person with this id", 404);
-      db.prepare("UPDATE fleet_people SET name = ?, email = ?, title = ?, status = ?, tags = ?, updated_at = ? WHERE id = ?").run(
+      db.prepare("UPDATE fleet_people SET name = ?, email = ?, title = ?, status = ?, kind = ?, tags = ?, updated_at = ? WHERE id = ?").run(
         name,
         input.email === undefined ? old.email : input.email,
         input.title ?? String(old.title),
         input.status ?? String(old.status),
+        input.kind ?? String(old.kind),
         JSON.stringify(cleanTags(input.tags) ?? tags(old.tags)),
         now,
         id,
@@ -314,12 +334,16 @@ export function setPerson(db: Db, input: PersonInput, now = Date.now()): Person 
       const count = Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_people").get()?.n);
       if (count >= LIMITS.people) fail("limit_reached", `a workspace has at most ${LIMITS.people} people`, 409);
       id = `psn_${ulid(now)}`;
-      db.prepare("INSERT INTO fleet_people (id, name, email, title, status, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
+      const source = input.source ?? "owner";
+      db.prepare("INSERT INTO fleet_people (id, name, email, title, status, kind, trust, source, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
         id,
         name,
         input.email ?? null,
         input.title ?? "",
         input.status ?? "active",
+        input.kind ?? "person",
+        defaultTrust(source),
+        source,
         JSON.stringify(cleanTags(input.tags) ?? []),
         now,
         now,
@@ -400,11 +424,11 @@ export function syncAgents(db: Db, agents: readonly Pick<SliceAgent, "id" | "nam
       listed.add(a.id);
       changed += db
         .prepare(
-          `INSERT INTO fleet_agents (id, name, mode, status, first_seen, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+          `INSERT INTO fleet_agents (id, name, mode, status, trust, first_seen, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (id) DO UPDATE SET name = excluded.name, mode = excluded.mode, status = excluded.status, updated_at = excluded.updated_at
            WHERE fleet_agents.name <> excluded.name OR fleet_agents.mode <> excluded.mode OR fleet_agents.status <> excluded.status`,
         )
-        .run(a.id, a.name, a.mode, a.status, now, now).changes;
+        .run(a.id, a.name, a.mode, a.status, defaultTrust("owner"), now, now).changes;
     }
     for (const r of db.prepare("SELECT id FROM fleet_agents WHERE status <> 'removed'").all()) {
       if (!listed.has(String(r.id))) changed += db.prepare("UPDATE fleet_agents SET status = 'removed', updated_at = ? WHERE id = ?").run(now, r.id).changes;
@@ -422,8 +446,16 @@ export function agentFacts(db: Db, id: string): { owner: Ref | null; teams: Team
   return { owner: r.owner_id === null ? null : { id: String(r.owner_id), name: String(r.owner_name) }, teams: teamsOf(db, "agent", id) };
 }
 
-/** An active directory person by Fleet id → teams; departed or unknown → null. */
-export function personFacts(db: Db, id: string): { person: Ref; teams: TeamRef[] } | null {
-  const r = db.prepare("SELECT id, name FROM fleet_people WHERE id = ? AND status = 'active'").get(id);
-  return r ? { person: { id: String(r.id), name: String(r.name) }, teams: teamsOf(db, "person", id) } : null;
+/** The trust of a workspace agent that is not removed; null for an unknown or removed agent. */
+export function agentTrust(db: Db, id: string): Trust | null {
+  const r = db.prepare("SELECT trust FROM fleet_agents WHERE id = ? AND status <> 'removed'").get(id);
+  return r ? (r.trust as Trust) : null;
+}
+
+/** An active directory contact by Fleet id → trust + teams (none while blocked); departed or unknown → null. */
+export function personFacts(db: Db, id: string): { contact: Contact; teams: TeamRef[] } | null {
+  const r = db.prepare("SELECT id, name, status, kind, trust FROM fleet_people WHERE id = ? AND status = 'active'").get(id);
+  if (!r) return null;
+  const contact = toContact(r);
+  return { contact, teams: hasTeamFacts(contact) ? teamsOf(db, "person", id) : [] };
 }

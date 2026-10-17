@@ -1,4 +1,4 @@
-/* Organization Plane: app-specific layout only (team cards, person and handle rows). The page layout helpers
+/* Governance (product id fleet): app-specific layout only (team cards, person and handle rows). The page layout helpers
    (.page-head, .ruled, .item, .kv) come from pages.css, everything else from the kit. Tokens only. */
 
 .head-text { gap: var(--tb-s2); }
