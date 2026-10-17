@@ -2,6 +2,28 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
+## 0.2.1 - Unreleased
+
+Governance, sprint S2 (reviews) and S2b (lean agent views, review UI). Decision C166; refs C230.
+
+### Changed
+- BREAKING for agents (privacy fix FLT-01 / APP-06 / C88, handbook §9.6): `teams_list`, `team_get` and `directory_get` are lean. Removed from the answers: `email`, `handles`, `tags` and the agent `mode`. Deprecation note: the fields were announced as removed in 0.2.0 (README and CHANGELOG: "lean in 0.2.1"); there is no second transition window, because the removed fields are the leak the fix closes, and Rules 0.3.0 no longer reads `directory_get` (it reads `directory_feed`). Kept: names, titles, team description, roles, team structure, owner (id and name) and trust. Added: `kind` and `trust` on people, `trust` on agents, and the member kind `outside_agent`. Lists of a subject's teams hold at most 50 entries. The `tag` filter of `teams_list` still works; tags are never shown.
+- `overview_get`, `person_set` and `agent_set` (owner views) show `kind` and `trust`. `person_set` still cannot set either.
+- Pages: Trust reviews is new (second tab); People and Agents show the trust state.
+- Dependencies: ui 0.2.4 -> 0.3.0.
+
+### Added
+- Agent op `review_request`: an agent asks the owner to review an agent, a person or an outside agent, and says why. One open request per subject (asking again returns it with `duplicate: true`); at most 20 open requests per agent (`too_many_requests`, 429). An unknown handle becomes an `unreviewed` directory entry. A companion app may ask too (recorded as a `system` request). The agent can never set trust.
+- Person ops: `reviews_list` (open requests, history, what is due, the schedule), `review_get` (a review and the subject's snapshot now; or a subject), `review_record` (verdict `trusted`, `limited` or `blocked` with a reason; refuses `snapshot_stale`, 409, when the subject changed since the owner looked; sets the trust and closes the open requests of the subject in one write), `review_dismiss`, `review_policy_set` (agent days, contact days, review new agents, review changed access).
+- Migration 0003: `fleet_reviews` (append-only: triggers refuse any change to a closed review and any delete, `review_append_only`) and `fleet_review_flags`.
+- Due dates from the schedule (agents 90 days, people and outside agents 180 days): a subject that was never reviewed is due after the schedule counted from when it was added (an `unreviewed` one at once); after a verdict the next date is the owner's choice or the schedule. A new agent opens one review request (requested by `system`) when "review new agents" is on (default on).
+- The review as a four-step flow (Subject, Verdict, Contact rule, Confirm) on the approved mockup.
+
+### Not in this release
+- Contact rules (`proposal_send`): step 3 of the review says so and is skipped. The topology page, the access copy from Core (`access` is empty and `source` is `directory_only` in every snapshot; G-2) and Connect contacts (G-5). "Review changed access" is stored and has no effect until Core gives apps the access data.
+- `org` and `relationship` on people (in the design draft) are not built; `directory_get` has no `org`.
+- Deviations from the draft manifest: `reviews_list` also returns `due` (the subjects due now, each with its current snapshot), `openCount` and `policy`; `review_get` takes an `id` or a `subject` and `review` can be null; `teams` caps are 500 teams, 2000 people, 2000 agents.
+
 ## 0.2.0 - Unreleased
 
 Governance, sprint S1 "contract first" (decision C166; refs C230). The product id stays `fleet`.
