@@ -285,13 +285,13 @@ test("trust defaults: the owner's entries start trusted, an agent's entries star
   db.prepare("UPDATE fleet_people SET trust = 'limited' WHERE id = ?").run(byAgent.id);
   store.setPerson(db, { id: byAgent.id, name: "Renamed", title: "x" });
   assert.deepEqual([trustOf(byAgent.id), sourceOf(byAgent.id)], ["limited", "agent"]);
-  // workspace agents arrive from the slice (the owner created them in Portal): trusted; a re-sync keeps a changed trust
+  // workspace agents arrive from the slice as UNREVIEWED (fail closed, like a contact an agent added); a re-sync keeps a changed trust
   store.syncAgents(db, [AGENT_A]);
   db.prepare("UPDATE fleet_agents SET trust = 'blocked' WHERE id = ?").run(AGENT_A.id);
   store.syncAgents(db, [{ ...AGENT_A, name: "Agent A renamed" }]);
   assert.equal(String(db.prepare("SELECT trust FROM fleet_agents WHERE id = ?").get(AGENT_A.id)?.trust), "blocked");
   store.syncAgents(db, [AGENT_A, AGENT_B]);
-  assert.equal(String(db.prepare("SELECT trust FROM fleet_agents WHERE id = ?").get(AGENT_B.id)?.trust), "trusted");
+  assert.equal(String(db.prepare("SELECT trust FROM fleet_agents WHERE id = ?").get(AGENT_B.id)?.trust), "unreviewed");
   // fire on bad: the database refuses a trust value outside the four states
   assert.throws(() => db.prepare("UPDATE fleet_people SET trust = 'vip' WHERE id = ?").run(viaOp.id));
   assert.throws(() => db.prepare("UPDATE fleet_agents SET trust = 'vip' WHERE id = ?").run(AGENT_A.id));

@@ -2,12 +2,14 @@
 // case with the exact error code and HTTP status. The append-only rule is tested at the database (triggers of 0003).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { validateAgainstSchema } from "@opt2-tealbrick/manifest";
+import { ulid, validateAgainstSchema } from "@opt2-tealbrick/manifest";
 import type { Db, Json, OpContext } from "@opt2-tealbrick/miniapp-sdk";
 import { definition, handlers, manifest } from "../src/app.ts";
+import { factsFor } from "../src/facts.ts";
 import { directoryFeed } from "../src/feed.ts";
 import * as r from "../src/reviews.ts";
 import * as store from "../src/store.ts";
+import { cleanText } from "../src/text.ts";
 import { checkFeed } from "./feed-contract.ts";
 import { AGENT_A, AGENT_B, migratedDb, NOSTR } from "./helpers.ts";
 import { seed } from "./seed.ts";
@@ -67,20 +69,20 @@ test("review_request: an agent asks; it never sets trust; answers valid against 
   assert.equal(audience("review_request"), "agent");
 });
 
-test("review_request guards: dedup per subject, 20 open per agent, caller, subject, handle, why (exact codes)", async () => {
+test("review_request guards: dedup per requester, 20 open per agent, subject, handle, why, text (exact codes)", async () => {
   const db = migratedDb();
   const s = seed(db);
   const ask = (input: object, c = agentCtx(db)) => run("review_request", input, c);
 
-  // dedup: the same subject again (also from another agent) returns the open request with duplicate true
+  // dedup is per (requester, subject): the same agent gets its own request back; another agent gets ITS OWN new request
   const first = await ask({ subject: { kind: "person", id: s.cy.id }, why: "one" });
   const again = await ask({ subject: { kind: "person", id: s.cy.id }, why: "two" });
   const other = await ask({ subject: { kind: "person", id: s.cy.id }, why: "three" }, agentCtx(db, AGENT_B.id));
   assert.deepEqual([again.review.duplicate, again.review.id], [true, first.review.id]);
-  assert.deepEqual([other.review.duplicate, other.review.id], [true, first.review.id]);
-  assert.equal(count(db, `SELECT COUNT(*) AS n FROM fleet_reviews WHERE subject_id = '${s.cy.id}'`), 1);
+  assert.deepEqual([other.review.duplicate, other.review.id === first.review.id], [false, false], "no other requester's id or time leaks");
+  assert.equal(count(db, `SELECT COUNT(*) AS n FROM fleet_reviews WHERE subject_id = '${s.cy.id}'`), 2);
+  assert.equal((await ask({ subject: { kind: "person", id: s.cy.id }, why: "four" }, agentCtx(db, AGENT_B.id))).review.id, other.review.id);
 
-  // who may ask
   // a companion app may ask too: recorded as `system` with its instance id (never as an agent); trust is still not touched
   const app = ctxOf(db, { type: "app", id: "ins_01J0000000000000000000000R", name: "r", mode: null });
   assert.equal(await outcome(() => ask({ subject: { kind: "person", id: s.bo.id }, why: "Rules saw odd traffic" }, app)), "ok");
@@ -94,28 +96,14 @@ test("review_request guards: dedup per subject, 20 open per agent, caller, subje
   assert.equal(await outcome(() => ask({ subject: { kind: "person", id: s.bot.id }, why: "x" })), "subject_not_found 404", "an outside agent asked about as a person");
   assert.equal(await outcome(() => ask({ subject: { kind: "outside_agent", id: s.bot.id }, why: "x" })), "ok");
   assert.equal(await outcome(() => ask({ subject: { kind: "agent" }, why: "x" })), "input_invalid 400");
+  assert.equal(await outcome(() => ask({ subject: { kind: "agent", handle: "slack:UXYZ00001" }, why: "x" })), "input_invalid 400", "a handle is not an agent subject");
   assert.equal(await outcome(() => ask({ subject: { kind: "person" }, why: "x" })), "input_invalid 400");
   assert.equal(await outcome(() => ask({ subject: { kind: "person", handle: "email:a@b.c" }, why: "x" })), "handle_invalid 400");
-  assert.equal(await outcome(() => ask({ subject: { kind: "person", handle: `buzz:npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w7` }, why: "x" })), "handle_invalid 400", "a bad checksum");
+  assert.equal(await outcome(() => ask({ subject: { kind: "person", handle: "buzz:npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w7" }, why: "x" })), "handle_invalid 400", "a bad checksum");
   assert.equal(await outcome(() => ask({ subject: { kind: "person", id: s.ann.id }, why: "   " })), "input_invalid 400");
+  assert.equal(await outcome(() => ask({ subject: { kind: "person", id: s.ann.id }, why: "\u202e\u200b\u0007" })), "input_invalid 400", "only control and bidi characters is empty");
 
-  // an unknown handle becomes an UNREVIEWED entry (source agent); a known handle does not create one
-  const before = count(db, "SELECT COUNT(*) AS n FROM fleet_people");
-  const known = await ask({ subject: { kind: "person", handle: `buzz:${NOSTR.hex}` }, why: "who is this" });
-  assert.equal(count(db, "SELECT COUNT(*) AS n FROM fleet_people"), before, "a known handle: no new entry");
-  assert.equal(known.review.duplicate, false);
-  const rev = store.revision(db);
-  const fresh = await ask({ subject: { kind: "outside_agent", handle: "slack:UNEW00001", name: "Brightline intake" }, why: "It wants slots." });
-  const created = db.prepare("SELECT p.id, p.kind, p.trust, p.source, p.name FROM fleet_people p JOIN fleet_handles h ON h.person_id = p.id WHERE h.handle = 'slack:UNEW00001'").get();
-  assert.deepEqual({ ...created, id: "x" }, { id: "x", kind: "outside_agent", trust: "unreviewed", source: "agent", name: "Brightline intake" });
-  assert.ok(store.revision(db) > rev, "a new entry moves the revision (the feed changes)");
-  assert.equal(fresh.review.duplicate, false);
-  const feed = directoryFeed(db, {});
-  assert.equal(checkFeed(feed).ok, true);
-  assert.equal(!feed.unchanged && feed.contacts.find((c) => c.id === created?.id)?.trust, "unreviewed");
-  assert.equal((await ask({ subject: { kind: "outside_agent", handle: "slack:UNEW00001" }, why: "again" })).review.duplicate, true, "the same handle again: the open request");
-
-  // cap: 20 open requests per agent. Agent B has 1 already (it asked as `other`? no, that was a duplicate). Fill agent B.
+  // cap: 20 open requests per requester
   const b = agentCtx(db, AGENT_B.id);
   const open = (id: string) => count(db, `SELECT COUNT(*) AS n FROM fleet_reviews WHERE requested_by_id = '${id}' AND status = 'requested'`);
   while (open(AGENT_B.id) < r.MAX_OPEN_PER_AGENT) {
@@ -126,12 +114,95 @@ test("review_request guards: dedup per subject, 20 open per agent, caller, subje
   const extra = store.setPerson(db, { name: "One too many" });
   assert.equal(await outcome(() => ask({ subject: { kind: "person", id: extra.id }, why: "21st" }, b)), "too_many_requests 429");
   assert.equal(open(AGENT_B.id), 20, "nothing was written");
-  const ghosts = count(db, "SELECT COUNT(*) AS n FROM fleet_people WHERE name = 'ghost'");
-  assert.equal(await outcome(() => ask({ subject: { kind: "person", handle: "slack:UGHOST001", name: "ghost" }, why: "21st via a new handle" }, b)), "too_many_requests 429");
-  assert.equal(count(db, "SELECT COUNT(*) AS n FROM fleet_people WHERE name = 'ghost'"), ghosts, "a refused request leaves no directory entry behind");
-  // quiet: at the cap, asking about a subject that has an open request still answers (duplicate), and another agent is not blocked
+  assert.equal(await outcome(() => ask({ subject: { kind: "person", handle: "slack:UGHOST001", name: "ghost" }, why: "21st via a handle" }, b)), "too_many_requests 429");
+  // quiet: at the cap, asking about a subject that has an own open request still answers (duplicate), and another agent is not blocked
   assert.equal(await outcome(() => ask({ subject: { kind: "person", id: s.cy.id }, why: "dup" }, b)), "ok");
   assert.equal(await outcome(() => ask({ subject: { kind: "person", id: extra.id }, why: "A can" })), "ok");
+});
+
+test("review_request stores untrusted text: control and bidi characters are removed from the why and from names", async () => {
+  const db = migratedDb();
+  const s = seed(db);
+  const out = await run("review_request", { subject: { kind: "person", id: s.cy.id }, why: "Pay\u202eevil.exe\u2066 now\u0000\u200b\nplease  \t ok" }, agentCtx(db));
+  assert.equal(String(db.prepare("SELECT requested_why AS w FROM fleet_reviews WHERE id = ?").get(out.review.id)?.w), "Payevil.exe now please ok");
+  const named = await run("review_request", { subject: { kind: "outside_agent", handle: "slack:UBIDI0001", name: "Bright\u202eline\u2029 intake" }, why: "x" }, agentCtx(db));
+  assert.equal(String(db.prepare("SELECT subject_name AS n FROM fleet_reviews WHERE id = ?").get(named.review.id)?.n), "Brightline intake");
+  assert.equal(cleanText("a\u202eb\u2066c\ufeffd\u00ade"), "abcde");
+  assert.equal(cleanText("emoji \u{1F44D}\ufe0f ok"), "emoji \u{1F44D}\ufe0f ok", "ordinary text and emoji stay");
+  // the owner's reason and dismissal text are cleaned the same way
+  const rec = record(db, { kind: "person", id: s.cy.id }, "limited", { reason: "ok\u202e\u200b" });
+  assert.equal(rec.reason, "ok");
+});
+
+// ── deferred creation: an agent never creates a directory entry ───────────────────────────────────────────────────
+
+test("an unknown handle creates NO directory entry; the owner adds it with a verdict (handle leak, squatting, cap fill-up)", async () => {
+  const db = migratedDb();
+  seed(db);
+  const people = () => count(db, "SELECT COUNT(*) AS n FROM fleet_people");
+  const handlesN = () => count(db, "SELECT COUNT(*) AS n FROM fleet_handles");
+  const rev = store.revision(db);
+  const before = [people(), handlesN()];
+
+  // (1) cap fill-up: 20 requests about 20 new handles fill the cap and add nothing to the directory
+  for (let i = 0; i < r.MAX_OPEN_PER_AGENT; i++) assert.equal(await outcome(() => run("review_request", { subject: { kind: "person", handle: `slack:UFILL${String(i).padStart(4, "0")}` }, why: "x" }, agentCtx(db))), "ok");
+  assert.equal(await outcome(() => run("review_request", { subject: { kind: "person", handle: "slack:UFILL9999" }, why: "21st" }, agentCtx(db))), "too_many_requests 429");
+  assert.deepEqual([people(), handlesN()], before, "the directory did not grow");
+  assert.equal(store.revision(db), rev, "and the revision did not move");
+  assert.equal(directoryFeed(db, {}).unchanged, false);
+  const feed = directoryFeed(db, {});
+  assert.ok(!feed.unchanged && feed.contacts.every((c) => !c.handles.some((h) => h.startsWith("slack:UFILL"))), "the feed does not carry them");
+  assert.equal(checkFeed(feed).ok, true);
+
+  // (2) squatting: the handle stays free; the owner can still give it to the real person
+  const squat = await run("review_request", { subject: { kind: "person", handle: "slack:UREAL0001", name: "CEO" }, why: "It is the CEO" }, agentCtx(db, AGENT_B.id));
+  assert.equal(db.prepare("SELECT 1 FROM fleet_handles WHERE handle = 'slack:UREAL0001'").get(), undefined);
+  const real = store.setPerson(db, { name: "Real person", handles: ["slack:UREAL0001"] });
+  assert.equal(store.resolveSender(db, "slack:UREAL0001").contact?.id, real.id, "resolve_sender finds the person the owner added");
+  assert.equal(store.resolveSender(db, "slack:UFILL0000").found, false, "an asked-about handle is still unknown to resolve_sender and the hook");
+  // the request about the now-known handle resolves to the real entry; the verdict goes to it and answers the request
+  const got = await run("review_get", { id: squat.review.id }, ownerCtx(db));
+  assert.equal(got.current.name, "Real person");
+  assert.match(got.current.digest, /^[0-9a-f]{64}$/);
+  const done = await run("review_record", { subject: { kind: "person", handle: "slack:UREAL0001" }, verdict: "trusted", reason: "Known", snapshotDigest: (await run("review_get", { subject: { kind: "person", handle: "slack:UREAL0001" } }, ownerCtx(db))).current.digest }, ownerCtx(db));
+  assert.equal(done.review.subject.id, real.id);
+  assert.equal(String(db.prepare("SELECT status FROM fleet_reviews WHERE id = ?").get(squat.review.id)?.status), "done", "the pending request is answered");
+  assert.equal(trustOf(db, "fleet_people", real.id), "trusted");
+
+  // (3) handle leak: a known and an unknown handle answer the same way, and neither shows anything of the entry
+  const known = await run("review_request", { subject: { kind: "person", handle: `buzz:${NOSTR.hex}` }, why: "who" }, agentCtx(db, AGENT_B.id));
+  const unknown = await run("review_request", { subject: { kind: "person", handle: "slack:UNKNOWN001" }, why: "who" }, agentCtx(db, AGENT_B.id));
+  assert.deepEqual(Object.keys(known.review).sort(), Object.keys(unknown.review).sort());
+  assert.deepEqual([known.review.status, known.review.duplicate, unknown.review.status, unknown.review.duplicate], ["requested", false, "requested", false]);
+  const knownAgain = await run("review_request", { subject: { kind: "person", handle: `buzz:${NOSTR.hex}` }, why: "again" }, agentCtx(db, AGENT_B.id));
+  const unknownAgain = await run("review_request", { subject: { kind: "person", handle: "slack:UNKNOWN001" }, why: "again" }, agentCtx(db, AGENT_B.id));
+  assert.deepEqual([knownAgain.review.duplicate, unknownAgain.review.duplicate], [true, true]);
+  assert.ok(!JSON.stringify([known, unknown, knownAgain, unknownAgain]).includes("slack:"), "no handle in any answer");
+  assert.deepEqual([...people().toString()].length > 0, true);
+
+  // the owner sees the request with the handle, and records "add as limited": the entry is created now
+  const list = await run("reviews_list", { status: "open" }, ownerCtx(db));
+  const pend = list.reviews.find((x: any) => x.subjectHandle === "slack:UNKNOWN001");
+  assert.deepEqual([pend.subject.id, pend.subject.kind, pend.requestedBy.kind], ["", "person", "agent"]);
+  assert.equal(valid("reviews_list", list), true);
+  const view = await run("review_get", { subject: { kind: "person", handle: "slack:UNKNOWN001" } }, ownerCtx(db));
+  assert.deepEqual([view.review, view.current.status, view.current.trust, view.current.handles, view.current.name], [null, "pending", "unreviewed", ["slack:UNKNOWN001"], "slack:UNKNOWN001"]);
+  assert.equal(valid("review_get", view), true);
+  const n = people();
+  const rec = await run("review_record", { subject: { kind: "person", handle: "slack:UNKNOWN001", name: "  Brightline\u202e intake " }, verdict: "limited", reason: "Partner bot.", snapshotDigest: view.current.digest, request: pend.id }, ownerCtx(db));
+  assert.equal(valid("review_record", rec), true);
+  assert.equal(people(), n + 1);
+  const added = db.prepare("SELECT p.id, p.name, p.kind, p.trust, p.source FROM fleet_people p JOIN fleet_handles h ON h.person_id = p.id WHERE h.handle = 'slack:UNKNOWN001'").get();
+  assert.deepEqual({ ...added, id: "x" }, { id: "x", name: "Brightline intake", kind: "person", trust: "limited", source: "agent" });
+  assert.equal(rec.review.subject.id, added?.id);
+  assert.equal(store.resolveSender(db, "slack:UNKNOWN001").contact?.trust, "limited");
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM fleet_reviews WHERE status = 'requested' AND subject_handle = 'slack:UNKNOWN001'"), 0, "both agents' pending requests are closed");
+  // recording against a pending handle needs an open request, and a stale picture is refused
+  assert.equal(await outcome(() => run("review_get", { subject: { kind: "person", handle: "slack:UNEVER0001" } }, ownerCtx(db))), "subject_not_found 404");
+  const view2 = await run("review_get", { subject: { kind: "outside_agent", handle: "slack:UFILL0001" } }, ownerCtx(db));
+  await run("review_request", { subject: { kind: "outside_agent", handle: "slack:UFILL0001" }, why: "late" }, agentCtx(db, AGENT_B.id));
+  assert.equal(await outcome(() => run("review_record", { subject: { kind: "outside_agent", handle: "slack:UFILL0001" }, verdict: "blocked", reason: "x", snapshotDigest: "0".repeat(64) }, ownerCtx(db))), "snapshot_stale 409");
+  assert.equal(view2.current.status, "pending");
 });
 
 // ── review_record (owner) ───────────────────────────────────────────────────────────────────────────────────────
@@ -141,7 +212,7 @@ test("review_record: the verdict sets trust, closes the open requests, keeps the
   const s = seed(db);
   const ask = await run("review_request", { subject: { kind: "person", id: s.cy.id }, why: "It wrote to me." }, agentCtx(db));
   const askB = await run("review_request", { subject: { kind: "person", id: s.cy.id }, why: "me too" }, agentCtx(db, AGENT_B.id));
-  assert.equal(askB.review.duplicate, true);
+  assert.equal(askB.review.duplicate, false, "another requester gets its own request");
   const rev = store.revision(db);
   const got = await run("review_get", { subject: { kind: "person", id: s.cy.id } }, ownerCtx(db));
   assert.equal(got.review, null, "never reviewed");
@@ -160,9 +231,11 @@ test("review_record: the verdict sets trust, closes the open requests, keeps the
   assert.ok(store.revision(db) > rev, "trust is in the feed: the revision moves");
   const feed = directoryFeed(db, {});
   assert.equal(!feed.unchanged && feed.contacts.find((c) => c.id === s.cy.id)?.trust, "limited");
-  assert.equal(count(db, "SELECT COUNT(*) AS n FROM fleet_reviews WHERE status = 'requested'"), 0, "every open request of the subject is closed in the same write");
-  const answered = db.prepare("SELECT status, verdict, answered_by FROM fleet_reviews WHERE id = ?").get(ask.review.id);
-  assert.deepEqual({ ...answered }, { status: "done", verdict: "limited", answered_by: rv.id });
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM fleet_reviews WHERE status = 'requested'"), 0, "every open request of the subject (both agents') is closed in the same write");
+  for (const id of [ask.review.id, askB.review.id]) {
+    const answered = db.prepare("SELECT status, verdict, answered_by, snapshot_digest FROM fleet_reviews WHERE id = ?").get(id);
+    assert.deepEqual({ ...answered }, { status: "done", verdict: "limited", answered_by: rv.id, snapshot_digest: got.current.digest });
+  }
   // history shows the verdict row once
   const list = await run("reviews_list", { status: "done" }, ownerCtx(db));
   assert.deepEqual(list.reviews.map((x: any) => x.id), [rv.id]);
@@ -271,16 +344,16 @@ test("review_dismiss: closes an open request; review_not_found 404; review_not_o
 
 // ── append-only (database) ──────────────────────────────────────────────────────────────────────────────────────
 
-test("reviews are append-only: triggers refuse any change to a closed review and any delete (review_append_only)", async () => {
+test("reviews are append-only: triggers refuse any change to a closed review, any delete, any replace (review_append_only)", async () => {
   const db = migratedDb();
   const s = seed(db);
   const open = await run("review_request", { subject: { kind: "person", id: s.cy.id }, why: "x" }, agentCtx(db));
   const dismissedReq = await run("review_request", { subject: { kind: "person", id: s.bo.id }, why: "y" }, agentCtx(db));
   await run("review_dismiss", { id: dismissedReq.review.id }, ownerCtx(db));
   const done = record(db, { kind: "person", id: s.ann.id }, "trusted");
-  const fails = (sql: string) => {
+  const fails = (sql: string, ...args: (string | number | null)[]) => {
     try {
-      db.prepare(sql).run();
+      db.prepare(sql).run(...args);
       return "no error";
     } catch (e) {
       return String((e as Error).message);
@@ -292,10 +365,39 @@ test("reviews are append-only: triggers refuse any change to a closed review and
       assert.match(fails(`UPDATE fleet_reviews SET ${set} WHERE id = '${id}'`), /review_append_only/, `${id} ${set}`);
     assert.match(fails(`DELETE FROM fleet_reviews WHERE id = '${id}'`), /review_append_only/);
   }
-  // an open request: who/what/when cannot change, and it cannot be deleted
-  for (const set of ["subject_id = 'psn_other'", "subject_name = 'x'", "requested_why = 'changed'", "requested_by_kind = 'owner'", "requested_by_id = 'agt_x'", "created_at = 0", "id = 'rvw_other'"])
-    assert.match(fails(`UPDATE fleet_reviews SET ${set} WHERE id = '${open.review.id}'`), /review_append_only/, set);
+  // INSERT OR REPLACE / REPLACE INTO (they delete the old row without a delete trigger) and a plain duplicate id
+  const copy = (id: string, verb: string) =>
+    fails(
+      `${verb} INTO fleet_reviews (id, subject_kind, subject_id, subject_name, status, verdict, reason, requested_by_kind, reviewer, snapshot_digest, created_at, decided_at) VALUES ('${id}', 'person', 'psn_x', 'x', 'done', 'trusted', 'forged', 'owner', 'per_x', '${"a".repeat(64)}', 0, 0)`,
+    );
+  for (const id of [done.id, dismissedReq.review.id, open.review.id]) {
+    assert.match(copy(id, "INSERT OR REPLACE"), /review_append_only/, `replace ${id}`);
+    assert.match(copy(id, "REPLACE"), /review_append_only/, `replace ${id}`);
+    assert.match(copy(id, "INSERT"), /review_append_only/, `insert ${id}`);
+  }
+  assert.equal(String(db.prepare("SELECT reason FROM fleet_reviews WHERE id = ?").get(done.id)?.reason), "Checked by phone.", "the evidence is intact");
+  // an open request: who/what/when cannot change, it cannot be edited in place, and it cannot be deleted
+  for (const set of ["subject_id = 'psn_other'", "subject_name = 'x'", "subject_handle = 'slack:UX'", "requested_why = 'changed'", "requested_by_kind = 'owner'", "requested_by_id = 'agt_x'", "created_at = 0", "id = 'rvw_other'", "reason = 'edited'", "status = 'requested'"])
+    assert.match(fails(`UPDATE fleet_reviews SET ${set} WHERE id = '${open.review.id}'`), /review_append_only|CHECK/, set);
   assert.match(fails(`DELETE FROM fleet_reviews WHERE id = '${open.review.id}'`), /review_append_only/);
+  // transitions: requested -> done only with a verdict, the digest and the answering row; requested -> dismissed only without a verdict
+  const to = (set: string) => fails(`UPDATE fleet_reviews SET ${set} WHERE id = '${open.review.id}'`);
+  assert.match(to("status = 'done', decided_at = 1, reviewer = 'per_x'"), /review_append_only|CHECK/, "done without verdict and digest");
+  assert.match(to("status = 'done', verdict = 'trusted', decided_at = 1, reviewer = 'per_x', answered_by = 'rvw_x'"), /review_append_only|CHECK/, "done without a digest");
+  assert.match(to(`status = 'done', verdict = 'trusted', snapshot_digest = '${"b".repeat(64)}', decided_at = 1, reviewer = 'per_x'`), /review_append_only|CHECK/, "done without the answering row");
+  assert.match(to(`status = 'done', verdict = 'unreviewed', snapshot_digest = '${"b".repeat(64)}', decided_at = 1, reviewer = 'per_x', answered_by = 'rvw_x'`), /review_append_only|CHECK/, "a verdict is never unreviewed");
+  assert.match(to("status = 'dismissed', verdict = 'trusted', decided_at = 1"), /review_append_only|CHECK/, "dismissed with a verdict");
+  assert.match(to("status = 'dismissed'"), /review_append_only|CHECK/, "dismissed without a date");
+  assert.match(to("status = 'bogus'"), /CHECK/);
+  assert.equal(String(db.prepare("SELECT status FROM fleet_reviews WHERE id = ?").get(open.review.id)?.status), "requested", "every refused probe left the request open");
+  // status and verdict agree (CHECK) on a fresh insert too
+  const ins = (cols: string) => fails(`INSERT INTO fleet_reviews (id, subject_kind, subject_id, subject_name, requested_by_kind, created_at, ${cols.split("|")[0]}) VALUES ('rvw_p${Math.random().toString(36).slice(2, 8)}', 'person', 'psn_y', 'y', 'agent', 0, ${cols.split("|")[1]})`);
+  assert.match(ins("status|'done'"), /CHECK/, "done without verdict");
+  assert.match(ins("status, verdict|'requested', 'trusted'"), /CHECK/, "requested with a verdict");
+  assert.match(ins("status, decided_at|'requested', 5"), /CHECK/, "requested with a decision date");
+  assert.match(ins("status, verdict, snapshot_digest, decided_at, reviewer|'done', 'unreviewed', 'd', 1, 'p'"), /CHECK/, "done with unreviewed");
+  assert.match(ins("status, answered_by|'requested', 'rvw_z'"), /CHECK/, "answered_by on a request");
+  assert.match(fails("INSERT INTO fleet_reviews (id, subject_kind, subject_id, subject_name, status, requested_by_kind, created_at) VALUES ('rvw_pn', 'person', '', 'n', 'requested', 'agent', 0)"), /CHECK/, "an empty subject id needs a handle");
   // quiet on good: the one allowed move of an open request is to dismissed or done (through the operations)
   assert.equal(await outcome(() => run("review_dismiss", { id: open.review.id }, ownerCtx(db))), "ok");
   // a database check: bad enums are refused
@@ -345,7 +447,7 @@ test("due dates: from the policy (90/180); never reviewed = created + days; unre
   await run("review_request", { subject: { kind: "agent", id: AGENT_B.id }, why: "x" }, agentCtx(db));
   const due = r.dueSubjects(db, T0 + 71 * DAY);
   assert.ok(!due.items.some((i) => i.subject.id === AGENT_B.id));
-  assert.match(due.items[0]?.snapshot.digest ?? "", /^[0-9a-f]{64}$/);
+  assert.deepEqual(Object.keys(due.items[0] ?? {}).sort(), ["dueAt", "lastReview", "lastVerdict", "subject"], "a due item has no snapshot: the review fetches a fresh one");
   const list = r.listReviews(db, {}, T0 + 71 * DAY);
   assert.equal(list.dueCount, due.count);
   assert.equal(list.openCount, 1);
@@ -404,4 +506,111 @@ test("agentsChanged: a NEW agent opens one system review request when reviewNewA
   assert.equal(count(db, `SELECT COUNT(*) AS n FROM fleet_agents WHERE id = '${d.id}'`), 1, "the agent itself is stored");
   // the open count counts system requests; the per-agent cap counts only agent requests
   assert.equal(r.listReviews(db, {}, NOW).openCount, 2);
+});
+
+// ── the picture the owner looks at, and what it binds to ──────────────────────────────────────────────────────────
+
+test("the snapshot is what the owner sees (name, title, kind, trust, handles, owner name, teams); the digest also covers email, trust and the last verdict", async () => {
+  const db = migratedDb();
+  const s = seed(db);
+  const look = async (kind: r.SubjectKind, id: string) => (await run("review_get", { subject: { kind, id } }, ownerCtx(db))).current as r.Snapshot;
+  const ann = await look("person", s.ann.id);
+  assert.deepEqual(
+    { name: ann.name, kind: ann.kind, title: ann.title, status: ann.status, trust: ann.trust, handles: ann.handles, owner: ann.owner, ownerName: ann.ownerName, teams: ann.teams, source: ann.source, access: ann.access, policy: ann.policy, contacts: ann.contacts },
+    { name: "Ann Example", kind: "person", title: "Chief Secret Officer", status: "active", trust: "trusted", handles: [`buzz:${NOSTR.npub}`, "slack:U012ABCDEF", "telegram:123456"].sort(), owner: null, ownerName: null, teams: ["Support"], source: "directory_only", access: [], policy: null, contacts: 0 },
+  );
+  const agent = await look("agent", AGENT_A.id);
+  assert.deepEqual([agent.ownerName, agent.owner, agent.title, agent.kind, agent.teams], ["Ann Example", s.ann.id, "triage-role", "agent", ["Support"]]);
+  assert.equal(valid("review_get", { review: null, current: ann }), true);
+  assert.ok(!JSON.stringify(ann).includes("@"), "the stored copy has no email; the email is only in the digest");
+  // each of these changes the digest (the owner would be deciding on an older picture)
+  const changes: [string, () => void][] = [
+    ["email", () => store.setPerson(db, { id: s.ann.id, name: "Ann Example", email: "ann@new.example" })],
+    ["title", () => store.setPerson(db, { id: s.ann.id, name: "Ann Example", title: "Boss" })],
+    ["trust", () => db.prepare("UPDATE fleet_people SET trust = 'limited' WHERE id = ?").run(s.ann.id)],
+    ["status", () => store.setPerson(db, { id: s.ann.id, name: "Ann Example", status: "departed" })],
+    ["team", () => store.setMembers(db, { team: s.ops.id, people: [{ id: s.ann.id, role: "lead" }], agents: [] })],
+    ["handle", () => store.setPerson(db, { id: s.ann.id, name: "Ann Example", handles: ["slack:UANN00009"] })],
+  ];
+  for (const [what, change] of changes) {
+    const before = (await look("person", s.ann.id)).digest;
+    change();
+    assert.notEqual((await look("person", s.ann.id)).digest, before, `a change of ${what} changes the digest`);
+  }
+});
+
+test("two tabs: the second verdict made from the pre-verdict picture is snapshot_stale (fires on bad), a fresh picture goes through", async () => {
+  const db = migratedDb();
+  const s = seed(db);
+  const subject = { kind: "person" as const, id: s.cy.id };
+  const tabA = (await run("review_get", { subject }, ownerCtx(db))).current.digest;
+  const tabB = (await run("review_get", { subject }, ownerCtx(db))).current.digest;
+  assert.equal(tabA, tabB, "both tabs see the same picture");
+  const rec = (digest: string, verdict: r.Verdict) => outcome(() => run("review_record", { subject, verdict, reason: "x", snapshotDigest: digest }, ownerCtx(db)));
+  assert.equal(await rec(tabA, "blocked"), "ok");
+  assert.equal(trustOf(db, "fleet_people", s.cy.id), "blocked");
+  const rows = count(db, "SELECT COUNT(*) AS n FROM fleet_reviews");
+  assert.equal(await rec(tabB, "trusted"), "snapshot_stale 409", "the other tab still holds the pre-block picture");
+  assert.equal(trustOf(db, "fleet_people", s.cy.id), "blocked", "the block stands");
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM fleet_reviews"), rows, "nothing was written");
+  // quiet: after looking again, the second verdict is accepted (and it sees the block)
+  const fresh = await run("review_get", { subject }, ownerCtx(db));
+  assert.equal(fresh.current.trust, "blocked");
+  assert.equal(fresh.review.verdict, "blocked");
+  assert.equal(await rec(fresh.current.digest, "limited"), "ok");
+  // the same holds for the page-load picture: the subject changed after the page loaded → stale
+  const loaded = (await run("review_get", { subject: { kind: "agent", id: AGENT_B.id } }, ownerCtx(db))).current.digest;
+  store.setAgent(db, { agent: AGENT_B.id, owner: s.ann.id });
+  assert.equal(await outcome(() => run("review_record", { subject: { kind: "agent", id: AGENT_B.id }, verdict: "trusted", reason: "x", snapshotDigest: loaded }, ownerCtx(db))), "snapshot_stale 409");
+});
+
+// ── blocked agents, new agents, caps ─────────────────────────────────────────────────────────────────────────────
+
+test("a BLOCKED agent has no team facts: fleet.agentTeams (as caller) and fleet.requesterTeams (as claim); the owner is kept", () => {
+  const db = migratedDb();
+  const s = seed(db);
+  const facts = (caller: { type: "agent"; id: string }, context: Record<string, unknown> = {}) => factsFor(db, { call: { caller } as never, context: context as never });
+  const claim = { "tb.onBehalfOf": { claim: { kind: "agent", id: AGENT_A.id }, verified: false } };
+  assert.deepEqual(facts({ type: "agent", id: AGENT_A.id })["fleet.agentTeams"].map((t) => t.name), ["Support"]);
+  assert.deepEqual(facts({ type: "agent", id: AGENT_B.id }, claim)["fleet.requesterTeams"].map((t) => t.name), ["Support"]);
+  record(db, { kind: "agent", id: AGENT_A.id }, "blocked");
+  const asCaller = facts({ type: "agent", id: AGENT_A.id });
+  assert.deepEqual(asCaller["fleet.agentTeams"], [], "blocked caller: no teams");
+  assert.deepEqual(asCaller["fleet.agentOwner"], { id: s.ann.id, name: "Ann Example" }, "the owner is still reported");
+  const asClaim = facts({ type: "agent", id: AGENT_B.id }, claim);
+  assert.deepEqual(asClaim["fleet.requesterTeams"], [], "blocked requester: no teams");
+  assert.equal(asClaim["fleet.requester.trust"], "blocked");
+  assert.deepEqual(store.agentFacts(db, AGENT_A.id).teams, []);
+  // quiet: an unblocked (limited) agent has its teams again
+  record(db, { kind: "agent", id: AGENT_A.id }, "limited");
+  assert.deepEqual(facts({ type: "agent", id: AGENT_A.id })["fleet.agentTeams"].map((t) => t.name), ["Support"]);
+});
+
+test("a NEW slice agent starts unreviewed (fail closed); agents that existed before keep trusted (migration 0002)", async () => {
+  const db = migratedDb();
+  store.syncAgents(db, [AGENT_A]);
+  assert.equal(trustOf(db, "fleet_agents", AGENT_A.id), "unreviewed");
+  assert.equal(store.agentTrust(db, AGENT_A.id), "unreviewed");
+  const feed = directoryFeed(db, {});
+  assert.equal(!feed.unchanged && feed.agents[0]?.trust, "unreviewed");
+  // the due list says so at once, and a review request exists for it
+  assert.equal(r.listReviews(db, {}).openCount, 0, "no request until agentsChanged opens one");
+  await definition.events?.agentsChanged?.([AGENT_A, AGENT_B] as never, { db } as never);
+  assert.equal(r.listReviews(db, {}).openCount, 1, "agentsChanged: B is new, A is not");
+});
+
+test("system requests (new agents) stop at 100 open; dueSubjects reads the directory with ONE query", async () => {
+  const db = migratedDb();
+  const agents = Array.from({ length: 130 }, (_, i) => ({ id: `agt_${ulid(i)}` as `agt_${string}`, name: `A${i}`, mode: "free" as const, status: "active" as const }));
+  await definition.events?.agentsChanged?.(agents as never, { db } as never);
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM fleet_reviews WHERE requested_by_kind = 'system' AND requested_by_id IS NULL"), r.MAX_OPEN_SYSTEM);
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM fleet_agents"), 130, "all agents are stored");
+  // an agent's own requests are not counted against the system cap
+  assert.equal(await outcome(() => run("review_request", { subject: { kind: "agent", id: agents[120]?.id }, why: "x" }, agentCtx(db))), "ok");
+  // one statement per call, whatever the number of subjects
+  let prepared = 0;
+  const spy: Db = { ...db, prepare: (sql: string) => { prepared++; return db.prepare(sql); } } as Db;
+  const due = r.dueSubjects(spy, Date.now());
+  assert.equal(due.count, 29, "the 130 agents minus 100 system requests and 1 agent request are due (unreviewed)");
+  assert.equal(prepared, 3, "the policy (2 reads) and ONE query for every subject, not one per subject");
 });

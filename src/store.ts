@@ -5,7 +5,7 @@
 // tenants, roles-per-tenant or license; people are directory entries, never sign-ins (C84).
 import { type HandleChannel, handleChannel, normalizeHandle, ulid } from "@opt2-tealbrick/manifest";
 import { type Db, type SliceAgent, TbError } from "@opt2-tealbrick/miniapp-sdk";
-import { type ContactKind, defaultTrust, type Source, type Trust } from "./trust.ts";
+import { type ContactKind, defaultTrust, NEW_AGENT_TRUST, type Source, type Trust } from "./trust.ts";
 
 export type Role = "member" | "lead";
 export type PersonStatus = "active" | "departed";
@@ -447,7 +447,7 @@ export function syncAgents(db: Db, agents: readonly Pick<SliceAgent, "id" | "nam
            ON CONFLICT (id) DO UPDATE SET name = excluded.name, mode = excluded.mode, status = excluded.status, updated_at = excluded.updated_at
            WHERE fleet_agents.name <> excluded.name OR fleet_agents.mode <> excluded.mode OR fleet_agents.status <> excluded.status`,
         )
-        .run(a.id, a.name, a.mode, a.status, defaultTrust("owner"), now, now).changes;
+        .run(a.id, a.name, a.mode, a.status, NEW_AGENT_TRUST, now, now).changes;
     }
     for (const r of db.prepare("SELECT id FROM fleet_agents WHERE status <> 'removed'").all()) {
       if (!listed.has(String(r.id))) changed += db.prepare("UPDATE fleet_agents SET status = 'removed', updated_at = ? WHERE id = ?").run(now, r.id).changes;
@@ -459,11 +459,11 @@ export function syncAgents(db: Db, agents: readonly Pick<SliceAgent, "id" | "nam
 
 // ── facts for the context hook ─────────────────────────────────────────────────────────────────────────────────
 
-/** Teams of an agent that is in the workspace (a removed agent has none). */
+/** Owner and teams of an agent that is in the workspace. A removed agent has none; a BLOCKED agent keeps its owner but has no teams (like a blocked contact: facts narrow, never widen). */
 export function agentFacts(db: Db, id: string): { owner: Ref | null; teams: TeamRef[] } {
   const r = db.prepare(`${AGENT_SELECT} WHERE a.id = ? AND a.status <> 'removed'`).get(id);
   if (!r) return { owner: null, teams: [] };
-  return { owner: r.owner_id === null ? null : { id: String(r.owner_id), name: String(r.owner_name) }, teams: teamsOf(db, "agent", id) };
+  return { owner: r.owner_id === null ? null : { id: String(r.owner_id), name: String(r.owner_name) }, teams: r.trust === "blocked" ? [] : teamsOf(db, "agent", id).slice(0, MAX_TEAMS_PER_ANSWER) };
 }
 
 /** The trust of a workspace agent that is not removed; null for an unknown or removed agent. */

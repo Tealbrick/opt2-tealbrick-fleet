@@ -11,6 +11,7 @@ export const SECRETS = ["ann@example.com", "Chief Secret Officer", "vip-tag", "i
 export function seed(db: Db) {
   store.syncAgents(db, [AGENT_A, AGENT_B, { id: "agt_01J0000000000000000000000C", name: "Agent C", mode: "free", status: "active" }]);
   store.syncAgents(db, [AGENT_A, { ...AGENT_B, status: "paused" }]); // C is removed
+  db.exec("UPDATE fleet_agents SET trust = 'trusted'"); // the owner has accepted these agents (a new slice agent starts unreviewed)
   const ann = store.setPerson(db, {
     name: "Ann Example",
     email: "ann@example.com",
