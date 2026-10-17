@@ -91,9 +91,9 @@ test("members, agent owner and resolve_sender for a Buzz npub (J3 sender → per
   assert.equal(store.getTeam(db, sup.id).members.length, 2, "a refused members_set changes nothing");
 
   const r = store.resolveSender(db, `buzz:${NOSTR.hex}`);
-  assert.deepEqual(r, { found: true, contact: { id: ann.id, name: "Ann", kind: "person", status: "active", trust: "trusted" }, teams: [{ id: sup.id, name: "Support", role: "lead" }] });
-  assert.deepEqual(store.resolveSender(db, "slack:U999"), { found: false, contact: null, teams: [] });
-  assert.deepEqual(store.resolveSender(db, "garbage"), { found: false, contact: null, teams: [] });
+  assert.deepEqual(r, { found: true, person: { id: ann.id, name: "Ann", status: "active" }, contact: { id: ann.id, name: "Ann", kind: "person", status: "active", trust: "trusted" }, teams: [{ id: sup.id, name: "Support", role: "lead" }] });
+  assert.deepEqual(store.resolveSender(db, "slack:U999"), { found: false, person: null, contact: null, teams: [] });
+  assert.deepEqual(store.resolveSender(db, "garbage"), { found: false, person: null, contact: null, teams: [] });
 
   const a = store.setAgent(db, { agent: AGENT_A.id, owner: ann.id, role: "triage" });
   assert.deepEqual(a.owner, { id: ann.id, name: "Ann" });

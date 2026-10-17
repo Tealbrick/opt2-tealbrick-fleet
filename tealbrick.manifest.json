@@ -623,7 +623,7 @@
     {
       "id": "resolve_sender",
       "title": "Resolve sender",
-      "description": "Find who is behind a channel handle (a person or an outside agent), its trust state and teams. handle = \"<channel>:<value>\": buzz:<npub>, slack:<user id>, telegram:<user id> (a bare npub also works). found:false = not in the directory; treat as unknown. Departed or blocked = no teams.",
+      "description": "Find who is behind a channel handle (a person or an outside agent), its trust state and teams. handle = \"<channel>:<value>\": buzz:<npub>, slack:<user id>, telegram:<user id> (a bare npub also works). found:false = not in the directory; treat as unknown. Departed or blocked = no teams. The field person is deprecated since 0.2.0 (use contact); removed after 0.3.0.",
       "input": {
         "type": "object",
         "additionalProperties": false,
@@ -643,12 +643,44 @@
         "additionalProperties": false,
         "required": [
           "found",
+          "person",
           "contact",
           "teams"
         ],
         "properties": {
           "found": {
             "type": "boolean"
+          },
+          "person": {
+            "description": "Deprecated since 0.2.0: use contact; removed after 0.3.0. The 0.1.10 shape, only for kind person (null for outside agents and unknown senders).",
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "name",
+                  "status"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "active",
+                      "departed"
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "contact": {
             "anyOf": [

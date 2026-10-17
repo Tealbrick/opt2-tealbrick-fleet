@@ -391,10 +391,51 @@ test("resolve_sender returns the contact with kind and trust, outside agents inc
   assert.equal((blocked.contact as { trust: string }).trust, "blocked");
   assert.deepEqual(blocked.teams, [], "blocked = no teams");
   assert.deepEqual((await call("telegram:-1001234567890")).teams, [], "departed = no teams");
-  assert.deepEqual(await call("slack:U404"), { found: false, contact: null, teams: [] });
+  assert.deepEqual(await call("slack:U404"), { found: false, person: null, contact: null, teams: [] });
   for (const r of [ann, bot, blocked]) assert.equal(validateAgainstSchema(out, r as unknown as Json).ok, true);
-  // fire on bad: the old shape (person) is no longer an answer
+  // fire on bad: an answer without the new contact is refused
   assert.equal(validateAgainstSchema(out, { found: true, person: { id: "x", name: "y", status: "active" }, teams: [] } as unknown as Json).ok, false);
+});
+
+test("resolve_sender keeps the deprecated `person` exactly as 0.1.10 returned it: a 0.1.10 client still works; null for outside agents", async () => {
+  const db = migratedDb();
+  const s = seed(db);
+  const call = (handle: string) => handlers.resolve_sender.run({ handle } as never, ctxOf(db, AGENT)) as Promise<Record<string, any>>;
+  // the 0.1.10 output schema of resolve_sender (frozen copy), and a 0.1.10 reader that only knows found / person / teams
+  const V0110 = {
+    type: "object",
+    additionalProperties: false,
+    required: ["found", "person", "teams"],
+    properties: {
+      found: { type: "boolean" },
+      person: { anyOf: [{ type: "object", additionalProperties: false, required: ["id", "name", "status"], properties: { id: { type: "string" }, name: { type: "string" }, status: { enum: ["active", "departed"] } } }, { type: "null" }] },
+      teams: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "name", "role"], properties: { id: { type: "string" }, name: { type: "string" }, role: { enum: ["member", "lead"] } } } },
+    },
+  } as unknown as Parameters<typeof validateAgainstSchema>[0];
+  const reader0110 = (a: Record<string, any>) => (a.found ? { who: a.person?.name ?? null, status: a.person?.status ?? null, teams: a.teams.map((t: { name: string }) => t.name) } : null);
+  const only0110 = ({ found, person, teams }: Record<string, any>) => ({ found, person, teams });
+
+  const ann = await call(`buzz:${NOSTR.npub}`);
+  assert.deepEqual(ann.person, { id: s.ann.id, name: "Ann Example", status: "active" }, "same fields and values as 0.1.10");
+  assert.deepEqual(Object.keys(ann.person).sort(), ["id", "name", "status"]);
+  assert.deepEqual(reader0110(ann), { who: "Ann Example", status: "active", teams: ["Support"] });
+  assert.equal(validateAgainstSchema(V0110, only0110(ann) as Json).ok, true, "the old fields validate against the 0.1.10 schema");
+  const bo = await call("telegram:-1001234567890");
+  assert.deepEqual(bo.person, { id: s.bo.id, name: "Bo", status: "departed" });
+  assert.deepEqual(reader0110(bo), { who: "Bo", status: "departed", teams: [] });
+  // an outside agent: person is null (the 0.1.10 schema allows null), contact has it
+  const bot = await call("slack:W0BOT123");
+  assert.equal(bot.person, null);
+  assert.equal(bot.found, true);
+  assert.equal(bot.contact.kind, "outside_agent");
+  assert.equal(validateAgainstSchema(V0110, only0110(bot) as Json).ok, true);
+  // unknown: as in 0.1.10
+  assert.deepEqual(only0110(await call("slack:U404")), { found: false, person: null, teams: [] });
+  // the manifest marks it deprecated in the description (no `deprecated` keyword)
+  const prop = (manifestOp("resolve_sender").output as unknown as { properties: { person: { description: string } } }).properties.person;
+  assert.match(prop.description, /^Deprecated since 0\.2\.0: use contact; removed after 0\.3\.0/);
+  // fire on bad: a person with a changed field set would not match the 0.1.10 schema
+  assert.equal(validateAgainstSchema(V0110, { ...only0110(ann), person: { ...ann.person, trust: "trusted" } } as Json).ok, false);
 });
 
 test("fleet_facts adds fleet.requester.trust (and trust inside fleet.requester); unknown is null, never a default", () => {

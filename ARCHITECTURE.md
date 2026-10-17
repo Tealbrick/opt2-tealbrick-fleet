@@ -23,7 +23,7 @@ Governance (0.2.0; formerly Organization Plane) is the workspace directory and i
 ## Operations (from `tealbrick.manifest.json`)
 
 13 operations.
-- Agent read: `teams_list`, `team_get`, `directory_get` (the whole directory; `sinceRevision` returns `unchanged:true`), `resolve_sender` (channel handle to contact, trust and teams).
+- Agent read: `teams_list`, `team_get`, `directory_get` (the whole directory; `sinceRevision` returns `unchanged:true`), `resolve_sender` (channel handle to contact, trust and teams; the 0.1.10 `person` field is kept but deprecated, null for outside agents).
 - App read: `directory_feed` (audience `agent` in the manifest for now; the handler refuses every caller that is not an app with `no_access` 403; sinceRevision gives `{v, revision, unchanged:true}`).
 - Person read: `overview_get`, `identities_view`. Person write: `team_set`, `person_set`, `members_set`, `agent_set`. Person destructive (held): `team_delete`, `person_delete`.
 - **Privacy:** the agent-audience op `directory_get` still returns people records including `email` (kept unchanged in 0.2.0; lean in 0.2.1). `teams_list`, `team_get`, `resolve_sender` and `directory_feed` do not.

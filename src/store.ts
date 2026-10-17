@@ -214,6 +214,8 @@ export interface Contact {
 
 export interface Resolved {
   found: boolean;
+  /** Deprecated since 0.2.0 (use `contact`; removed after 0.3.0): the 0.1.10 shape, only for kind person; null for outside agents. */
+  person: { id: string; name: string; status: PersonStatus } | null;
   contact: Contact | null;
   teams: TeamRef[];
 }
@@ -229,9 +231,10 @@ export function resolveSender(db: Db, handle: string): Resolved {
   const r = h
     ? db.prepare("SELECT p.id, p.name, p.status, p.kind, p.trust FROM fleet_handles h JOIN fleet_people p ON p.id = h.person_id WHERE h.handle = ?").get(h)
     : undefined;
-  if (!r) return { found: false, contact: null, teams: [] };
+  if (!r) return { found: false, person: null, contact: null, teams: [] };
   const contact = toContact(r);
-  return { found: true, contact, teams: hasTeamFacts(contact) ? teamsOf(db, "person", contact.id) : [] };
+  const person = contact.kind === "person" ? { id: contact.id, name: contact.name, status: contact.status } : null;
+  return { found: true, person, contact, teams: hasTeamFacts(contact) ? teamsOf(db, "person", contact.id) : [] };
 }
 
 export interface Identities {
