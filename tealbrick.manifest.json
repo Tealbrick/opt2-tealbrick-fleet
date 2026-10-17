@@ -4,8 +4,8 @@
   "id": "fleet",
   "name": "Governance",
   "summary": "Governance: who is who in your workspace, who owns which agent, and how far each person, outside agent and agent is trusted.",
-  "description": "Governance is the workspace directory and its trust record.\n\n- **Directory:** teams, people and outside agents with their Buzz, Slack and Telegram handles, and every workspace agent with its owner, role and teams.\n- **Trust:** every person, outside agent and agent has a trust state (unreviewed, trusted, limited or blocked). People you add start trusted; entries that an agent adds start unreviewed.\n- **Feed for apps:** other apps (for example Rules & Approvals) read a small, versioned directory feed. It has no email addresses and no job titles.\n\nGovernance never grants access, never decides a hold and holds no credentials. People are directory entries, not sign-ins.",
-  "version": "0.2.0",
+  "description": "Governance is the workspace directory and its trust record.\n\n- **Directory:** teams, people and outside agents with their Buzz, Slack and Telegram handles, and every workspace agent with its owner, role and teams.\n- **Trust:** every person, outside agent and agent has a trust state (unreviewed, trusted, limited or blocked). People you add start trusted; entries that an agent adds start unreviewed.\n- **Trust reviews:** an agent can ask for a review and say why; only you decide. Each verdict is kept with a copy of what the subject could do at that time, and it sets the trust state.\n- **Feed for apps:** other apps (for example Rules & Approvals) read a small, versioned directory feed. It has no email addresses and no job titles.\n\nGovernance never grants access, never decides a hold and holds no credentials. People are directory entries, not sign-ins.",
+  "version": "0.2.1",
   "sdkMajor": 1,
   "publisher": {
     "name": "Teal Brick opt2"
@@ -25,16 +25,18 @@
       "who owns this agent",
       "which team is this person in",
       "map a Buzz or Slack sender to a person",
-      "is this sender trusted"
+      "is this sender trusted",
+      "review whether we trust this agent"
     ],
     "keywords": [
-      "governance",
       "directory",
-      "teams",
-      "trust",
+      "fleet",
+      "governance",
       "owners",
       "people",
-      "fleet"
+      "review",
+      "teams",
+      "trust"
     ]
   },
   "runtime": {
@@ -67,7 +69,7 @@
     {
       "id": "teams_list",
       "title": "List teams",
-      "description": "List the workspace teams with their members (people with their channel handles, agents), oldest first. Optional: only teams with a tag. Page with cursor = nextCursor.",
+      "description": "List the workspace teams with their members (people, outside agents and agents: names and roles only), oldest first. Optional: only teams with a tag. Page with cursor = nextCursor. No contact details, handles or tags.",
       "input": {
         "type": "object",
         "additionalProperties": false,
@@ -99,6 +101,7 @@
         "properties": {
           "teams": {
             "type": "array",
+            "maxItems": 500,
             "items": {
               "type": "object",
               "additionalProperties": false,
@@ -106,7 +109,6 @@
                 "id",
                 "name",
                 "description",
-                "tags",
                 "people",
                 "agents",
                 "updatedAt",
@@ -114,31 +116,32 @@
               ],
               "properties": {
                 "id": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 200
                 },
                 "name": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 200
                 },
                 "description": {
-                  "type": "string"
-                },
-                "tags": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
+                  "type": "string",
+                  "maxLength": 500
                 },
                 "people": {
-                  "type": "integer"
+                  "type": "integer",
+                  "minimum": 0
                 },
                 "agents": {
-                  "type": "integer"
+                  "type": "integer",
+                  "minimum": 0
                 },
                 "updatedAt": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 40
                 },
                 "members": {
                   "type": "array",
+                  "maxItems": 4000,
                   "items": {
                     "type": "object",
                     "additionalProperties": false,
@@ -152,26 +155,23 @@
                       "kind": {
                         "enum": [
                           "person",
+                          "outside_agent",
                           "agent"
                         ]
                       },
                       "id": {
-                        "type": "string"
+                        "type": "string",
+                        "maxLength": 200
                       },
                       "name": {
-                        "type": "string"
+                        "type": "string",
+                        "maxLength": 200
                       },
                       "role": {
                         "enum": [
                           "member",
                           "lead"
                         ]
-                      },
-                      "handles": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
                       }
                     }
                   }
@@ -182,7 +182,8 @@
           "nextCursor": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 64
               },
               {
                 "type": "null"
@@ -202,7 +203,7 @@
     {
       "id": "team_get",
       "title": "Get team",
-      "description": "One team with its members (people and agents, each with a role). Give the team id or its exact name.",
+      "description": "One team with its members (people, outside agents and agents, each with a role; names only). Give the team id or its exact name.",
       "input": {
         "type": "object",
         "additionalProperties": false,
@@ -231,7 +232,6 @@
               "id",
               "name",
               "description",
-              "tags",
               "people",
               "agents",
               "updatedAt",
@@ -239,31 +239,32 @@
             ],
             "properties": {
               "id": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 200
               },
               "name": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 200
               },
               "description": {
-                "type": "string"
-              },
-              "tags": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
+                "type": "string",
+                "maxLength": 500
               },
               "people": {
-                "type": "integer"
+                "type": "integer",
+                "minimum": 0
               },
               "agents": {
-                "type": "integer"
+                "type": "integer",
+                "minimum": 0
               },
               "updatedAt": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 40
               },
               "members": {
                 "type": "array",
+                "maxItems": 4000,
                 "items": {
                   "type": "object",
                   "additionalProperties": false,
@@ -277,26 +278,23 @@
                     "kind": {
                       "enum": [
                         "person",
+                        "outside_agent",
                         "agent"
                       ]
                     },
                     "id": {
-                      "type": "string"
+                      "type": "string",
+                      "maxLength": 200
                     },
                     "name": {
-                      "type": "string"
+                      "type": "string",
+                      "maxLength": 200
                     },
                     "role": {
                       "enum": [
                         "member",
                         "lead"
                       ]
-                    },
-                    "handles": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
                     }
                   }
                 }
@@ -316,7 +314,7 @@
     {
       "id": "directory_get",
       "title": "Get directory",
-      "description": "The whole workspace directory: teams with members, people with channel handles and teams, agents with owner, role and teams. Pass sinceRevision to get only `unchanged: true` when nothing changed.",
+      "description": "Who is who in the workspace: teams, people and outside agents (names, titles, trust; no contact details), agents with owner, role, trust and teams. Pass sinceRevision to get only `unchanged: true` when nothing changed. Lean since 0.2.1: no email, handles, tags or mode.",
       "input": {
         "type": "object",
         "additionalProperties": false,
@@ -333,17 +331,22 @@
         "additionalProperties": false,
         "required": [
           "revision",
+          "unchanged",
           "teams",
           "people",
-          "agents",
-          "unchanged"
+          "agents"
         ],
         "properties": {
           "revision": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 0
+          },
+          "unchanged": {
+            "type": "boolean"
           },
           "teams": {
             "type": "array",
+            "maxItems": 500,
             "items": {
               "type": "object",
               "additionalProperties": false,
@@ -351,7 +354,6 @@
                 "id",
                 "name",
                 "description",
-                "tags",
                 "people",
                 "agents",
                 "updatedAt",
@@ -359,31 +361,32 @@
               ],
               "properties": {
                 "id": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 200
                 },
                 "name": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 200
                 },
                 "description": {
-                  "type": "string"
-                },
-                "tags": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
+                  "type": "string",
+                  "maxLength": 500
                 },
                 "people": {
-                  "type": "integer"
+                  "type": "integer",
+                  "minimum": 0
                 },
                 "agents": {
-                  "type": "integer"
+                  "type": "integer",
+                  "minimum": 0
                 },
                 "updatedAt": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 40
                 },
                 "members": {
                   "type": "array",
+                  "maxItems": 4000,
                   "items": {
                     "type": "object",
                     "additionalProperties": false,
@@ -397,26 +400,23 @@
                       "kind": {
                         "enum": [
                           "person",
+                          "outside_agent",
                           "agent"
                         ]
                       },
                       "id": {
-                        "type": "string"
+                        "type": "string",
+                        "maxLength": 200
                       },
                       "name": {
-                        "type": "string"
+                        "type": "string",
+                        "maxLength": 200
                       },
                       "role": {
                         "enum": [
                           "member",
                           "lead"
                         ]
-                      },
-                      "handles": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
                       }
                     }
                   }
@@ -426,39 +426,38 @@
           },
           "people": {
             "type": "array",
+            "maxItems": 2000,
             "items": {
               "type": "object",
               "additionalProperties": false,
               "required": [
                 "id",
                 "name",
-                "email",
+                "kind",
                 "title",
                 "status",
-                "tags",
-                "handles",
+                "trust",
                 "teams",
                 "updatedAt"
               ],
               "properties": {
                 "id": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 200
                 },
                 "name": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 200
                 },
-                "email": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
+                "kind": {
+                  "enum": [
+                    "person",
+                    "outside_agent"
                   ]
                 },
                 "title": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 120
                 },
                 "status": {
                   "enum": [
@@ -466,20 +465,17 @@
                     "departed"
                   ]
                 },
-                "tags": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                },
-                "handles": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
+                "trust": {
+                  "enum": [
+                    "unreviewed",
+                    "trusted",
+                    "limited",
+                    "blocked"
+                  ]
                 },
                 "teams": {
                   "type": "array",
+                  "maxItems": 50,
                   "items": {
                     "type": "object",
                     "additionalProperties": false,
@@ -490,10 +486,12 @@
                     ],
                     "properties": {
                       "id": {
-                        "type": "string"
+                        "type": "string",
+                        "maxLength": 200
                       },
                       "name": {
-                        "type": "string"
+                        "type": "string",
+                        "maxLength": 200
                       },
                       "role": {
                         "enum": [
@@ -505,36 +503,36 @@
                   }
                 },
                 "updatedAt": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 40
                 }
               }
             }
           },
           "agents": {
             "type": "array",
+            "maxItems": 2000,
             "items": {
               "type": "object",
               "additionalProperties": false,
               "required": [
                 "id",
                 "name",
-                "mode",
                 "status",
                 "owner",
                 "role",
-                "tags",
+                "trust",
                 "teams",
                 "updatedAt"
               ],
               "properties": {
                 "id": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 200
                 },
                 "name": {
-                  "type": "string"
-                },
-                "mode": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 200
                 },
                 "status": {
                   "enum": [
@@ -554,10 +552,12 @@
                       ],
                       "properties": {
                         "id": {
-                          "type": "string"
+                          "type": "string",
+                          "maxLength": 200
                         },
                         "name": {
-                          "type": "string"
+                          "type": "string",
+                          "maxLength": 200
                         }
                       }
                     },
@@ -567,16 +567,20 @@
                   ]
                 },
                 "role": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 80
                 },
-                "tags": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
+                "trust": {
+                  "enum": [
+                    "unreviewed",
+                    "trusted",
+                    "limited",
+                    "blocked"
+                  ]
                 },
                 "teams": {
                   "type": "array",
+                  "maxItems": 50,
                   "items": {
                     "type": "object",
                     "additionalProperties": false,
@@ -587,10 +591,12 @@
                     ],
                     "properties": {
                       "id": {
-                        "type": "string"
+                        "type": "string",
+                        "maxLength": 200
                       },
                       "name": {
-                        "type": "string"
+                        "type": "string",
+                        "maxLength": 200
                       },
                       "role": {
                         "enum": [
@@ -602,13 +608,11 @@
                   }
                 },
                 "updatedAt": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 40
                 }
               }
             }
-          },
-          "unchanged": {
-            "type": "boolean"
           }
         }
       },
@@ -767,6 +771,97 @@
       "effect": "read",
       "idempotency": "none",
       "receipt": false,
+      "audience": "agent"
+    },
+    {
+      "id": "review_request",
+      "title": "Ask the owner for a trust review",
+      "description": "Ask the owner to review an agent, a person or an outside agent you are dealing with, and say why. A handle that is not in the directory does NOT create an entry: the owner sees your request and decides whether to add it. You cannot set or change trust; only the owner decides. Asking again about the same subject returns your own open request with duplicate: true; at most 20 open requests per agent. Your text is stored as untrusted text.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "subject",
+          "why"
+        ],
+        "properties": {
+          "subject": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "agent",
+                  "person",
+                  "outside_agent"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "handle": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 140,
+                "pattern": "^(buzz|slack|telegram):\\S+$"
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 120
+              }
+            }
+          },
+          "why": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "review"
+        ],
+        "properties": {
+          "review": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "status",
+              "duplicate"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "maxLength": 40
+              },
+              "status": {
+                "enum": [
+                  "requested",
+                  "done",
+                  "dismissed"
+                ]
+              },
+              "duplicate": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "create"
+      ],
+      "effect": "write",
+      "idempotency": "required",
+      "receipt": true,
       "audience": "agent"
     },
     {
@@ -1111,6 +1206,8 @@
               "required": [
                 "id",
                 "name",
+                "kind",
+                "trust",
                 "email",
                 "title",
                 "status",
@@ -1125,6 +1222,20 @@
                 },
                 "name": {
                   "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "person",
+                    "outside_agent"
+                  ]
+                },
+                "trust": {
+                  "enum": [
+                    "unreviewed",
+                    "trusted",
+                    "limited",
+                    "blocked"
+                  ]
                 },
                 "email": {
                   "anyOf": [
@@ -1197,6 +1308,7 @@
               "required": [
                 "id",
                 "name",
+                "trust",
                 "mode",
                 "status",
                 "owner",
@@ -1211,6 +1323,14 @@
                 },
                 "name": {
                   "type": "string"
+                },
+                "trust": {
+                  "enum": [
+                    "unreviewed",
+                    "trusted",
+                    "limited",
+                    "blocked"
+                  ]
                 },
                 "mode": {
                   "type": "string"
@@ -1505,6 +1625,8 @@
             "required": [
               "id",
               "name",
+              "kind",
+              "trust",
               "email",
               "title",
               "status",
@@ -1519,6 +1641,20 @@
               },
               "name": {
                 "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "person",
+                  "outside_agent"
+                ]
+              },
+              "trust": {
+                "enum": [
+                  "unreviewed",
+                  "trusted",
+                  "limited",
+                  "blocked"
+                ]
               },
               "email": {
                 "anyOf": [
@@ -1854,6 +1990,7 @@
             "required": [
               "id",
               "name",
+              "trust",
               "mode",
               "status",
               "owner",
@@ -1868,6 +2005,14 @@
               },
               "name": {
                 "type": "string"
+              },
+              "trust": {
+                "enum": [
+                  "unreviewed",
+                  "trusted",
+                  "limited",
+                  "blocked"
+                ]
               },
               "mode": {
                 "type": "string"
@@ -2073,6 +2218,2189 @@
       ],
       "effect": "read",
       "idempotency": "none",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "reviews_list",
+      "title": "Trust reviews",
+      "description": "Open review requests (one per requester and subject), the review history (newest first), what is due, and the review schedule. Reviews of status `done` are the verdicts; `due` lists subjects whose next review date has passed (or that were never reviewed).",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "status": {
+            "enum": [
+              "open",
+              "due",
+              "done",
+              "all"
+            ]
+          },
+          "subject": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "cursor": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reviews",
+          "due",
+          "dueCount",
+          "openCount",
+          "policy",
+          "nextCursor"
+        ],
+        "properties": {
+          "reviews": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "subject",
+                "subjectHandle",
+                "status",
+                "verdict",
+                "reason",
+                "requestedBy",
+                "reviewer",
+                "snapshot",
+                "createdAt",
+                "decidedAt",
+                "nextDueAt",
+                "proposal"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "maxLength": 40
+                },
+                "subject": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "id",
+                    "name"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "agent",
+                        "person",
+                        "outside_agent"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "maxLength": 64
+                    },
+                    "name": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  }
+                },
+                "subjectHandle": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 140
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "status": {
+                  "enum": [
+                    "requested",
+                    "done",
+                    "dismissed"
+                  ]
+                },
+                "verdict": {
+                  "anyOf": [
+                    {
+                      "enum": [
+                        "unreviewed",
+                        "trusted",
+                        "limited",
+                        "blocked"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "maxLength": 2000
+                },
+                "requestedBy": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "id",
+                    "why"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "owner",
+                        "agent",
+                        "system"
+                      ]
+                    },
+                    "id": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "why": {
+                      "type": "string",
+                      "maxLength": 500
+                    }
+                  }
+                },
+                "reviewer": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 64
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "snapshot": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "digest",
+                        "takenAt",
+                        "name",
+                        "kind",
+                        "title",
+                        "status",
+                        "trust",
+                        "handles",
+                        "access",
+                        "policy",
+                        "contacts",
+                        "owner",
+                        "ownerName",
+                        "teams",
+                        "source"
+                      ],
+                      "properties": {
+                        "digest": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "takenAt": {
+                          "type": "string",
+                          "maxLength": 40
+                        },
+                        "name": {
+                          "type": "string",
+                          "maxLength": 200
+                        },
+                        "kind": {
+                          "enum": [
+                            "agent",
+                            "person",
+                            "outside_agent"
+                          ]
+                        },
+                        "title": {
+                          "type": "string",
+                          "maxLength": 120
+                        },
+                        "status": {
+                          "enum": [
+                            "active",
+                            "departed",
+                            "paused",
+                            "removed",
+                            "pending"
+                          ]
+                        },
+                        "trust": {
+                          "enum": [
+                            "unreviewed",
+                            "trusted",
+                            "limited",
+                            "blocked"
+                          ]
+                        },
+                        "handles": {
+                          "type": "array",
+                          "maxItems": 10,
+                          "items": {
+                            "type": "string",
+                            "maxLength": 140
+                          }
+                        },
+                        "access": {
+                          "type": "array",
+                          "maxItems": 50,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "product",
+                              "crud",
+                              "ops",
+                              "scopeType",
+                              "enabled"
+                            ],
+                            "properties": {
+                              "product": {
+                                "type": "string",
+                                "maxLength": 40
+                              },
+                              "crud": {
+                                "type": "array",
+                                "maxItems": 4,
+                                "items": {
+                                  "type": "string",
+                                  "maxLength": 10
+                                }
+                              },
+                              "ops": {
+                                "anyOf": [
+                                  {
+                                    "type": "array",
+                                    "maxItems": 100,
+                                    "items": {
+                                      "type": "string",
+                                      "maxLength": 40
+                                    }
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "scopeType": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "maxLength": 40
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "enabled": {
+                                "type": "boolean"
+                              }
+                            }
+                          }
+                        },
+                        "policy": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "mode",
+                                "held",
+                                "paused"
+                              ],
+                              "properties": {
+                                "mode": {
+                                  "enum": [
+                                    "free",
+                                    "bound"
+                                  ]
+                                },
+                                "held": {
+                                  "type": "array",
+                                  "maxItems": 10,
+                                  "items": {
+                                    "type": "string",
+                                    "maxLength": 30
+                                  }
+                                },
+                                "paused": {
+                                  "type": "boolean"
+                                }
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "contacts": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        },
+                        "owner": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 200
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "ownerName": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 200
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "teams": {
+                          "type": "array",
+                          "maxItems": 50,
+                          "items": {
+                            "type": "string",
+                            "maxLength": 200
+                          }
+                        },
+                        "source": {
+                          "enum": [
+                            "slice",
+                            "directory_only"
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "maxLength": 40
+                },
+                "decidedAt": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 40
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "nextDueAt": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 40
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "proposal": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 40
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "due": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "subject",
+                "dueAt",
+                "lastReview",
+                "lastVerdict"
+              ],
+              "properties": {
+                "subject": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "id",
+                    "name"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "agent",
+                        "person",
+                        "outside_agent"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "maxLength": 64
+                    },
+                    "name": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  }
+                },
+                "dueAt": {
+                  "type": "string",
+                  "maxLength": 40
+                },
+                "lastReview": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 40
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "lastVerdict": {
+                  "anyOf": [
+                    {
+                      "enum": [
+                        "unreviewed",
+                        "trusted",
+                        "limited",
+                        "blocked"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "dueCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000
+          },
+          "openCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000
+          },
+          "policy": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "agentDays",
+              "contactDays",
+              "reviewNewAgents",
+              "reviewChangedAccess"
+            ],
+            "properties": {
+              "agentDays": {
+                "type": "integer",
+                "minimum": 7,
+                "maximum": 730
+              },
+              "contactDays": {
+                "type": "integer",
+                "minimum": 7,
+                "maximum": 730
+              },
+              "reviewNewAgents": {
+                "type": "boolean"
+              },
+              "reviewChangedAccess": {
+                "type": "boolean"
+              }
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "review_get",
+      "title": "One review",
+      "description": "One review with the snapshot taken when it was recorded, and the snapshot of the subject now (compare the digests to see what changed). Give the review `id`, or a `subject` (an `id`, or a `handle` with an open request) to get its latest verdict (null if none) and its snapshot now: the first step of a review, and the digest to record against.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "subject": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "agent",
+                  "person",
+                  "outside_agent"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "handle": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 140,
+                "pattern": "^(buzz|slack|telegram):\\S+$"
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 120
+              }
+            }
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "review",
+          "current"
+        ],
+        "properties": {
+          "review": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "subject",
+                  "subjectHandle",
+                  "status",
+                  "verdict",
+                  "reason",
+                  "requestedBy",
+                  "reviewer",
+                  "snapshot",
+                  "createdAt",
+                  "decidedAt",
+                  "nextDueAt",
+                  "proposal"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  "subject": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "kind",
+                      "id",
+                      "name"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "enum": [
+                          "agent",
+                          "person",
+                          "outside_agent"
+                        ]
+                      },
+                      "id": {
+                        "type": "string",
+                        "maxLength": 64
+                      },
+                      "name": {
+                        "type": "string",
+                        "maxLength": 200
+                      }
+                    }
+                  },
+                  "subjectHandle": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 140
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "status": {
+                    "enum": [
+                      "requested",
+                      "done",
+                      "dismissed"
+                    ]
+                  },
+                  "verdict": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "unreviewed",
+                          "trusted",
+                          "limited",
+                          "blocked"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 2000
+                  },
+                  "requestedBy": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "kind",
+                      "id",
+                      "why"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "enum": [
+                          "owner",
+                          "agent",
+                          "system"
+                        ]
+                      },
+                      "id": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "maxLength": 64
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "why": {
+                        "type": "string",
+                        "maxLength": 500
+                      }
+                    }
+                  },
+                  "reviewer": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 64
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "snapshot": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "digest",
+                          "takenAt",
+                          "name",
+                          "kind",
+                          "title",
+                          "status",
+                          "trust",
+                          "handles",
+                          "access",
+                          "policy",
+                          "contacts",
+                          "owner",
+                          "ownerName",
+                          "teams",
+                          "source"
+                        ],
+                        "properties": {
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$"
+                          },
+                          "takenAt": {
+                            "type": "string",
+                            "maxLength": 40
+                          },
+                          "name": {
+                            "type": "string",
+                            "maxLength": 200
+                          },
+                          "kind": {
+                            "enum": [
+                              "agent",
+                              "person",
+                              "outside_agent"
+                            ]
+                          },
+                          "title": {
+                            "type": "string",
+                            "maxLength": 120
+                          },
+                          "status": {
+                            "enum": [
+                              "active",
+                              "departed",
+                              "paused",
+                              "removed",
+                              "pending"
+                            ]
+                          },
+                          "trust": {
+                            "enum": [
+                              "unreviewed",
+                              "trusted",
+                              "limited",
+                              "blocked"
+                            ]
+                          },
+                          "handles": {
+                            "type": "array",
+                            "maxItems": 10,
+                            "items": {
+                              "type": "string",
+                              "maxLength": 140
+                            }
+                          },
+                          "access": {
+                            "type": "array",
+                            "maxItems": 50,
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "product",
+                                "crud",
+                                "ops",
+                                "scopeType",
+                                "enabled"
+                              ],
+                              "properties": {
+                                "product": {
+                                  "type": "string",
+                                  "maxLength": 40
+                                },
+                                "crud": {
+                                  "type": "array",
+                                  "maxItems": 4,
+                                  "items": {
+                                    "type": "string",
+                                    "maxLength": 10
+                                  }
+                                },
+                                "ops": {
+                                  "anyOf": [
+                                    {
+                                      "type": "array",
+                                      "maxItems": 100,
+                                      "items": {
+                                        "type": "string",
+                                        "maxLength": 40
+                                      }
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "scopeType": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 40
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "enabled": {
+                                  "type": "boolean"
+                                }
+                              }
+                            }
+                          },
+                          "policy": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "mode",
+                                  "held",
+                                  "paused"
+                                ],
+                                "properties": {
+                                  "mode": {
+                                    "enum": [
+                                      "free",
+                                      "bound"
+                                    ]
+                                  },
+                                  "held": {
+                                    "type": "array",
+                                    "maxItems": 10,
+                                    "items": {
+                                      "type": "string",
+                                      "maxLength": 30
+                                    }
+                                  },
+                                  "paused": {
+                                    "type": "boolean"
+                                  }
+                                }
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "contacts": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 100000
+                          },
+                          "owner": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "maxLength": 200
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "ownerName": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "maxLength": 200
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "teams": {
+                            "type": "array",
+                            "maxItems": 50,
+                            "items": {
+                              "type": "string",
+                              "maxLength": 200
+                            }
+                          },
+                          "source": {
+                            "enum": [
+                              "slice",
+                              "directory_only"
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  "decidedAt": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 40
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "nextDueAt": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 40
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "proposal": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 40
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "current": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "digest",
+                  "takenAt",
+                  "name",
+                  "kind",
+                  "title",
+                  "status",
+                  "trust",
+                  "handles",
+                  "access",
+                  "policy",
+                  "contacts",
+                  "owner",
+                  "ownerName",
+                  "teams",
+                  "source"
+                ],
+                "properties": {
+                  "digest": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "takenAt": {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "kind": {
+                    "enum": [
+                      "agent",
+                      "person",
+                      "outside_agent"
+                    ]
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "status": {
+                    "enum": [
+                      "active",
+                      "departed",
+                      "paused",
+                      "removed",
+                      "pending"
+                    ]
+                  },
+                  "trust": {
+                    "enum": [
+                      "unreviewed",
+                      "trusted",
+                      "limited",
+                      "blocked"
+                    ]
+                  },
+                  "handles": {
+                    "type": "array",
+                    "maxItems": 10,
+                    "items": {
+                      "type": "string",
+                      "maxLength": 140
+                    }
+                  },
+                  "access": {
+                    "type": "array",
+                    "maxItems": 50,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "product",
+                        "crud",
+                        "ops",
+                        "scopeType",
+                        "enabled"
+                      ],
+                      "properties": {
+                        "product": {
+                          "type": "string",
+                          "maxLength": 40
+                        },
+                        "crud": {
+                          "type": "array",
+                          "maxItems": 4,
+                          "items": {
+                            "type": "string",
+                            "maxLength": 10
+                          }
+                        },
+                        "ops": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "maxItems": 100,
+                              "items": {
+                                "type": "string",
+                                "maxLength": 40
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "scopeType": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 40
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  },
+                  "policy": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "mode",
+                          "held",
+                          "paused"
+                        ],
+                        "properties": {
+                          "mode": {
+                            "enum": [
+                              "free",
+                              "bound"
+                            ]
+                          },
+                          "held": {
+                            "type": "array",
+                            "maxItems": 10,
+                            "items": {
+                              "type": "string",
+                              "maxLength": 30
+                            }
+                          },
+                          "paused": {
+                            "type": "boolean"
+                          }
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "contacts": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100000
+                  },
+                  "owner": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "ownerName": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "teams": {
+                    "type": "array",
+                    "maxItems": 50,
+                    "items": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "source": {
+                    "enum": [
+                      "slice",
+                      "directory_only"
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "review_record",
+      "title": "Record a review",
+      "description": "Record your verdict (trusted, limited, blocked) with a reason. The subject's trust changes now; apps that read the directory feed see it with the next read. Pass the snapshotDigest of the review_get you looked at; if the subject changed since (or another verdict was recorded), the answer is snapshot_stale (409). Give the subject as `id`, or as a `handle` that is not in the directory yet (a request an agent made): the entry is added now with this verdict as its trust (optional `name`). The record cannot be edited later.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "subject",
+          "verdict",
+          "reason",
+          "snapshotDigest"
+        ],
+        "properties": {
+          "subject": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "agent",
+                  "person",
+                  "outside_agent"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "handle": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 140,
+                "pattern": "^(buzz|slack|telegram):\\S+$"
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 120
+              }
+            }
+          },
+          "verdict": {
+            "enum": [
+              "trusted",
+              "limited",
+              "blocked"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "snapshotDigest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "nextReviewDays": {
+            "type": "integer",
+            "minimum": 7,
+            "maximum": 730
+          },
+          "request": {
+            "type": "string",
+            "maxLength": 40
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "review"
+        ],
+        "properties": {
+          "review": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "subject",
+              "subjectHandle",
+              "status",
+              "verdict",
+              "reason",
+              "requestedBy",
+              "reviewer",
+              "snapshot",
+              "createdAt",
+              "decidedAt",
+              "nextDueAt",
+              "proposal"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "maxLength": 40
+              },
+              "subject": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "id",
+                  "name"
+                ],
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "agent",
+                      "person",
+                      "outside_agent"
+                    ]
+                  },
+                  "id": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                }
+              },
+              "subjectHandle": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 140
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "status": {
+                "enum": [
+                  "requested",
+                  "done",
+                  "dismissed"
+                ]
+              },
+              "verdict": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "unreviewed",
+                      "trusted",
+                      "limited",
+                      "blocked"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "maxLength": 2000
+              },
+              "requestedBy": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "id",
+                  "why"
+                ],
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "owner",
+                      "agent",
+                      "system"
+                    ]
+                  },
+                  "id": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 64
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "why": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                }
+              },
+              "reviewer": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "snapshot": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "digest",
+                      "takenAt",
+                      "name",
+                      "kind",
+                      "title",
+                      "status",
+                      "trust",
+                      "handles",
+                      "access",
+                      "policy",
+                      "contacts",
+                      "owner",
+                      "ownerName",
+                      "teams",
+                      "source"
+                    ],
+                    "properties": {
+                      "digest": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      },
+                      "takenAt": {
+                        "type": "string",
+                        "maxLength": 40
+                      },
+                      "name": {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "kind": {
+                        "enum": [
+                          "agent",
+                          "person",
+                          "outside_agent"
+                        ]
+                      },
+                      "title": {
+                        "type": "string",
+                        "maxLength": 120
+                      },
+                      "status": {
+                        "enum": [
+                          "active",
+                          "departed",
+                          "paused",
+                          "removed",
+                          "pending"
+                        ]
+                      },
+                      "trust": {
+                        "enum": [
+                          "unreviewed",
+                          "trusted",
+                          "limited",
+                          "blocked"
+                        ]
+                      },
+                      "handles": {
+                        "type": "array",
+                        "maxItems": 10,
+                        "items": {
+                          "type": "string",
+                          "maxLength": 140
+                        }
+                      },
+                      "access": {
+                        "type": "array",
+                        "maxItems": 50,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "product",
+                            "crud",
+                            "ops",
+                            "scopeType",
+                            "enabled"
+                          ],
+                          "properties": {
+                            "product": {
+                              "type": "string",
+                              "maxLength": 40
+                            },
+                            "crud": {
+                              "type": "array",
+                              "maxItems": 4,
+                              "items": {
+                                "type": "string",
+                                "maxLength": 10
+                              }
+                            },
+                            "ops": {
+                              "anyOf": [
+                                {
+                                  "type": "array",
+                                  "maxItems": 100,
+                                  "items": {
+                                    "type": "string",
+                                    "maxLength": 40
+                                  }
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "scopeType": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "maxLength": 40
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "enabled": {
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      },
+                      "policy": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "mode",
+                              "held",
+                              "paused"
+                            ],
+                            "properties": {
+                              "mode": {
+                                "enum": [
+                                  "free",
+                                  "bound"
+                                ]
+                              },
+                              "held": {
+                                "type": "array",
+                                "maxItems": 10,
+                                "items": {
+                                  "type": "string",
+                                  "maxLength": 30
+                                }
+                              },
+                              "paused": {
+                                "type": "boolean"
+                              }
+                            }
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "contacts": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100000
+                      },
+                      "owner": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "maxLength": 200
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "ownerName": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "maxLength": 200
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "teams": {
+                        "type": "array",
+                        "maxItems": 50,
+                        "items": {
+                          "type": "string",
+                          "maxLength": 200
+                        }
+                      },
+                      "source": {
+                        "enum": [
+                          "slice",
+                          "directory_only"
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "createdAt": {
+                "type": "string",
+                "maxLength": 40
+              },
+              "decidedAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "nextDueAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "proposal": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "create"
+      ],
+      "effect": "write",
+      "idempotency": "required",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "review_dismiss",
+      "title": "Dismiss a review request",
+      "description": "Close a review request without a verdict (for example a duplicate or spam request from an agent). A closed review cannot be dismissed (review_not_open, 409).",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "why": {
+            "type": "string",
+            "maxLength": 500
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "review"
+        ],
+        "properties": {
+          "review": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "subject",
+              "subjectHandle",
+              "status",
+              "verdict",
+              "reason",
+              "requestedBy",
+              "reviewer",
+              "snapshot",
+              "createdAt",
+              "decidedAt",
+              "nextDueAt",
+              "proposal"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "maxLength": 40
+              },
+              "subject": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "id",
+                  "name"
+                ],
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "agent",
+                      "person",
+                      "outside_agent"
+                    ]
+                  },
+                  "id": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                }
+              },
+              "subjectHandle": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 140
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "status": {
+                "enum": [
+                  "requested",
+                  "done",
+                  "dismissed"
+                ]
+              },
+              "verdict": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "unreviewed",
+                      "trusted",
+                      "limited",
+                      "blocked"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "maxLength": 2000
+              },
+              "requestedBy": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "id",
+                  "why"
+                ],
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "owner",
+                      "agent",
+                      "system"
+                    ]
+                  },
+                  "id": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 64
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "why": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                }
+              },
+              "reviewer": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "snapshot": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "digest",
+                      "takenAt",
+                      "name",
+                      "kind",
+                      "title",
+                      "status",
+                      "trust",
+                      "handles",
+                      "access",
+                      "policy",
+                      "contacts",
+                      "owner",
+                      "ownerName",
+                      "teams",
+                      "source"
+                    ],
+                    "properties": {
+                      "digest": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      },
+                      "takenAt": {
+                        "type": "string",
+                        "maxLength": 40
+                      },
+                      "name": {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "kind": {
+                        "enum": [
+                          "agent",
+                          "person",
+                          "outside_agent"
+                        ]
+                      },
+                      "title": {
+                        "type": "string",
+                        "maxLength": 120
+                      },
+                      "status": {
+                        "enum": [
+                          "active",
+                          "departed",
+                          "paused",
+                          "removed",
+                          "pending"
+                        ]
+                      },
+                      "trust": {
+                        "enum": [
+                          "unreviewed",
+                          "trusted",
+                          "limited",
+                          "blocked"
+                        ]
+                      },
+                      "handles": {
+                        "type": "array",
+                        "maxItems": 10,
+                        "items": {
+                          "type": "string",
+                          "maxLength": 140
+                        }
+                      },
+                      "access": {
+                        "type": "array",
+                        "maxItems": 50,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "product",
+                            "crud",
+                            "ops",
+                            "scopeType",
+                            "enabled"
+                          ],
+                          "properties": {
+                            "product": {
+                              "type": "string",
+                              "maxLength": 40
+                            },
+                            "crud": {
+                              "type": "array",
+                              "maxItems": 4,
+                              "items": {
+                                "type": "string",
+                                "maxLength": 10
+                              }
+                            },
+                            "ops": {
+                              "anyOf": [
+                                {
+                                  "type": "array",
+                                  "maxItems": 100,
+                                  "items": {
+                                    "type": "string",
+                                    "maxLength": 40
+                                  }
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "scopeType": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "maxLength": 40
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "enabled": {
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      },
+                      "policy": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "mode",
+                              "held",
+                              "paused"
+                            ],
+                            "properties": {
+                              "mode": {
+                                "enum": [
+                                  "free",
+                                  "bound"
+                                ]
+                              },
+                              "held": {
+                                "type": "array",
+                                "maxItems": 10,
+                                "items": {
+                                  "type": "string",
+                                  "maxLength": 30
+                                }
+                              },
+                              "paused": {
+                                "type": "boolean"
+                              }
+                            }
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "contacts": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100000
+                      },
+                      "owner": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "maxLength": 200
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "ownerName": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "maxLength": 200
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "teams": {
+                        "type": "array",
+                        "maxItems": 50,
+                        "items": {
+                          "type": "string",
+                          "maxLength": 200
+                        }
+                      },
+                      "source": {
+                        "enum": [
+                          "slice",
+                          "directory_only"
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "createdAt": {
+                "type": "string",
+                "maxLength": 40
+              },
+              "decidedAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "nextDueAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "proposal": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "supported",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "review_policy_set",
+      "title": "Review schedule",
+      "description": "How many days between reviews of agents and of people and outside agents (7 to 730), and whether a new agent opens a review request. reviewChangedAccess is stored and takes effect when Core gives apps the access data.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "agentDays": {
+            "type": "integer",
+            "minimum": 7,
+            "maximum": 730
+          },
+          "contactDays": {
+            "type": "integer",
+            "minimum": 7,
+            "maximum": 730
+          },
+          "reviewNewAgents": {
+            "type": "boolean"
+          },
+          "reviewChangedAccess": {
+            "type": "boolean"
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "policy"
+        ],
+        "properties": {
+          "policy": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "agentDays",
+              "contactDays",
+              "reviewNewAgents",
+              "reviewChangedAccess"
+            ],
+            "properties": {
+              "agentDays": {
+                "type": "integer",
+                "minimum": 7,
+                "maximum": 730
+              },
+              "contactDays": {
+                "type": "integer",
+                "minimum": 7,
+                "maximum": 730
+              },
+              "reviewNewAgents": {
+                "type": "boolean"
+              },
+              "reviewChangedAccess": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "supported",
       "receipt": false,
       "audience": "person"
     }

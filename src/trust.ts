@@ -19,3 +19,6 @@ export function defaultTrust(source: Source): Trust {
 
 /** Days between reviews, stored in `fleet_review_policy` by migration 0002 (the review operations come later). */
 export const REVIEW_DAYS_DEFAULT = { agent_days: 90, contact_days: 180 } as const;
+
+/** A workspace agent that arrives from the slice starts `unreviewed` (fail closed, like a contact an agent added). Agents that existed before 0.2.1 keep `trusted` (migration 0002). */
+export const NEW_AGENT_TRUST: Trust = "unreviewed";
