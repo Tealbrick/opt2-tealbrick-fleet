@@ -3,10 +3,12 @@
 // (`callOp`); the page reloads the directory after each one. Holds are decided one call at a time (C8, in HoldsPage).
 // Every load shows its error with Try again (RUL-14); every failed change shows a plain message (L18).
 import { callOp, useSession } from "@opt2-tealbrick/miniapp-sdk/client";
-import { AppShell, appArt, appColour, Button, Card, Dialog, EmptyState, Field, Notice, Select, Swatch, Tag, Textarea, TextInput } from "@opt2-tealbrick/ui";
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { AppShell, appArt, appColour, Button, Card, EmptyState, Field, Notice, Select, Swatch, Tag, Textarea, TextInput } from "@opt2-tealbrick/ui";
+import { useCallback, useState } from "react";
 import type { IdentitiesViewOutput, MembersSetInput, OverviewGetOutput, PersonSetInput, TeamSetInput } from "#kit";
-import { errorMessage, HoldsPage, portalHref, useHoldList, useNav } from "./standard.tsx";
+import { changeError, EditDialog, LoadFailed, Loading, PageHead, useLoad } from "./common.tsx";
+import { loadReviews, ReviewsPage, reviewBadge, TrustTag } from "./reviews.tsx";
+import { HoldsPage, portalHref, useHoldList, useNav } from "./standard.tsx";
 
 const NAME = "Governance";
 /** Where scripts/build-ui.ts puts this app's still (`stills/`, next to this module in the hashed asset directory, C61). */
@@ -20,9 +22,10 @@ type Role = "member" | "lead";
 type Reload = () => Promise<void>;
 
 /** Shell page id → path under the base `/a/fleet/`. Teams is the launch page and the configure page (manifest `ui.launchPath` = `ui.configurePath` = "/"). */
-const ROUTES = { teams: "", people: "people", agents: "agents", identities: "identities", holds: "holds" } as const;
+const ROUTES = { teams: "", reviews: "reviews", people: "people", agents: "agents", identities: "identities", holds: "holds" } as const;
 const PAGES = [
   { id: "teams", label: "Teams" },
+  { id: "reviews", label: "Trust reviews" },
   { id: "people", label: "People" },
   { id: "agents", label: "Agents" },
   { id: "identities", label: "Identities" },
@@ -42,125 +45,8 @@ const shortHandle = (h: string) => {
   return value.length > 20 ? `${h.slice(0, at + 1)}${value.slice(0, 13)}…` : h;
 };
 
-/** Codes whose message this app wrote as a plain sentence (src/store.ts); everything else gets the shared wording. */
-const OWN_CODES = new Set(["input_invalid", "handle_invalid", "handle_taken", "team_name_taken", "limit_reached"]);
-const GONE_CODES = new Set(["team_not_found", "person_not_found", "agent_not_found"]);
-/** Plain sentence for a failed change: the cause and what to do (L18). */
-function changeError(e: unknown): string {
-  const err = (e ?? {}) as { code?: unknown; message?: unknown };
-  if (typeof err.code === "string" && OWN_CODES.has(err.code) && typeof err.message === "string" && err.message) {
-    const m = err.message.trim();
-    return `${m.charAt(0).toUpperCase()}${m.slice(1)}${/[.!?]$/.test(m) ? "" : "."}`;
-  }
-  if (typeof err.code === "string" && GONE_CODES.has(err.code)) return "This entry is gone. Reload the page and try again.";
-  return errorMessage(e);
-}
-
-/** Load state with the error kept (RUL-14). */
-function useLoad<T>(load: () => Promise<T>) {
-  const [data, setData] = useState<T | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const seq = useRef(0);
-  const reload = useCallback(async () => {
-    const mine = ++seq.current;
-    setLoading(true);
-    try {
-      const v = await load();
-      if (mine !== seq.current) return;
-      setData(v);
-      setError(null);
-    } catch (e) {
-      if (mine === seq.current) setError(errorMessage(e));
-    } finally {
-      if (mine === seq.current) setLoading(false);
-    }
-  }, [load]);
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-  return { data, error, loading, reload };
-}
-
 const loadDirectory = () => callOp<Dir>("overview_get", {});
 const loadIdentities = () => callOp<IdentitiesViewOutput>("identities_view", {});
-
-/** A failed load: what happened, and Try again. */
-function LoadFailed({ message, retrying, onRetry }: { message: string; retrying: boolean; onRetry: () => void }) {
-  return (
-    <Notice tone="needs-you" role="alert">
-      <span className="tb-row">
-        <span>{message}</span>
-        <Button size="sm" onClick={onRetry} disabled={retrying}>
-          Try again
-        </Button>
-      </span>
-    </Notice>
-  );
-}
-
-const Loading = ({ what }: { what: string }) => (
-  <p className="tb-soft" role="status">
-    Loading {what}.
-  </p>
-);
-
-function PageHead({ title, lede, action }: { title: string; lede?: ReactNode; action?: ReactNode }) {
-  return (
-    <div className="page-head">
-      <div className="tb-stack head-text">
-        <h1>{title}</h1>
-        {lede ? <p className="tb-lede">{lede}</p> : null}
-      </div>
-      {action}
-    </div>
-  );
-}
-
-/** A dialog with a Save button that runs `save`; an error stays in the dialog. */
-function EditDialog({ title, onClose, save, children }: { title: string; onClose: () => void; save: () => Promise<void>; children: ReactNode }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const run = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await save();
-      onClose();
-    } catch (e) {
-      setError(changeError(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Dialog
-      open
-      title={title}
-      onClose={onClose}
-      busy={busy}
-      footer={
-        <>
-          <Button onClick={onClose} disabled={busy}>
-            Cancel
-          </Button>
-          <Button variant="primary" onClick={() => void run()} disabled={busy}>
-            Save
-          </Button>
-        </>
-      }
-    >
-      <div className="tb-stack">
-        {error ? (
-          <Notice tone="needs-you" role="alert">
-            {error}
-          </Notice>
-        ) : null}
-        {children}
-      </div>
-    </Dialog>
-  );
-}
 
 /** Delete in two clicks: the first arms the button (it turns into the filled confirm), the second deletes. */
 function DeleteButton({ what, run, onError }: { what: string; run: () => Promise<void>; onError: (message: string | null) => void }) {
@@ -414,6 +300,8 @@ function People({ dir, reload }: { dir: Dir; reload: Reload }) {
               <h3>
                 {p.name}
                 {p.title ? <span className="tb-hint">{p.title}</span> : null}
+                {p.kind === "outside_agent" ? <Tag>Outside agent</Tag> : null}
+                <TrustTag trust={p.trust} />
                 {p.status === "departed" ? <Tag status="needs-you">departed</Tag> : null}
               </h3>
               {p.teams.length ? (
@@ -492,6 +380,7 @@ function Agents({ dir, reload }: { dir: Dir; reload: Reload }) {
               <h3>
                 {a.name}
                 <Tag>{a.mode}</Tag>
+                <TrustTag trust={a.trust} />
                 {a.status !== "active" ? <Tag status="needs-you">{a.status}</Tag> : null}
               </h3>
               {a.role ? <p>{a.role}</p> : null}
@@ -583,10 +472,12 @@ export function App() {
   const { principal, status, signOut } = useSession();
   const nav = useNav(ROUTES, "teams");
   const holds = useHoldList();
+  const signedIn = status === "signed_in" && principal;
+  const loadBadge = useCallback(() => (signedIn ? loadReviews() : Promise.resolve(null)), [signedIn]);
+  const badge = useLoad(loadBadge);
   const [notice, setNotice] = useState<string | null>(null);
   const [portal] = useState(portalHref);
-  const pages = PAGES.map((p) => (p.id === "holds" ? { ...p, badge: holds.holds?.length || null } : p));
-  const signedIn = status === "signed_in" && principal;
+  const pages = PAGES.map((p) => (p.id === "holds" ? { ...p, badge: holds.holds?.length || null } : p.id === "reviews" ? { ...p, badge: reviewBadge(badge.data) } : p));
   return (
     <AppShell
       title={NAME}
@@ -626,6 +517,8 @@ export function App() {
     >
       {!signedIn ? null : nav.page === "holds" ? (
         <HoldsPage list={holds} only={nav.hold} empty="No calls wait for your approval." />
+      ) : nav.page === "reviews" ? (
+        <ReviewsPage onChanged={() => void badge.reload()} />
       ) : nav.page === "identities" ? (
         <Identities />
       ) : (

@@ -78,7 +78,7 @@ test("review_request guards: dedup per subject, 20 open per agent, caller, subje
   const other = await ask({ subject: { kind: "person", id: s.cy.id }, why: "three" }, agentCtx(db, AGENT_B.id));
   assert.deepEqual([again.review.duplicate, again.review.id], [true, first.review.id]);
   assert.deepEqual([other.review.duplicate, other.review.id], [true, first.review.id]);
-  assert.equal(count(db, "SELECT COUNT(*) AS n FROM fleet_reviews WHERE subject_id = '" + s.cy.id + "'"), 1);
+  assert.equal(count(db, `SELECT COUNT(*) AS n FROM fleet_reviews WHERE subject_id = '${s.cy.id}'`), 1);
 
   // who may ask
   // a companion app may ask too: recorded as `system` with its instance id (never as an agent); trust is still not touched
@@ -300,7 +300,7 @@ test("reviews are append-only: triggers refuse any change to a closed review and
   assert.equal(await outcome(() => run("review_dismiss", { id: open.review.id }, ownerCtx(db))), "ok");
   // a database check: bad enums are refused
   assert.match(fails("INSERT INTO fleet_reviews (id, subject_kind, subject_id, subject_name, status, requested_by_kind, created_at) VALUES ('rvw_x', 'robot', 'a', 'a', 'requested', 'agent', 0)"), /CHECK/);
-  assert.match(fails("INSERT INTO fleet_reviews (id, subject_kind, subject_id, subject_name, status, requested_by_kind, created_at, reason) VALUES ('rvw_y', 'agent', 'a', 'a', 'requested', 'agent', 0, '" + "x".repeat(2001) + "')"), /CHECK/);
+  assert.match(fails(`INSERT INTO fleet_reviews (id, subject_kind, subject_id, subject_name, status, requested_by_kind, created_at, reason) VALUES ('rvw_y', 'agent', 'a', 'a', 'requested', 'agent', 0, '${"x".repeat(2001)}')`), /CHECK/);
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM fleet_reviews"), 3, "nothing was lost");
 });
 
