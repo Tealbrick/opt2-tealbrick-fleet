@@ -371,11 +371,15 @@ export function recordReview(db: Db, reviewer: string, input: RecordInput, now =
       const made = setPerson(db, { name, kind: s.kind as "person" | "outside_agent", source: "agent", handles: [pendingHandle] }, now);
       s = subjectOf(db, s.kind, made.id) as Subject;
     }
+    // The stale check above bound the picture the owner LOOKED at (for a handle: "pending", no owner, no teams). What is KEPT with
+    // the verdict is the entry as it is after this write (L31, same transaction): the picture the next review_get computes, so
+    // "changed since the last review" starts false and turns true only on a real change. For a known entry the two are the same.
+    const kept = pendingHandle !== null ? snapshotOf(db, s, now) : snap;
     const id = `rvw_${ulid(now)}`;
     db.prepare(
       `INSERT INTO fleet_reviews (id, subject_kind, subject_id, subject_name, status, verdict, reason, requested_by_kind, requested_by_id, requested_why, reviewer, snapshot_json, snapshot_digest, created_at, decided_at, next_due_at)
        VALUES (?, ?, ?, ?, 'done', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(id, s.kind, s.id, s.name, input.verdict, reason, by.kind, by.id, by.why, reviewer, JSON.stringify(snap), snap.digest, now, now, now + days * DAY_MS);
+    ).run(id, s.kind, s.id, s.name, input.verdict, reason, by.kind, by.id, by.why, reviewer, JSON.stringify(kept), kept.digest, now, now, now + days * DAY_MS);
     if (s.kind === "agent") db.prepare("UPDATE fleet_agents SET trust = ?, updated_at = ? WHERE id = ?").run(input.verdict, now, s.id);
     else db.prepare("UPDATE fleet_people SET trust = ?, updated_at = ? WHERE id = ?").run(input.verdict, now, s.id);
     // every open request about this entry, and about any of its handles, is answered by this verdict
@@ -383,7 +387,7 @@ export function recordReview(db: Db, reviewer: string, input: RecordInput, now =
     db.prepare(
       `UPDATE fleet_reviews SET status = 'done', verdict = ?, reviewer = ?, decided_at = ?, snapshot_digest = ?, answered_by = ?
        WHERE status = 'requested' AND ((subject_kind = ? AND subject_id = ?) ${handles.length ? `OR (subject_id = '' AND subject_handle IN (${handles.map(() => "?").join(",")}))` : ""})`,
-    ).run(input.verdict, reviewer, now, snap.digest, id, s.kind, s.id, ...handles);
+    ).run(input.verdict, reviewer, now, kept.digest, id, s.kind, s.id, ...handles);
     bump(db);
     return toReview(getRow(db, id) as Row);
   });
