@@ -388,6 +388,54 @@ test("a failed poll stops at the first transport error (no run of timeouts) and 
   assert.equal(validOut("proposals_list", list), true);
 });
 
+/** A Rules whose draft_status is slow: `slow` drafts answer "approved" after `ms`, the others at once. */
+function slowRules(slow: (draftId: string) => boolean, ms: number) {
+  const rules = fakeRules();
+  const fast = rules.callApp;
+  rules.callApp = (async (product: string, op: string, input: Json, opts?: { idempotencyKey?: string }) => {
+    if (op === "draft_status" && slow(String((input as { draftId: string }).draftId))) {
+      await new Promise((resolve) => setTimeout(resolve, ms).unref());
+      return { status: "ok", output: { draftId: (input as { draftId: string }).draftId, status: "approved", submittedAt: "2026-10-18T00:00:00.000Z", decidedAt: "2026-10-19T08:00:00.000Z", ruleCount: 1 } };
+    }
+    return (fast as unknown as (...a: unknown[]) => unknown)(product, op, input, opts);
+  }) as unknown as OpContext["callApp"];
+  return rules;
+}
+
+test("S3-5: a slow Rules cannot hold the refresh past its budget; unrefreshed rows keep the stored status and a late answer changes nothing (fire on bad)", async () => {
+  const { db } = fresh();
+  const rules = slowRules((id) => id !== "drf_1", 700);
+  const ids: string[] = [];
+  for (let i = 0; i < 6; i++) ids.push((await send(db, rules, "hold_on_behalf_of_sender", { handle: `slack:USLOW000${i}` })).proposal.id);
+  rules.decide("drf_1", "approved");
+  const t0 = Date.now();
+  const changed = await p.pollStatuses(db, rules.callApp, Date.now(), 10_000, { concurrency: 5, budgetMs: 200 });
+  assert.ok(Date.now() - t0 < 600, `answered inside the budget, not after the slow calls (${Date.now() - t0} ms)`);
+  assert.equal(changed, 1);
+  assert.equal(row(db, ids[0] as string).rules_status, "approved", "the draft that answered in time is refreshed");
+  assert.deepEqual(ids.slice(1).map((id) => row(db, id).rules_status), ["pending", "pending", "pending", "pending", "pending"], "not refreshed in time: the stored status stays, never approved");
+  await new Promise((resolve) => setTimeout(resolve, 900)); // the slow answers arrive now
+  assert.deepEqual(ids.slice(1).map((id) => row(db, id).rules_status), ["pending", "pending", "pending", "pending", "pending"], "a late answer is dropped, not written");
+  // the next refresh asks them again (quiet on good: with enough budget they are all refreshed, in parallel)
+  const t1 = Date.now();
+  await p.pollStatuses(db, rules.callApp, Date.now(), 10_000, { concurrency: 5, budgetMs: 3_000 });
+  assert.ok(Date.now() - t1 < 2_000, "five slow calls in parallel, not in a row");
+  assert.deepEqual(ids.map((id) => row(db, id).rules_status), Array(6).fill("approved"));
+});
+
+test("S3-5: proposals_list answers inside its budget when Rules does not answer at all, and the rows keep their stored status", async () => {
+  const { db } = fresh();
+  const rules = slowRules(() => true, 60_000);
+  for (let i = 0; i < 3; i++) await send(db, rules, "hold_on_behalf_of_sender", { handle: `slack:UHANG000${i}` });
+  assert.ok((p.LIST_POLL.budgetMs ?? Number.POSITIVE_INFINITY) <= 8_000, "the budget is well under the 30 s limit of the op");
+  const t0 = Date.now();
+  const list = await run("proposals_list", {}, owner(db, rules));
+  assert.ok(Date.now() - t0 < 9_000, `answered in ${Date.now() - t0} ms`);
+  assert.equal(list.proposals.length, 3);
+  assert.ok(list.proposals.every((x: any) => x.rulesStatus === "pending" && x.status === "sent"));
+  assert.equal(validOut("proposals_list", list), true);
+});
+
 // ── C88: who may start a proposal; what Governance may call ─────────────────────────────────────────────────────
 
 test("C88 a: an agent and an app are refused on proposal_send and proposals_list (no_access 403) and Rules is not called", async () => {

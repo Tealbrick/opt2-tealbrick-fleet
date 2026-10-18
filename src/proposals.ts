@@ -49,6 +49,8 @@ const NAME_MAX = 60;
 const CALL_TIMEOUT_MS = 20_000;
 const POLL_TIMEOUT_MS = 10_000;
 const POLL_BATCH = 25;
+/** `proposals_list` refreshes with this many calls at once and for at most this long (the op has a 30 s limit). */
+export const LIST_POLL: PollBudget = { concurrency: 5, budgetMs: 5_000 };
 const AGENT_ID = /^agt_[A-Za-z0-9]+$/;
 
 const isAgentTemplate = (t: Template) => t.endsWith("_outward_for_agent");
@@ -229,20 +231,34 @@ async function attempt(db: Db, callApp: CallApp, id: string, payload: Payload, t
 
 // ── status from Rules (never an approval) ───────────────────────────────────────────────────────────────────────
 
+/** How `pollStatuses` spends its time. The default is one call at a time with no overall limit (the 60 s timer). */
+export interface PollBudget {
+  /** calls in flight at once, after the first one has shown that Rules answers */
+  concurrency?: number;
+  /** after this many ms the function returns; drafts not asked in time keep their last stored status */
+  budgetMs?: number;
+}
+
 /**
  * Asks Rules about sent drafts that are not decided (`draft_status`, read). A decided draft is final. An answer that does
- * not come leaves the draft `unknown`, never `approved`. Stops at the first transport failure (no 25 timeouts in a row).
+ * not come leaves the draft `unknown`, never `approved`. Stops at the first transport failure (no 25 timeouts in a row):
+ * the first draft is asked alone, the rest only if Rules answered it. With `budget`, the rest run in parallel and the whole
+ * refresh ends at `budgetMs`; an answer that comes later is dropped, the stored status stays.
  * Called by `proposals_list` and by the 60 s timer; never by a hook; it can only call `draft_status`.
  */
-export async function pollStatuses(db: Db, callApp: CallApp, now = Date.now(), timeoutMs = POLL_TIMEOUT_MS): Promise<number> {
+export async function pollStatuses(db: Db, callApp: CallApp, now = Date.now(), timeoutMs = POLL_TIMEOUT_MS, budget: PollBudget = {}): Promise<number> {
   const open = db
     .prepare("SELECT id, rules_draft_id FROM fleet_proposals WHERE status = 'sent' AND rules_status IN ('pending', 'unknown') ORDER BY COALESCE(rules_checked_at, 0), id LIMIT ?")
     .all(POLL_BATCH);
   const set = db.prepare("UPDATE fleet_proposals SET rules_status = ?, rules_decided_at = ?, rules_checked_at = ?, updated_at = ? WHERE id = ? AND rules_status IN ('pending', 'unknown')");
   let changed = 0;
-  for (const p of open) {
+  let halted = false; // Rules did not answer: ask no further draft
+  let expired = false; // the budget is spent: write nothing more
+  let at = 0;
+  const one = async (p: (typeof open)[number]): Promise<void> => {
     try {
       const r = await callRules(callApp, "draft_status", { draftId: String(p.rules_draft_id) }, undefined, timeoutMs);
+      if (expired) return;
       const out = r.status === "ok" ? (r.output as { status?: unknown; decidedAt?: unknown }) : null;
       const status = out?.status;
       if (status === "pending" || status === "approved" || status === "rejected") {
@@ -250,13 +266,35 @@ export async function pollStatuses(db: Db, callApp: CallApp, now = Date.now(), t
         changed += set.run(status, decided, now, now, p.id).changes > 0 && status !== "pending" ? 1 : 0;
       } else {
         set.run("unknown", null, now, now, p.id);
-        break;
+        halted = true;
       }
     } catch (e) {
+      if (expired) return;
       // Rules no longer knows the draft: say so. Any other failure: unknown, and stop (Rules or the bridge is not answering).
       const gone = codeOf(e) === "not_found";
       set.run(gone ? "gone" : "unknown", null, now, now, p.id);
-      if (!gone) break;
+      if (!gone) halted = true;
+    }
+  };
+  const lane = async (): Promise<void> => {
+    while (!halted && !expired && at < open.length) await one(open[at++] as (typeof open)[number]);
+  };
+  const work = async (): Promise<void> => {
+    if (open[0]) await one(open[at++] as (typeof open)[number]); // one call alone first: a Rules that is down costs one timeout, not one per lane
+    await Promise.all(Array.from({ length: Math.max(1, budget.concurrency ?? 1) }, lane));
+  };
+  if (budget.budgetMs === undefined) {
+    await work();
+  } else {
+    let timer: NodeJS.Timeout | undefined;
+    const spent = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, budget.budgetMs);
+    });
+    try {
+      await Promise.race([work(), spent]);
+    } finally {
+      expired = true;
+      clearTimeout(timer);
     }
   }
   return changed;

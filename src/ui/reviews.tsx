@@ -193,6 +193,11 @@ function ReviewFlow({ subject: given, requests, dir, policy, onClose, onDone }: 
                     onValueChange={(v) => {
                       const at = v.indexOf(":");
                       setSubject(v ? { kind: v.slice(0, at) as Kind, id: v.slice(at + 1) } : null);
+                      // a new subject records its own verdict and is offered only its own templates (step 3 starts over)
+                      setTemplate(null);
+                      setHandleChoice(null);
+                      setRecorded(null);
+                      setRecordError(null);
                     }}
                   />
                 </Field>

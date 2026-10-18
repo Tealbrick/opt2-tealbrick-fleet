@@ -605,4 +605,69 @@ describe("Trust reviews: step 3, the contact rule", () => {
     assert.equal(ruleChoice(d, "Hold what agents do"), undefined);
     await m.unmount();
   });
+
+  /** Picks who to review in step 1 (the flow was opened with "Review someone"). */
+  async function pickWho(d: Element, label: string) {
+    await click(d.querySelector('[role="combobox"]') as Element);
+    const option = [...d.querySelectorAll('[role="option"]')].find((o) => o.textContent === label);
+    assert.ok(option, `who "${label}"`);
+    await click(option);
+  }
+
+  it("S3-1: the owner picks an agent, chooses an agent template, goes back and picks a person: the template is gone and the person gets only its own templates (fire on bad)", async () => {
+    reset();
+    const m = await mount(h(ui.ReviewsPage, {}));
+    await click(button(m.host, "Review someone"));
+    const d = dialog();
+    stub.current = snap(DIGEST, { kind: "agent", name: "Front desk", handles: [], teams: [] });
+    await pickWho(d, "Front desk (agent)");
+    await fillVerdict("Limited", "Checked.");
+    await move(d, "Next"); // → 3
+    await click(ruleChoice(d, "Hold its outward actions"));
+    await move(d, "Previous"); // → 2
+    await move(d, "Previous"); // → 1
+    stub.current = snap(DIGEST2, { kind: "outside_agent", name: "Brightline intake", handles: ["slack:UBRIGHT01"], teams: [] });
+    await pickWho(d, "Brightline intake (outside agent)");
+    await move(d, "Next"); // → 2 (the verdict stays)
+    await move(d, "Next"); // → 3
+    assert.equal(ruleChoice(d, "Hold its outward actions"), undefined, "no agent template for a person");
+    assert.ok(ruleChoice(d, "Hold what agents do for this sender"), "its own templates");
+    await move(d, "Next"); // → 4
+    assert.ok(button(d, "Record verdict"), "no rule is chosen any more");
+    await click(button(d, "Record verdict"));
+    assert.equal(stub.calls.filter((c) => c.op === "proposal_send").length, 0, "the agent template was not sent for the person");
+    assert.deepEqual(stub.calls.filter((c) => c.op === "review_record").map((c) => c.input.subject), [{ kind: "outside_agent", id: "psn_bright" }]);
+    await m.unmount();
+  });
+
+  it("S3-1: after a failed send the owner goes back and changes who: the new subject records its own verdict and its rule links to that review", async () => {
+    reset();
+    stub.proposal = failedProposal("too_many_drafts");
+    const m = await mount(h(ui.ReviewsPage, {}));
+    await click(button(m.host, "Review someone"));
+    const d = dialog();
+    stub.current = snap(DIGEST, { kind: "agent", name: "Front desk", handles: [], teams: [] });
+    await pickWho(d, "Front desk (agent)");
+    await fillVerdict("Limited", "Checked.");
+    await move(d, "Next"); // → 3
+    await click(ruleChoice(d, "Hold its outward actions"));
+    await move(d, "Next"); // → 4
+    await click(button(d, "Record verdict and send rule"));
+    assert.match(alerts(d)[0] ?? "", /^Your verdict is recorded\. The rule was not sent\./);
+    for (let i = 0; i < 3; i++) await move(d, "Previous"); // → 1
+    stub.proposal = sentProposal;
+    stub.current = snap(DIGEST2, { kind: "agent", name: "Scout", handles: [], teams: [] });
+    await pickWho(d, "Scout (agent)");
+    assert.equal(alerts(d).filter((a) => /verdict is recorded/.test(a)).length, 0, "the old failure is not shown for the new subject");
+    await move(d, "Next"); // → 2
+    await move(d, "Next"); // → 3
+    await click(ruleChoice(d, "Refuse its outward actions"));
+    await move(d, "Next"); // → 4
+    await click(button(d, "Record verdict and send rule"));
+    const records = stub.calls.filter((c) => c.op === "review_record");
+    assert.deepEqual(records.map((c) => c.input.subject), [{ kind: "agent", id: AGENT }, { kind: "agent", id: SCOUT }], "each subject records its own verdict");
+    assert.deepEqual(stub.calls.filter((c) => c.op === "proposal_send").map((c) => c.input.params), [{ agent: AGENT }, { agent: SCOUT }]);
+    assert.equal(document.querySelector("dialog[open]"), null, "closed after both succeeded");
+    await m.unmount();
+  });
 });

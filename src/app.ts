@@ -57,7 +57,7 @@ import { factsAnswer } from "./facts.ts";
 import { assertFeedCaller, directoryFeed } from "./feed.ts";
 import { identitiesView } from "./identities.ts";
 import { leanDirectory, leanTeamGet, leanTeamsList } from "./lean.ts";
-import { assertOwner, listProposals, pollStatuses, sendProposal, startProposalTimer } from "./proposals.ts";
+import { assertOwner, LIST_POLL, listProposals, pollStatuses, sendProposal, startProposalTimer } from "./proposals.ts";
 import * as reviews from "./reviews.ts";
 import * as store from "./store.ts";
 import { assertTopologyCaller, topologyGet } from "./topology.ts";
@@ -159,7 +159,7 @@ export const handlers = {
     async run(input, ctx) {
       assertOwner(ctx.caller);
       try {
-        await pollStatuses(ctx.db, ctx.callApp.bind(ctx));
+        await pollStatuses(ctx.db, ctx.callApp.bind(ctx), Date.now(), undefined, LIST_POLL);
       } catch (e) {
         ctx.log.warn("proposal status poll failed", { error: e instanceof Error ? e.message : "unknown" });
       }

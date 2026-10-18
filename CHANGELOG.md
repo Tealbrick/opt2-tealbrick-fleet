@@ -19,6 +19,9 @@ Governance, sprint S4a (contact-rule proposals, "now" templates). Decision C166;
 - Page Contact rules (after Trust reviews): the proposals with what Rules says about each, "Send again" for a proposal that was not sent, and the pointer "Approve or reject a draft in Rules & Approvals, under Drafts". Governance has no approve button.
 - Tests: `test/proposals.test.ts` (templates against Rules' RuleSpec, parameters, exact payload keys, refusal/timeout/hold/bad answer, one draft per key, status, who may call, which Rules operations are called by agent ops, hook, events, verdicts and the timer, M-CP-2) and the UI tests `test/ui-contact-rules.test.ts` and the step-3 cases in `test/ui-reviews.test.ts`.
 
+### Fixed
+- Review flow: choosing another subject resets step 3 (rule choice and recorded verdict), so a new subject records its own verdict and gets only its own templates. `proposals_list` refreshes statuses with 5 calls at once and for at most 5 s; rows not refreshed in time keep their stored status.
+
 ### Deploy note (M-CP-2)
 - Core validates a companion against the deployed target manifest (`validateCompanions`): each listed operation must exist in the target with audience `agent`, and the crud must fit. `draft_status` is new in Rules 0.3.0, so a workspace that still runs an older Rules fails that check with `companion_op_invalid`; deploy Rules 0.3.0 first (as for the directory feed). A workspace without Rules is not checked; the proposal then fails at send time with `no_grant` and the page says to deploy Rules. The grant lists both operations together, so a missing `draft_status` also takes away `rule_draft_submit`.
 
