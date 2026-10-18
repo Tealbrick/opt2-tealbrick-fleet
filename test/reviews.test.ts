@@ -205,6 +205,36 @@ test("an unknown handle creates NO directory entry; the owner adds it with a ver
   assert.equal(view2.current.status, "pending");
 });
 
+test("an unknown handle the owner adds: NOT changed since the review right after the first verdict; a real change shows changed (S2-1)", async () => {
+  const db = migratedDb();
+  seed(db);
+  await run("review_request", { subject: { kind: "person", handle: "slack:UPEND00001" }, why: "New sender." }, agentCtx(db));
+  const subject = { kind: "person", handle: "slack:UPEND00001" };
+  const view = await run("review_get", { subject }, ownerCtx(db));
+  assert.equal(view.current.status, "pending");
+  const rec = await run("review_record", { subject: { ...subject, name: "Pending Pat" }, verdict: "trusted", reason: "Known.", snapshotDigest: view.current.digest }, ownerCtx(db));
+  const entry = String(db.prepare("SELECT person_id FROM fleet_handles WHERE handle = 'slack:UPEND00001'").get()?.person_id);
+  const shown = (s: any) => [s.name, s.title, s.status, s.handles, s.owner, s.teams];
+  const after = await run("review_get", { subject: { kind: "person", id: entry } }, ownerCtx(db));
+  // the kept picture is the entry as created: what review_get computes now
+  assert.deepEqual(shown(after.review.snapshot), shown(after.current));
+  assert.deepEqual(shown(after.current), ["Pending Pat", "", "active", ["slack:UPEND00001"], null, []]);
+  assert.equal(rec.review.snapshot.status, "active", "not the pending picture");
+  assert.equal(valid("review_get", after), true);
+  assert.equal(count(db, `SELECT COUNT(*) AS n FROM fleet_reviews WHERE subject_id = '${entry}' AND snapshot_digest = '${rec.review.snapshot.digest}'`), 1);
+  // the page's rule (sameShown in src/ui/reviews.tsx): same name, title, status, handles, owner, teams
+  assert.equal(JSON.stringify(shown(after.review.snapshot)) !== JSON.stringify(shown(after.current)), false, "exactly not changed after the first verdict");
+  // fire on bad: a real change after the verdict
+  store.setPerson(db, { id: entry, name: "Pending Patricia" });
+  const changed = await run("review_get", { subject: { kind: "person", id: entry } }, ownerCtx(db));
+  assert.equal(JSON.stringify(shown(changed.review.snapshot)) !== JSON.stringify(shown(changed.current)), true, "a rename after the verdict is a change");
+  // the stale check still binds what the owner saw: a digest of another picture is refused, and nothing was written
+  await run("review_request", { subject: { kind: "person", handle: "slack:UPEND00002" }, why: "Another." }, agentCtx(db));
+  const n = count(db, "SELECT COUNT(*) AS n FROM fleet_people");
+  assert.equal(await outcome(() => run("review_record", { subject: { kind: "person", handle: "slack:UPEND00002" }, verdict: "trusted", reason: "x", snapshotDigest: view.current.digest }, ownerCtx(db))), "snapshot_stale 409");
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM fleet_people"), n, "no entry was created by the refused call");
+});
+
 // ── review_record (owner) ───────────────────────────────────────────────────────────────────────────────────────
 
 test("review_record: the verdict sets trust, closes the open requests, keeps the snapshot; answers valid against the manifest", async () => {
