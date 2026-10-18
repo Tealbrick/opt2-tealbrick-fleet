@@ -121,6 +121,10 @@ test("directory_feed: only the verified product `rules` reads the feed (C243 int
   assert.doesNotThrow(() => assertFeedCaller({ type: "app", product: "rules" }));
   assert.doesNotThrow(() => assertFeedCaller({ type: "app" }));
   assert.throws(() => assertFeedCaller({ type: "app", product: "observer" }), (e) => e instanceof TbError && e.code === "no_access" && e.httpStatus === 403);
+  // a product that is present but not a string fails closed too (never read as "no product")
+  for (const odd of [42, {}, ["rules"], true]) {
+    assert.throws(() => assertFeedCaller({ type: "app", product: odd }), (e) => e instanceof TbError && e.code === "no_access" && e.httpStatus === 403);
+  }
 });
 
 // ── the answer: schema, shape, unchanged, canonical handles, PII ────────────────────────────────────────────────

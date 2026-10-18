@@ -77,10 +77,10 @@ export const FEED_PRODUCT = "rules";
  * reading the feed. The full `caller_unverified` guard (an app caller with no product is refused) comes with SDK 0.1.34
  * (C261/C243); the test "only the verified product rules reads the feed" pins the interim so that change is visible.
  */
-export function assertFeedCaller(caller: { type: string; product?: string | null }): void {
+export function assertFeedCaller(caller: { type: string; product?: unknown }): void {
   if (caller.type !== "app") throw new TbError("no_access", "directory_feed is for apps only", 403);
   const product = caller.product;
-  if (typeof product === "string" && product !== "" && product !== FEED_PRODUCT) {
+  if (product !== undefined && product !== null && product !== "" && product !== FEED_PRODUCT) {
     throw new TbError("no_access", "directory_feed is for the Rules app only", 403);
   }
 }
