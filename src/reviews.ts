@@ -17,6 +17,7 @@ import type { Db, Json } from "@opt2-tealbrick/miniapp-sdk";
 import { bump, fail, MAX_TEAMS_PER_ANSWER, setPerson } from "./store.ts";
 import { cleanText } from "./text.ts";
 import { REVIEW_DAYS_DEFAULT, type Trust } from "./trust.ts";
+import { type Shown, sameShown } from "./ui/shown.ts";
 
 export type SubjectKind = "agent" | "person" | "outside_agent";
 export type ReviewStatus = "requested" | "done" | "dismissed";
@@ -462,31 +463,60 @@ export function dueSubjects(db: Db, now = Date.now(), limit = MAX_LIST): { items
   return { items: items.slice(0, limit), count: items.length };
 }
 
-type Shown = Pick<Snapshot, "name" | "title" | "status" | "handles" | "owner" | "teams">;
-/** The same picture apart from the trust state (a verdict changes trust; the rest is what "changed since the last review" means). */
-export function sameShown(a: Shown, b: Shown): boolean {
-  return JSON.stringify([a.name, a.title, a.status, a.handles, a.owner, a.teams]) === JSON.stringify([b.name, b.title, b.status, b.handles, b.owner, b.teams]);
-}
-
 /**
  * The subjects (`kind:id`) whose picture is no longer the one their LAST verdict looked at (name, title, status, handles,
- * owner or teams). A subject that was never reviewed is not in the set. Compares the stored snapshot with `snapshotOf` now,
- * so the page and `review_get` agree.
+ * owner or teams; the rule is `sameShown`, shared with the page). A subject that was never reviewed is not in the set.
+ * SET-BASED: one read for the last verdicts and four reads for the current pictures, whatever the number of subjects (the
+ * per-subject `subjectOf` + `snapshotOf` cost about 4 queries each: 9,500 at the design size). `within` limits the work to
+ * those `kind:id` keys (a focused topology answer). A test compares this with `snapshotOf` for every subject.
  */
-export function changedSinceReview(db: Db, now = Date.now()): Set<string> {
-  const rows = db
+export function changedSinceReview(db: Db, within?: ReadonlySet<string>): Set<string> {
+  const ids = within ? JSON.stringify([...new Set([...within].map((k) => k.slice(k.indexOf(":") + 1)))]) : null;
+  const only = (col: string) => (ids === null ? "" : ` AND ${col} IN (SELECT value FROM json_each(?))`);
+  const arg = ids === null ? [] : [ids];
+  const verdicts = db
     .prepare(
       `SELECT r.subject_kind, r.subject_id, r.snapshot_json FROM fleet_reviews r
-       JOIN (SELECT subject_kind AS k, subject_id AS sid, MAX(id) AS lid FROM fleet_reviews WHERE status = 'done' AND answered_by IS NULL AND subject_id <> '' GROUP BY subject_kind, subject_id) latest ON latest.lid = r.id
+       JOIN (SELECT subject_kind AS k, subject_id AS sid, MAX(id) AS lid FROM fleet_reviews WHERE status = 'done' AND answered_by IS NULL AND subject_id <> ''${only("subject_id")} GROUP BY subject_kind, subject_id) latest ON latest.lid = r.id
        WHERE r.snapshot_json IS NOT NULL`,
     )
-    .all();
+    .all(...arg)
+    .filter((r) => !within || within.has(`${r.subject_kind}:${r.subject_id}`));
+  if (verdicts.length === 0) return new Set();
+  // the current pictures of exactly these subjects, in the same shape and order as `snapshotOf`
+  const subjects = JSON.stringify([...new Set(verdicts.map((r) => String(r.subject_id)))]);
+  const people = new Map(db.prepare("SELECT id, kind, name, title, status FROM fleet_people WHERE id IN (SELECT value FROM json_each(?))").all(subjects).map((r) => [String(r.id), r]));
+  const agents = new Map(db.prepare("SELECT id, name, role, status, owner_id FROM fleet_agents WHERE id IN (SELECT value FROM json_each(?))").all(subjects).map((r) => [String(r.id), r]));
+  const handles = new Map<string, string[]>();
+  for (const h of db.prepare("SELECT person_id, handle FROM fleet_handles WHERE person_id IN (SELECT value FROM json_each(?)) ORDER BY person_id, handle").all(subjects)) {
+    const list = handles.get(String(h.person_id)) ?? [];
+    list.push(String(h.handle));
+    handles.set(String(h.person_id), list);
+  }
+  const teams = new Map<string, string[]>();
+  for (const t of db
+    .prepare("SELECT m.kind, m.subject_id, t.name FROM fleet_members m JOIN fleet_teams t ON t.id = m.team_id WHERE m.subject_id IN (SELECT value FROM json_each(?)) ORDER BY t.name COLLATE NOCASE, t.id")
+    .all(subjects)) {
+    const key = `${t.kind}:${t.subject_id}`;
+    const list = teams.get(key) ?? [];
+    list.push(String(t.name));
+    teams.set(key, list);
+  }
   const changed = new Set<string>();
-  for (const r of rows) {
+  for (const r of verdicts) {
     const kind = r.subject_kind as SubjectKind;
     const id = String(r.subject_id);
-    const s = subjectOf(db, kind, id);
-    if (s && !sameShown(JSON.parse(String(r.snapshot_json)) as Snapshot, snapshotOf(db, s, now))) changed.add(`${kind}:${id}`);
+    let now: Shown;
+    if (kind === "agent") {
+      const a = agents.get(id);
+      if (!a) continue; // gone: nothing to compare
+      now = { name: String(a.name), title: String(a.role), status: String(a.status), handles: [], owner: a.owner_id === null ? null : String(a.owner_id), teams: (teams.get(`agent:${id}`) ?? []).slice(0, MAX_TEAMS_PER_ANSWER) };
+    } else {
+      const p = people.get(id);
+      if (!p || p.kind !== kind) continue;
+      now = { name: String(p.name), title: String(p.title), status: String(p.status), handles: handles.get(id) ?? [], owner: null, teams: (teams.get(`person:${id}`) ?? []).slice(0, MAX_TEAMS_PER_ANSWER) };
+    }
+    if (!sameShown(JSON.parse(String(r.snapshot_json)) as Snapshot, now)) changed.add(`${kind}:${id}`);
   }
   return changed;
 }

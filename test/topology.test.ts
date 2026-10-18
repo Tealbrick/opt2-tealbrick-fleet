@@ -11,6 +11,7 @@ import { handlers, manifest } from "../src/app.ts";
 import * as r from "../src/reviews.ts";
 import * as store from "../src/store.ts";
 import { assertTopologyCaller, sourceNote, TOPOLOGY_CAPS, topologyGet } from "../src/topology.ts";
+import { sameShown } from "../src/ui/shown.ts";
 import { bigDirectory } from "./big.ts";
 import { AGENT_A, AGENT_B, migratedDb } from "./helpers.ts";
 import { seed } from "./seed.ts";
@@ -155,7 +156,14 @@ test("an id over 64 characters is left out with one warning, not an invalid answ
   const out = topologyGet(db, {}, (m, f) => warnings.push(`${m} ${f.what}`));
   assert.equal(validOut(out), true);
   assert.ok(!out.nodes.some((n) => n.name === "Long"));
+  assert.match(out.sources.note, / 1 entry left out: id too long\.$/, "L3: the owner is told, not only the log");
   assert.equal(warnings.length, 1);
+  // a second one: counted, and quiet on good (the seed alone has no such note)
+  db.prepare("INSERT INTO fleet_agents (id, name, mode, status, trust, first_seen, updated_at) VALUES (?, 'Long2', 'free', 'active', 'trusted', ?, ?)").run(`agt_${"Y".repeat(70)}`, T0, T0);
+  assert.match(topologyGet(db, {}).sources.note, / 2 entries left out: id too long\.$/);
+  assert.match(topologyGet(db, { layers: ["org"] }).sources.note, /^Only people, agents and teams were asked for\. 2 entries left out: id too long\.$/);
+  assert.equal(validOut(topologyGet(db, {})), true);
+  assert.ok(!/left out/.test(topologyGet(fixedSeed().db, {}).sources.note), "nothing left out: no such sentence");
   topologyGet(db, {}, (m) => warnings.push(m));
   assert.equal(warnings.length, 1, "one warning per id");
 });
@@ -232,8 +240,10 @@ test("a layer that was not asked for says not_requested; asking for contacts alo
 test("every note fits the schema (at most 280 characters)", () => {
   for (const c of ["available", "unavailable", "not_requested"] as const)
     for (const a of ["available", "unavailable", "not_requested"] as const) {
-      const note = sourceNote(c, a);
-      assert.ok(note.length > 0 && note.length <= 280, `${c}/${a}: ${note.length}`);
+      for (const left of [0, 1, 3000]) {
+        const note = sourceNote(c, a, left);
+        assert.ok(note.length > 0 && note.length <= 280, `${c}/${a}/${left}: ${note.length}`);
+      }
     }
 });
 
@@ -300,24 +310,76 @@ test("at the design size (500 teams, 2000 people, 500 agents) the whole answer f
   assert.equal(validOut(focused), true);
 });
 
-test("with 500 reviewed subjects at the design size the answer is still quick and each flag is right", async () => {
-  const { db, contactIds, agentIds } = bigDirectory();
+/** A Db that counts the statements it runs (the number of queries is the budget, not the wall clock: L39). */
+function counted(db: Db): { db: Db; count: () => number } {
+  let n = 0;
+  const wrapped: Db = {
+    ...db,
+    prepare: (sql: string) => {
+      const st = db.prepare(sql) as unknown as Record<string, (...a: unknown[]) => unknown>;
+      const run = (k: string) => (...a: unknown[]) => {
+        n++;
+        return (st[k] as (...a: unknown[]) => unknown).apply(st, a);
+      };
+      return new Proxy(st, {
+        get: (t, k: string) => (k === "all" || k === "get" || k === "run" ? run(k) : typeof t[k] === "function" ? (t[k] as (...a: unknown[]) => unknown).bind(t) : t[k]),
+      }) as unknown as ReturnType<Db["prepare"]>;
+    },
+  };
+  return { db: wrapped, count: () => n };
+}
+
+test("design size, ALL 2500 subjects reviewed: a few queries, not thousands; the flags equal the per-subject rule; a focus is cheaper still", async () => {
+  const { db, contactIds, agentIds, } = bigDirectory();
   const kindOf = new Map(db.prepare("SELECT id, kind FROM fleet_people").all().map((x) => [String(x.id), String(x.kind) as r.SubjectKind]));
-  const subjects = [...contactIds.slice(0, 300).map((id) => ({ kind: kindOf.get(id) as r.SubjectKind, id })), ...agentIds.slice(0, 200).map((id) => ({ kind: "agent" as const, id }))];
+  const subjects = [...contactIds.map((id) => ({ kind: kindOf.get(id) as r.SubjectKind, id })), ...agentIds.map((id) => ({ kind: "agent" as const, id }))];
+  assert.equal(subjects.length, 2500);
   for (const s of subjects) {
     const digest = (r.getReview(db, { subject: s }, NOW).current as r.Snapshot).digest;
     r.recordReview(db, OWNER, { subject: s, verdict: "trusted", reason: "ok", snapshotDigest: digest }, NOW);
   }
-  db.prepare("UPDATE fleet_people SET name = name || ' (renamed)' WHERE id IN (SELECT id FROM fleet_people ORDER BY id LIMIT 7)").run();
+  // after the verdicts: a rename, a new handle, a new team, a new owner, a paused agent
+  const some = (xs: string[], from: number) => xs.slice(from, from + 5);
+  const people = contactIds.filter((id) => kindOf.get(id));
+  for (const id of some(people, 0)) store.setPerson(db, { id, name: `Renamed ${id.slice(-4)}` });
+  for (const [i, id] of some(people, 50).entries()) store.setPerson(db, { id, name: String(db.prepare("SELECT name FROM fleet_people WHERE id = ?").get(id)?.name), handles: [`slack:UNEWH${String(i).padStart(5, "0")}`] });
+  const team = String(db.prepare("SELECT id FROM fleet_teams ORDER BY id LIMIT 1").get()?.id);
+  db.prepare("INSERT OR IGNORE INTO fleet_members (team_id, kind, subject_id, role, created_at) VALUES (?, 'agent', ?, 'member', ?)").run(team, agentIds[300], NOW);
+  store.setAgent(db, { agent: agentIds[400] as string, owner: contactIds[1999] as string });
+  db.prepare("UPDATE fleet_agents SET status = 'paused' WHERE id = ?").run(agentIds[450]);
+
+  // the reference: the per-subject rule, one subject at a time (what the page and review_get do)
+  const reference = new Set<string>();
+  for (const s of subjects) {
+    const entry = r.subjectOf(db, s.kind, s.id) as NonNullable<ReturnType<typeof r.subjectOf>>;
+    const was = r.getReview(db, { subject: s }, NOW).review?.snapshot as r.Snapshot;
+    if (!sameShown(was, r.snapshotOf(db, entry, NOW))) reference.add(`${s.kind}:${s.id}`);
+  }
+  assert.equal(reference.size, 13, "5 renames, 5 new handles, a team, an owner, a pause");
+
+  const full = counted(db);
   const t0 = performance.now();
-  const out = await topo(db);
+  const out = await topo(full.db);
   const ms = performance.now() - t0;
-  const reviewed = new Set(contactIds.slice(0, 300));
-  const expectChanged = new Set(db.prepare("SELECT id FROM fleet_people ORDER BY id LIMIT 7").all().map((x) => String(x.id)).filter((id) => reviewed.has(id)));
-  assert.ok(expectChanged.size > 0, "the renamed rows include reviewed ones");
-  assert.deepEqual(new Set(out.nodes.filter((n) => n.changedSinceReview).map((n) => n.id)), expectChanged);
-  assert.ok(ms < 1500, `the answer took ${Math.round(ms)} ms`);
+  const queries = full.count();
+  console.log(`# topology at the design size, 2500 reviewed: ${queries} queries, ${Math.round(ms)} ms`);
+  assert.deepEqual(new Set(out.nodes.filter((n) => n.changedSinceReview).map((n) => `${n.kind}:${n.id}`)), reference, "the set-based flags equal the per-subject rule");
+  assert.ok(queries <= 25, `${queries} queries for the whole answer (it was about 9,500)`);
+  assert.ok(ms < 1000, `the answer took ${Math.round(ms)} ms`); // generous: the query count is the real budget
   assert.equal(validOut(out), true);
+
+  // a focus: the flags are computed for the nodes in the answer only
+  const focusId = contactIds[0] as string; // renamed above
+  const f = counted(db);
+  const focused = await topo(f.db, { focus: focusId });
+  assert.ok(f.count() <= queries, `${f.count()} queries for a focus`);
+  assert.equal(focused.nodes.find((n) => n.id === focusId)?.changedSinceReview, true);
+  assert.ok(focused.nodes.length < 40);
+  for (const n of focused.nodes) assert.equal(n.changedSinceReview, n.kind === "team" ? false : reference.has(`${n.kind}:${n.id}`), n.name);
+  // the changed lookup itself reads only what it is asked for
+  const only = counted(db);
+  assert.deepEqual([...r.changedSinceReview(only.db, new Set([`${kindOf.get(focusId)}:${focusId}`]))], [`${kindOf.get(focusId)}:${focusId}`]);
+  assert.ok(only.count() <= 5, `${only.count()} queries for one subject`);
 });
 
 test("more than 10000 edges is refused with topology_too_large 503, 10000 is not", async () => {

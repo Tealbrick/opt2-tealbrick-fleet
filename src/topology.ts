@@ -48,11 +48,13 @@ function skip(warn: Warn | undefined, what: string, id: string): void {
 const idFits = (id: string): boolean => id.length >= 1 && id.length <= ID_MAX;
 
 /** The plain sentence that says what the two layers are, for every combination (at most 280 characters). */
-export function sourceNote(contacts: Source, access: Source): string {
+export function sourceNote(contacts: Source, access: Source, leftOut = 0): string {
   const parts: string[] = [];
   if (contacts === "unavailable") parts.push("Channel contacts are not shown: the Connect contact book is not available to apps yet.");
   if (access === "unavailable") parts.push("App access is not shown: the copy of access from Portal is not available to apps yet. Change access in Portal.");
-  if (parts.length === 0) return contacts === "not_requested" && access === "not_requested" ? "Only people, agents and teams were asked for." : "Contacts and access are shown.";
+  if (parts.length === 0) parts.push(contacts === "not_requested" && access === "not_requested" ? "Only people, agents and teams were asked for." : "Contacts and access are shown.");
+  // L3: an entry that cannot be carried is counted, not dropped without a word
+  if (leftOut > 0) parts.push(`${leftOut} ${leftOut === 1 ? "entry" : "entries"} left out: id too long.`);
   return parts.join(" ");
 }
 
@@ -60,11 +62,12 @@ export function topologyGet(db: Db, input: TopologyGetInput, warn?: Warn): Topol
   const asked = new Set<Layer>(input.layers ?? LAYERS);
   const sourceOf = (layer: Layer): Source => (asked.has(layer) ? "unavailable" : "not_requested");
   const sources: TopologyGetOutput["sources"] = { contacts: sourceOf("contacts"), access: sourceOf("access"), note: "" };
-  sources.note = sourceNote(sources.contacts, sources.access);
 
   let nodes: Node[] = [];
   let edges: Edge[] = [];
-  if (asked.has("org")) ({ nodes, edges } = orgLayer(db, warn));
+  let leftOut = 0;
+  if (asked.has("org")) ({ nodes, edges, leftOut } = orgLayer(db, warn));
+  sources.note = sourceNote(sources.contacts, sources.access, leftOut);
 
   if (input.focus !== undefined) {
     const focus = input.focus;
@@ -81,9 +84,10 @@ export function topologyGet(db: Db, input: TopologyGetInput, warn?: Warn): Topol
   if (nodes.length > TOPOLOGY_CAPS.nodes) tooLarge("nodes", TOPOLOGY_CAPS.nodes);
   if (edges.length > TOPOLOGY_CAPS.edges) tooLarge("edges", TOPOLOGY_CAPS.edges);
 
-  // trust, due date and "changed since review" come from the review logic (src/reviews.ts); computed only for an answer that fits
+  // trust, due date and "changed since review" come from the review logic (src/reviews.ts); computed only for an answer that fits,
+  // and the changed flags only for the nodes in it (a focused answer stays cheap)
   const due = reviewDueDates(db);
-  const changed = changedSinceReview(db);
+  const changed = changedSinceReview(db, new Set(nodes.filter((n) => n.kind !== "team").map((n) => `${n.kind}:${n.id}`)));
   for (const n of nodes) {
     if (n.kind === "team") continue;
     const key = `${n.kind}:${n.id}`;
@@ -97,12 +101,14 @@ type Row = Record<string, unknown>;
 const KIND_ORDER: Record<Node["kind"], number> = { person: 0, outside_agent: 1, agent: 2, app: 3, team: 4 };
 
 /** People, outside agents, agents and teams; `owner` and `member` edges. Four reads, none per node. */
-function orgLayer(db: Db, warn?: Warn): { nodes: Node[]; edges: Edge[] } {
+function orgLayer(db: Db, warn?: Warn): { nodes: Node[]; edges: Edge[]; leftOut: number } {
   const nodes: Node[] = [];
+  let leftOut = 0;
   const byId = new Map<string, Node>();
   const add = (n: Node): void => {
     if (!idFits(n.id)) {
       skip(warn, `a ${n.kind}`, n.id);
+      leftOut++;
       return;
     }
     nodes.push(n);
@@ -138,5 +144,5 @@ function orgLayer(db: Db, warn?: Warn): { nodes: Node[]; edges: Edge[] } {
     wire("member", String(m.subject_id), String(m.team_id), String(m.role), iso(m.created_at));
   }
   edges.sort((x, y) => (x.kind === y.kind ? 0 : x.kind === "owner" ? -1 : 1));
-  return { nodes, edges };
+  return { nodes, edges, leftOut };
 }
