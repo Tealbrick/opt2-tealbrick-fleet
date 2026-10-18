@@ -1,4 +1,4 @@
-// The owner's pages inside the ONE app shell, <AppShell> from @opt2-tealbrick/ui (SDK-API §14): teams, people,
+// The owner's pages inside the ONE app shell, <AppShell> from @opt2-tealbrick/ui (SDK-API §14): teams, topology, trust reviews, people,
 // agents, identities, and the SDK holds page (./standard.tsx, the template's single copy). Every change is a person op
 // (`callOp`); the page reloads the directory after each one. Holds are decided one call at a time (C8, in HoldsPage).
 // Every load shows its error with Try again (RUL-14); every failed change shows a plain message (L18).
@@ -9,6 +9,7 @@ import type { IdentitiesViewOutput, MembersSetInput, OverviewGetOutput, PersonSe
 import { changeError, EditDialog, LoadFailed, Loading, PageHead, useLoad } from "./common.tsx";
 import { loadReviews, ReviewsPage, reviewBadge, TrustTag } from "./reviews.tsx";
 import { HoldsPage, portalHref, useHoldList, useNav } from "./standard.tsx";
+import { TopologyPage } from "./topology.tsx";
 
 const NAME = "Governance";
 /** Where scripts/build-ui.ts puts this app's still (`stills/`, next to this module in the hashed asset directory, C61). */
@@ -22,9 +23,10 @@ type Role = "member" | "lead";
 type Reload = () => Promise<void>;
 
 /** Shell page id → path under the base `/a/fleet/`. Teams is the launch page and the configure page (manifest `ui.launchPath` = `ui.configurePath` = "/"). */
-const ROUTES = { teams: "", reviews: "reviews", people: "people", agents: "agents", identities: "identities", holds: "holds" } as const;
+const ROUTES = { teams: "", topology: "topology", reviews: "reviews", people: "people", agents: "agents", identities: "identities", holds: "holds" } as const;
 const PAGES = [
   { id: "teams", label: "Teams" },
+  { id: "topology", label: "Topology" },
   { id: "reviews", label: "Trust reviews" },
   { id: "people", label: "People" },
   { id: "agents", label: "Agents" },
@@ -517,6 +519,8 @@ export function App() {
     >
       {!signedIn ? null : nav.page === "holds" ? (
         <HoldsPage list={holds} only={nav.hold} empty="No calls wait for your approval." />
+      ) : nav.page === "topology" ? (
+        <TopologyPage />
       ) : nav.page === "reviews" ? (
         <ReviewsPage onChanged={() => void badge.reload()} />
       ) : nav.page === "identities" ? (

@@ -18,14 +18,14 @@ State: verified against the repo on 2026-10-17. Claims cite paths in this repo. 
 
 ## Governance: what it does
 
-Governance (0.2.1; formerly Organization Plane) is the workspace directory and its trust record. Rules reads the directory feed `directory_feed` (contract `fleet.directory_feed/1`, apps only) since Rules 0.3.0; `directory_get` is the lean agent view. A context hook adds facts about the requester (with its trust) and the agent owner to every call. Handle format is `<channel>:<value>` (`buzz:npub1...`, `slack:U...`, `telegram:123...`), canonicalized by `normalizeHandle` from `@opt2-tealbrick/manifest` (no local parser). Trust reviews: an agent asks, the owner decides. Design: `coordination/leads/fleet/DESIGN.md` (private).
+Governance (0.2.2; formerly Organization Plane) is the workspace directory and its trust record. Rules reads the directory feed `directory_feed` (contract `fleet.directory_feed/1`, apps only) since Rules 0.3.0; `directory_get` is the lean agent view. A context hook adds facts about the requester (with its trust) and the agent owner to every call. Handle format is `<channel>:<value>` (`buzz:npub1...`, `slack:U...`, `telegram:123...`), canonicalized by `normalizeHandle` from `@opt2-tealbrick/manifest` (no local parser). Trust reviews: an agent asks, the owner decides. Design: `coordination/leads/fleet/DESIGN.md` (private).
 
 ## Operations (from `tealbrick.manifest.json`)
 
-19 operations.
+20 operations.
 - Agent: `teams_list`, `team_get`, `directory_get` (lean: names, titles, trust, teams, owner; `sinceRevision` returns `unchanged:true`), `resolve_sender` (channel handle to contact, trust and teams; the 0.1.10 `person` field is kept but deprecated, null for outside agents), and `review_request` (write, receipt, idempotency required; asks the owner for a review; dedup per requester and subject; 20 open per agent; an unknown handle creates no entry).
 - App read: `directory_feed` (audience `agent` in the manifest for now; the handler refuses every caller that is not an app with `no_access` 403; sinceRevision gives `{v, revision, unchanged:true}`).
-- Person read: `overview_get`, `identities_view`, `reviews_list`, `review_get`. Person write: `team_set`, `person_set`, `members_set`, `agent_set`, `review_record` (idempotency required; `snapshot_stale` 409), `review_dismiss`, `review_policy_set`. Person destructive (held): `team_delete`, `person_delete`.
+- Person read: `overview_get`, `identities_view`, `topology_get` (nodes and edges from the own tables; `contacts` and `access` layers answer `unavailable`; agents and apps get `no_access` 403; beyond 3000 nodes or 10000 edges `topology_too_large` 503), `reviews_list`, `review_get`. Person write: `team_set`, `person_set`, `members_set`, `agent_set`, `review_record` (idempotency required; `snapshot_stale` 409), `review_dismiss`, `review_policy_set`. Person destructive (held): `team_delete`, `person_delete`.
 - **Privacy (since 0.2.1):** the agent reads never return email, handles, tags or agent mode (lean views in `src/lean.ts`; each query selects its columns). `directory_feed` (apps only) carries handles and no email, title or tag.
 
 ## Scopes, hooks and companions
@@ -50,7 +50,7 @@ None. No keys and no environment variables.
 
 ## Person UI
 
-Teams, Trust reviews, People, Agents, Identities, Holds (`src/ui/App.tsx`, `src/ui/reviews.tsx`, shared pieces in `src/ui/common.tsx`). The tab badge counts open requests and what is due. `ui.configurePath` is `/` here and `/configure` in the other apps.
+Teams, Topology, Trust reviews, People, Agents, Identities, Holds (`src/ui/App.tsx`, `src/ui/reviews.tsx`, `src/ui/topology.tsx`, shared pieces in `src/ui/common.tsx`). The tab badge counts open requests and what is due. Teams stays the launch page (`ui.launchPath` `/`); Topology becomes the launch page when it has its network picture (G-10). `ui.configurePath` is `/` here and `/configure` in the other apps.
 
 ## Requirements and runtime hints
 
@@ -60,13 +60,13 @@ Port 8080. 0.25 cpu, 256 MB. Data 1 GB plus backup 2 GB. Backup cron `30 2 * * *
 
 ## Pinned packages
 
-miniapp-sdk 0.1.25, manifest 0.1.19, conformance 0.1.18, ui 0.2.4.
+miniapp-sdk 0.1.25, manifest 0.1.19, conformance 0.1.18, ui 0.3.0.
 
 All `@opt2-tealbrick/*` pins use dist-host tarball URLs. Upgrade safety (SDK 0.1.25: pre-update snapshot, migration lock, failed mode) is in this app since 0.2.0, which migrates with migration 0002.
 
 ## Known gaps
 
-- Governance is built in sprints (DESIGN §8). 0.2.0 (S1) added the name, trust state and the feed; 0.2.1 (S2) the reviews and the lean agent views. Topology and contact rules (0.2.2, 0.2.3) are not built; step 3 of the review ("Contact rule") says so. The snapshot has no access data (G-2) and no Connect contacts (G-5).
+- Governance is built in sprints (DESIGN §8). 0.2.0 (S1) added the name, trust state and the feed; 0.2.1 (S2) the reviews and the lean agent views. 0.2.2 (S3a) added the topology from the own data; its contacts and access layers are `unavailable` and the page has no network picture until the ui kit has `TopologyGraph` (G-10). Contact rules (0.2.3) are not built; step 3 of the review ("Contact rule") says so. The snapshot has no access data (G-2) and no Connect contacts (G-5).
 - Review requests: 20 open per agent, one open per (requester, subject), 100 open system requests. A request about an unknown handle keeps the handle in the row and creates no entry; the entry is created when the owner records a verdict. Reviews are append-only and have no retention (evidence); at the design size that is about 10,000 rows (under 100 MB) a year.
 - Rollback of a failed 0.2.0 update is by the SDK pre-update snapshot (E3, restores the data), not by a down migration; migration 0002 is forward-only.
 - Revision after a restore: a restore from a backup brings back an older `revision`. A reader that holds a higher one must re-pull the full feed after a restore (Rules treats an unequal revision as changed; `sinceRevision` only answers `unchanged` on equality).

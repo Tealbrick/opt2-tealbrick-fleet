@@ -7,6 +7,7 @@ import { Button, Card, Choices, EmptyState, Field, Notice, Select, StepFlow, Swa
 import { useCallback, useEffect, useState } from "react";
 import type { OverviewGetOutput, ReviewGetOutput, ReviewsListOutput } from "#kit";
 import { changeError, EditDialog, LoadFailed, Loading, PageHead, useLoad } from "./common.tsx";
+import { sameShown } from "./shown.ts";
 
 type List = ReviewsListOutput;
 type Review = List["reviews"][number];
@@ -17,7 +18,6 @@ type Trust = "unreviewed" | "trusted" | "limited" | "blocked";
 type Verdict = "trusted" | "limited" | "blocked";
 /** A directory entry (`id`) or a handle an agent asked about that is not in the directory yet (`handle`). */
 type Subject = { kind: Kind; id?: string; handle?: string };
-type Current = NonNullable<ReviewGetOutput["current"]>;
 
 /** Open requests (all of them) and the latest verdicts: two reads, so a long history never hides an open request. */
 export async function loadReviews(): Promise<List> {
@@ -67,11 +67,6 @@ function knownAbout(dir: Dir, s: Subject) {
   }
   const p = dir.people.find((x) => x.id === s.id);
   return p ? { name: p.name, trust: p.trust as Trust } : null;
-}
-
-/** Same picture apart from the trust state (a verdict changes trust; the rest is what "changed since the last review" means). */
-function sameShown(a: Current, b: Current): boolean {
-  return JSON.stringify([a.name, a.title, a.status, a.handles, a.owner, a.teams]) === JSON.stringify([b.name, b.title, b.status, b.handles, b.owner, b.teams]);
 }
 
 const askedBy = (r: Review, dir: Dir | null): string => {

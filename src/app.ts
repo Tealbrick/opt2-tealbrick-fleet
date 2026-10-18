@@ -46,6 +46,8 @@ import {
   type TeamSetOutput,
   type TeamsListInput,
   type TeamsListOutput,
+  type TopologyGetInput,
+  type TopologyGetOutput,
 } from "#kit";
 import { factsAnswer } from "./facts.ts";
 import { assertFeedCaller, directoryFeed } from "./feed.ts";
@@ -53,6 +55,7 @@ import { identitiesView } from "./identities.ts";
 import { leanDirectory, leanTeamGet, leanTeamsList } from "./lean.ts";
 import * as reviews from "./reviews.ts";
 import * as store from "./store.ts";
+import { assertTopologyCaller, topologyGet } from "./topology.ts";
 
 export const manifest = JSON.parse(readFileSync(new URL("../tealbrick.manifest.json", import.meta.url), "utf8")) as AppDefinition["manifest"];
 export const migrationsDir = fileURLToPath(new URL("../migrations", import.meta.url));
@@ -137,6 +140,13 @@ export const handlers = {
   [OP.agentSet]: op<AgentSetInput, AgentSetOutput>({
     async run(input, ctx) {
       return { agent: store.setAgent(ctx.db, input) };
+    },
+  }),
+  [OP.topologyGet]: op<TopologyGetInput, TopologyGetOutput>({
+    // Owner only (person op): the bridge never offers it to agents, and the handler refuses every caller that is not a person.
+    async run(input, ctx) {
+      assertTopologyCaller(ctx.caller);
+      return topologyGet(ctx.db, input, (msg, fields) => ctx.log.warn(msg, fields));
     },
   }),
   [OP.reviewsList]: op<ReviewsListInput, ReviewsListOutput>({

@@ -17,6 +17,7 @@ import type { Db, Json } from "@opt2-tealbrick/miniapp-sdk";
 import { bump, fail, MAX_TEAMS_PER_ANSWER, setPerson } from "./store.ts";
 import { cleanText } from "./text.ts";
 import { REVIEW_DAYS_DEFAULT, type Trust } from "./trust.ts";
+import { type Shown, sameShown } from "./ui/shown.ts";
 
 export type SubjectKind = "agent" | "person" | "outside_agent";
 export type ReviewStatus = "requested" | "done" | "dismissed";
@@ -405,37 +406,119 @@ export function dismissReview(db: Db, reviewer: string, id: string, why: string 
 
 // ── reads ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
+interface ScheduleRow {
+  kind: SubjectKind;
+  id: string;
+  name: string;
+  /** When the next review is due (ms): the last verdict's date; else the schedule counted from when it was added (an `unreviewed` one at once). */
+  dueMs: number;
+  lastId: string | null;
+  lastVerdict: Trust | null;
+  /** The subject has an open request (it waits for the owner and is not repeated as "due"). */
+  hasOpen: boolean;
+}
+
+/** The review schedule of every scheduled subject (active people and outside agents, agents that are not removed). ONE query; the only place that decides a due date. */
+function reviewSchedule(db: Db): ScheduleRow[] {
+  const policy = reviewPolicy(db);
+  const rows = db
+    .prepare(
+      `WITH latest AS (SELECT subject_kind AS k, subject_id AS sid, MAX(id) AS lid FROM fleet_reviews WHERE status = 'done' AND answered_by IS NULL GROUP BY subject_kind, subject_id)
+       SELECT s.kind, s.id, s.name, s.trust, s.created, l.id AS last_id, l.verdict AS last_verdict, l.next_due_at AS last_due,
+              EXISTS (SELECT 1 FROM fleet_reviews o WHERE o.status = 'requested' AND o.subject_kind = s.kind AND o.subject_id = s.id) AS has_open
+       FROM (SELECT 'agent' AS kind, id, name, trust, first_seen AS created FROM fleet_agents WHERE status <> 'removed'
+             UNION ALL SELECT kind, id, name, trust, created_at AS created FROM fleet_people WHERE status = 'active') s
+       LEFT JOIN latest ON latest.k = s.kind AND latest.sid = s.id
+       LEFT JOIN fleet_reviews l ON l.id = latest.lid`,
+    )
+    .all();
+  return rows.map((r) => {
+    const days = r.kind === "agent" ? policy.agentDays : policy.contactDays;
+    return {
+      kind: r.kind as SubjectKind,
+      id: String(r.id),
+      name: String(r.name),
+      dueMs: r.last_id !== null ? Number(r.last_due) : r.trust === "unreviewed" ? Number(r.created) : Number(r.created) + days * DAY_MS,
+      lastId: r.last_id === null ? null : String(r.last_id),
+      lastVerdict: r.last_id === null ? null : (r.last_verdict as Trust),
+      hasOpen: Number(r.has_open) === 1,
+    };
+  });
+}
+
+/** The next review date of every scheduled subject, by `kind:id` (the topology shows it; departed people and removed agents have none). */
+export function reviewDueDates(db: Db): Map<string, string> {
+  return new Map(reviewSchedule(db).map((r) => [`${r.kind}:${r.id}`, iso(r.dueMs)]));
+}
+
 /**
  * Subjects due now: last verdict past its date, or never reviewed and older than the schedule (an `unreviewed` subject
  * is due at once). Subjects with an open request are not repeated here. ONE query for every subject.
  */
 export function dueSubjects(db: Db, now = Date.now(), limit = MAX_LIST): { items: DueItem[]; count: number } {
-  const policy = reviewPolicy(db);
-  const rows = db
-    .prepare(
-      `WITH latest AS (SELECT subject_kind AS k, subject_id AS sid, MAX(id) AS lid FROM fleet_reviews WHERE status = 'done' AND answered_by IS NULL GROUP BY subject_kind, subject_id)
-       SELECT s.kind, s.id, s.name, s.trust, s.created, l.id AS last_id, l.verdict AS last_verdict, l.next_due_at AS last_due
-       FROM (SELECT 'agent' AS kind, id, name, trust, first_seen AS created FROM fleet_agents WHERE status <> 'removed'
-             UNION ALL SELECT kind, id, name, trust, created_at AS created FROM fleet_people WHERE status = 'active') s
-       LEFT JOIN latest ON latest.k = s.kind AND latest.sid = s.id
-       LEFT JOIN fleet_reviews l ON l.id = latest.lid
-       WHERE NOT EXISTS (SELECT 1 FROM fleet_reviews o WHERE o.status = 'requested' AND o.subject_kind = s.kind AND o.subject_id = s.id)`,
-    )
-    .all();
-  const items: DueItem[] = [];
-  for (const r of rows) {
-    const days = r.kind === "agent" ? policy.agentDays : policy.contactDays;
-    const due = r.last_id !== null ? Number(r.last_due) : r.trust === "unreviewed" ? Number(r.created) : Number(r.created) + days * DAY_MS;
-    if (due > now) continue;
-    items.push({
-      subject: { kind: r.kind as SubjectKind, id: String(r.id), name: String(r.name) },
-      dueAt: iso(due),
-      lastReview: r.last_id === null ? null : String(r.last_id),
-      lastVerdict: r.last_id === null ? null : (r.last_verdict as Trust),
-    });
-  }
+  const items: DueItem[] = reviewSchedule(db)
+    .filter((r) => !r.hasOpen && r.dueMs <= now)
+    .map((r) => ({ subject: { kind: r.kind, id: r.id, name: r.name }, dueAt: iso(r.dueMs), lastReview: r.lastId, lastVerdict: r.lastVerdict }));
   items.sort((x, y) => x.dueAt.localeCompare(y.dueAt) || x.subject.id.localeCompare(y.subject.id));
   return { items: items.slice(0, limit), count: items.length };
+}
+
+/**
+ * The subjects (`kind:id`) whose picture is no longer the one their LAST verdict looked at (name, title, status, handles,
+ * owner or teams; the rule is `sameShown`, shared with the page). A subject that was never reviewed is not in the set.
+ * SET-BASED: one read for the last verdicts and four reads for the current pictures, whatever the number of subjects (the
+ * per-subject `subjectOf` + `snapshotOf` cost about 4 queries each: 9,500 at the design size). `within` limits the work to
+ * those `kind:id` keys (a focused topology answer). A test compares this with `snapshotOf` for every subject.
+ */
+export function changedSinceReview(db: Db, within?: ReadonlySet<string>): Set<string> {
+  const ids = within ? JSON.stringify([...new Set([...within].map((k) => k.slice(k.indexOf(":") + 1)))]) : null;
+  const only = (col: string) => (ids === null ? "" : ` AND ${col} IN (SELECT value FROM json_each(?))`);
+  const arg = ids === null ? [] : [ids];
+  const verdicts = db
+    .prepare(
+      `SELECT r.subject_kind, r.subject_id, r.snapshot_json FROM fleet_reviews r
+       JOIN (SELECT subject_kind AS k, subject_id AS sid, MAX(id) AS lid FROM fleet_reviews WHERE status = 'done' AND answered_by IS NULL AND subject_id <> ''${only("subject_id")} GROUP BY subject_kind, subject_id) latest ON latest.lid = r.id
+       WHERE r.snapshot_json IS NOT NULL`,
+    )
+    .all(...arg)
+    .filter((r) => !within || within.has(`${r.subject_kind}:${r.subject_id}`));
+  if (verdicts.length === 0) return new Set();
+  // the current pictures of exactly these subjects, in the same shape and order as `snapshotOf`
+  const subjects = JSON.stringify([...new Set(verdicts.map((r) => String(r.subject_id)))]);
+  const people = new Map(db.prepare("SELECT id, kind, name, title, status FROM fleet_people WHERE id IN (SELECT value FROM json_each(?))").all(subjects).map((r) => [String(r.id), r]));
+  const agents = new Map(db.prepare("SELECT id, name, role, status, owner_id FROM fleet_agents WHERE id IN (SELECT value FROM json_each(?))").all(subjects).map((r) => [String(r.id), r]));
+  const handles = new Map<string, string[]>();
+  for (const h of db.prepare("SELECT person_id, handle FROM fleet_handles WHERE person_id IN (SELECT value FROM json_each(?)) ORDER BY person_id, handle").all(subjects)) {
+    const list = handles.get(String(h.person_id)) ?? [];
+    list.push(String(h.handle));
+    handles.set(String(h.person_id), list);
+  }
+  const teams = new Map<string, string[]>();
+  for (const t of db
+    .prepare("SELECT m.kind, m.subject_id, t.name FROM fleet_members m JOIN fleet_teams t ON t.id = m.team_id WHERE m.subject_id IN (SELECT value FROM json_each(?)) ORDER BY t.name COLLATE NOCASE, t.id")
+    .all(subjects)) {
+    const key = `${t.kind}:${t.subject_id}`;
+    const list = teams.get(key) ?? [];
+    list.push(String(t.name));
+    teams.set(key, list);
+  }
+  const changed = new Set<string>();
+  for (const r of verdicts) {
+    const kind = r.subject_kind as SubjectKind;
+    const id = String(r.subject_id);
+    let now: Shown;
+    if (kind === "agent") {
+      const a = agents.get(id);
+      if (!a) continue; // gone: nothing to compare
+      now = { name: String(a.name), title: String(a.role), status: String(a.status), handles: [], owner: a.owner_id === null ? null : String(a.owner_id), teams: (teams.get(`agent:${id}`) ?? []).slice(0, MAX_TEAMS_PER_ANSWER) };
+    } else {
+      const p = people.get(id);
+      if (!p || p.kind !== kind) continue;
+      now = { name: String(p.name), title: String(p.title), status: String(p.status), handles: handles.get(id) ?? [], owner: null, teams: (teams.get(`person:${id}`) ?? []).slice(0, MAX_TEAMS_PER_ANSWER) };
+    }
+    if (!sameShown(JSON.parse(String(r.snapshot_json)) as Snapshot, now)) changed.add(`${kind}:${id}`);
+  }
+  return changed;
 }
 
 export interface ReviewList {
