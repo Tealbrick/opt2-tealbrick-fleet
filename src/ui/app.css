@@ -22,3 +22,14 @@
 .page-note { max-width: 62ch; }
 
 .sub-head { font-size: var(--tb-text-title); font-weight: var(--tb-weight-head); line-height: 28px; }
+
+/* Topology: the print view for a security review (the browser print of the tables and notices). The shell chrome and
+   the page's own buttons are left out; the "printed on" line is only for paper. */
+.print-only { display: none; }
+@media print {
+  .print-only { display: block; }
+  .tb-shell { display: block; }
+  .tb-shell > .tb-head, .tb-shell-nav, .no-print { display: none; }
+  .tb-shell-main { max-width: none; padding: 0; }
+  .app-page .tb-table tr { break-inside: avoid; }
+}
