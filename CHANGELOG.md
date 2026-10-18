@@ -2,6 +2,11 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
+## 0.2.3 - Unreleased
+
+### Changed
+- `directory_feed` interim allowlist (C243): an app caller with a verified product (`Caller.product`) other than `rules` now gets `no_access`, 403, with no feed data in the error. An app caller without a product still reads the feed for now (Rules on qa1 has no signed product yet); the full `caller_unverified` guard comes with SDK 0.1.34 (C261). Agents and people are refused as before. Version numbers are not bumped here.
+
 ## 0.2.2 - Unreleased
 
 Governance, sprint S3a (topology from Governance's own data). Decision C166; refs C230.

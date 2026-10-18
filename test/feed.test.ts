@@ -84,6 +84,45 @@ test("directory_feed: an agent caller gets no_access 403; a person caller too; a
   assert.doesNotThrow(() => assertFeedCaller({ type: "app" }));
 });
 
+test("directory_feed: only the verified product `rules` reads the feed (C243 interim allowlist)", async () => {
+  const db = migratedDb();
+  seed(db);
+  // quiet on good: Rules with a verified product
+  const rules = (await feedOp(db, { ...APP, product: "rules" })) as { teams: unknown[] };
+  assert.equal(rules.teams.length, 2);
+  // INTERIM (until SDK 0.1.34 / C261): an app caller without a verified product still reads the feed. When the
+  // caller_unverified guard lands this assertion must flip to a refusal.
+  const noProduct = (await feedOp(db, APP)) as { teams: unknown[] };
+  assert.equal(noProduct.teams.length, 2);
+  const nullProduct = (await feedOp(db, { ...APP, product: null })) as { teams: unknown[] };
+  assert.equal(nullProduct.teams.length, 2);
+  // fire on bad: any other verified product gets no_access 403 and nothing from the feed
+  for (const product of ["observer", "inbox", "Rules", "rules2"]) {
+    for (const input of [{}, { sinceRevision: store.revision(db) }]) {
+      let caught: unknown;
+      try {
+        await feedOp(db, { ...APP, product }, input);
+      } catch (e) {
+        caught = e;
+      }
+      assert.ok(caught instanceof TbError, `product ${product} is refused`);
+      assert.equal((caught as TbError).code, "no_access");
+      assert.equal((caught as TbError).httpStatus, 403);
+      const shown = JSON.stringify({ code: (caught as TbError).code, message: (caught as Error).message });
+      assert.doesNotMatch(shown, /agt_|teams|contacts|handles|slack:|buzz:/, "the error carries no feed data");
+    }
+  }
+  // a self-claimed name never counts: the display name "rules" with product "observer" is refused
+  assert.deepEqual(await refusal(() => feedOp(db, { ...APP, name: "rules", product: "observer" })), { code: "no_access", status: 403 });
+  // agent and person stay refused, whatever product field they carry
+  assert.deepEqual(await refusal(() => feedOp(db, { ...AGENT, product: "rules" })), { code: "no_access", status: 403 });
+  assert.deepEqual(await refusal(() => feedOp(db, { ...PERSON, product: "rules" })), { code: "no_access", status: 403 });
+  // the guard function itself
+  assert.doesNotThrow(() => assertFeedCaller({ type: "app", product: "rules" }));
+  assert.doesNotThrow(() => assertFeedCaller({ type: "app" }));
+  assert.throws(() => assertFeedCaller({ type: "app", product: "observer" }), (e) => e instanceof TbError && e.code === "no_access" && e.httpStatus === 403);
+});
+
 // ── the answer: schema, shape, unchanged, canonical handles, PII ────────────────────────────────────────────────
 
 test("directory_feed: the answer for an app is valid against fleet.directory_feed/1 and the manifest output schema", async () => {
