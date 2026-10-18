@@ -24,6 +24,9 @@ Governance, sprint S2 (reviews) and S2b (lean agent views, review UI). Decision 
 - The tag filter of `teams_list` stays (an agent can filter by a tag it cannot read; documented, harmless).
 - The review as a four-step flow (Subject, Verdict, Contact rule, Confirm) on the approved mockup.
 
+### Fixed
+- A handle an agent asked about and the owner then adds with a verdict: the verdict kept the picture of the handle while it was still `pending` (the claimed name, no owner, no teams). Right after the first verdict, `review_get` and the Trust reviews page showed "changed since the last review". Now the snapshot kept with the verdict is the entry as it is after it was created (same transaction), so the flag starts false and turns true only on a real change. The `snapshot_stale` check is unchanged: it still compares the digest of the picture the owner looked at (the pending picture) before anything is written. What is no longer stored for such a verdict is the pending picture itself; it held only the handle and the name the agent claimed, and the agent's request rows keep both. For a known entry nothing changes.
+
 ### Not in this release
 - Contact rules (`proposal_send`): step 3 of the review says so and is skipped. The topology page, the access copy from Core (`access` is empty and `source` is `directory_only` in every snapshot; G-2) and Connect contacts (G-5). "Review changed access" is stored and has no effect until Core gives apps the access data.
 - `org` and `relationship` on people (in the design draft) are not built; `directory_get` has no `org`.
