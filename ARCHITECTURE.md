@@ -60,7 +60,7 @@ Port 8080. 0.25 cpu, 256 MB. Data 1 GB plus backup 2 GB. Backup cron `30 2 * * *
 
 ## Pinned packages
 
-miniapp-sdk 0.1.25, manifest 0.1.19, conformance 0.1.18, ui 0.2.4.
+miniapp-sdk 0.1.25, manifest 0.1.19, conformance 0.1.18, ui 0.3.0.
 
 All `@opt2-tealbrick/*` pins use dist-host tarball URLs. Upgrade safety (SDK 0.1.25: pre-update snapshot, migration lock, failed mode) is in this app since 0.2.0, which migrates with migration 0002.
 

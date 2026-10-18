@@ -18,6 +18,11 @@ Governance, sprint S3a (topology from Governance's own data). Decision C166; ref
 - Tests: `test/topology.test.ts` (org layer on the seed, edge states, removed-agent rule, due and changed flags, unavailable layers, focus, caps at 3000 nodes and 10000 edges, agent and app callers refused, run-time marker strings for email, handle, tag, title and review text, output schema, a time check at the design size) and `test/ui-topology.test.ts`.
 
 ### Changed
+- `changedSinceReview` is set-based: one read for the last verdicts and four bulk reads for the current pictures (13 queries for the whole answer at the design size with all 2,500 subjects reviewed; a per-subject `subjectOf` + `snapshotOf` needs 9,500). The flags are computed only for the nodes in the answer, so a `focus` answer is cheaper still. A test compares the set with the per-subject rule for every subject.
+- A person, agent or team left out of the answer because its id is longer than 64 characters is counted in `sources.note` ("N entries left out: id too long."), as well as logged once. The schema is unchanged.
+- The Relationships table and the people table show the end of each id (`…ABC123`, the full id in the tooltip), so two entries with the same name differ on paper.
+- The "same picture apart from trust" rule (`sameShown`) is one pure module, `src/ui/shown.ts`, used by the server and by the Trust reviews page.
+- Docs: the ui pin in README and ARCHITECTURE is 0.3.0 (it was 0.2.4 in the text).
 - `src/reviews.ts`: `dueSubjects` and the new `reviewDueDates` share one schedule query (`reviewSchedule`); the open-request filter moved from SQL into the caller. `dueSubjects` answers exactly as before. New: `changedSinceReview`, `sameShown`.
 - Version 0.2.2. The launch page stays Teams (`ui.launchPath` and `ui.configurePath` are unchanged, `/`). The design lists Topology as the launch page; that waits for the network picture.
 

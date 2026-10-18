@@ -33,3 +33,5 @@
   .tb-shell-main { max-width: none; padding: 0; }
   .app-page .tb-table tr { break-inside: avoid; }
 }
+
+.id { color: var(--tb-muted); white-space: nowrap; }

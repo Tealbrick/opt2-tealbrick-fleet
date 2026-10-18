@@ -136,11 +136,11 @@ describe("Topology page", () => {
     assert.deepEqual(stub.calls, [{ op: "topology_get", input: { layers: ["org", "contacts", "access"] } }]);
     assert.equal(m.host.querySelector("h1")?.textContent, "Topology");
     assert.deepEqual(cells(m.host.querySelector('[aria-label="Relationships"]')), [
-      ["Ann Example (person)", "owns", "Front desk (agent)", "Live"],
-      ["Ann Example (person)", "leads", "Support (team)", "Live"],
-      ["Outside Bot (outside agent)", "is a member of", "Support (team)", "Live"],
-      ["Scout (agent)", "is a member of", "Support (team)", "Blocked"],
-      ["Front desk (agent)", "is a member of", "Support (team)", "Off"],
+      ["Ann Example (person) psn_ann", "owns", "Front desk (agent) …00000A", "Live"],
+      ["Ann Example (person) psn_ann", "leads", "Support (team) …upport", "Live"],
+      ["Outside Bot (outside agent) psn_bot", "is a member of", "Support (team) …upport", "Live"],
+      ["Scout (agent) …00000B", "is a member of", "Support (team) …upport", "Blocked"],
+      ["Front desk (agent) …00000A", "is a member of", "Support (team) …upport", "Off"],
     ]);
     assert.deepEqual([...m.host.querySelectorAll('[aria-label="Relationships"] thead th')].map((x) => x.textContent), ["From", "Relationship", "To", "State"]);
     assert.match(m.host.querySelector('[aria-label="Relationships"]')?.textContent ?? "", /Off: one side is departed or paused\. Blocked: one side is blocked\./);
@@ -182,10 +182,10 @@ describe("Topology page", () => {
     reset();
     const m = await mount(h(ui.TopologyPage, {}));
     assert.deepEqual(cells(m.host.querySelector('[aria-label="People and agents"]')), [
-      ["Ann Example", "Person", "Trusted", "active", "1 Dec 2026"],
-      ["Outside Bot", "Outside agent", "Limited", "active", "2 Nov 2026Changed since the last review"],
-      ["Front desk", "Agent", "Trusted", "active", "12 Oct 2026"],
-      ["Scout", "Agent", "Blocked", "paused", "Not scheduled"],
+      ["Ann Example", "Person", "psn_ann", "Trusted", "active", "1 Dec 2026"],
+      ["Outside Bot", "Outside agent", "psn_bot", "Limited", "active", "2 Nov 2026Changed since the last review"],
+      ["Front desk", "Agent", "…00000A", "Trusted", "active", "12 Oct 2026"],
+      ["Scout", "Agent", "…00000B", "Blocked", "paused", "Not scheduled"],
     ]);
     assert.equal(m.host.querySelectorAll('[aria-label="People and agents"] tbody tr').length, 4, "teams are in the relationships, not here");
     await m.unmount();
@@ -207,7 +207,22 @@ describe("Topology page", () => {
     stub.answer = { ...ANSWER(), nodes: [node(ANN, "person", "<b>Ann</b>"), node("tm_support", "team", "Support")], edges: [edge("member", ANN, "tm_support", "lead")] };
     const m = await mount(h(ui.TopologyPage, {}));
     assert.equal(m.host.querySelector("td b"), null);
-    assert.match(m.host.textContent ?? "", /<b>Ann<\/b> \(person\)/);
+    assert.match(m.host.textContent ?? "", /<b>Ann<\/b> \(person\) psn_ann/);
+    await m.unmount();
+  });
+
+  it("two entries with the same name differ in the printout: each shows the end of its id (S3-3)", async () => {
+    reset();
+    const A = "psn_01J00000000000000000000AAA";
+    const B = "psn_01J00000000000000000000BBB";
+    stub.answer = { ...ANSWER(), nodes: [node(A, "person", "Sam"), node(B, "person", "Sam"), node("tm_support", "team", "Support")], edges: [edge("member", A, "tm_support", "member"), edge("member", B, "tm_support", "lead")] };
+    const m = await mount(h(ui.TopologyPage, {}));
+    const rel = cells(m.host.querySelector('[aria-label="Relationships"]'));
+    assert.deepEqual(rel.map((row) => row[0]), [`Sam (person) …${A.slice(-6)}`, `Sam (person) …${B.slice(-6)}`]);
+    assert.notEqual(rel[0]?.[0], rel[1]?.[0]);
+    const ppl = cells(m.host.querySelector('[aria-label="People and agents"]'));
+    assert.deepEqual(ppl.map((row) => row[2]), [`…${A.slice(-6)}`, `…${B.slice(-6)}`]);
+    assert.equal(m.host.querySelector(".id")?.getAttribute("title"), A, "the full id is in the title");
     await m.unmount();
   });
 

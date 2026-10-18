@@ -40,7 +40,7 @@ This repository is private. Treat it as if it could become public. It must never
 
 ## Build
 
-Scaffolded with `create-tealbrick-miniapp`; CI template ci-v9.9. Pins: miniapp-sdk 0.1.25, manifest 0.1.19, conformance 0.1.18, ui 0.2.4.
+Scaffolded with `create-tealbrick-miniapp`; CI template ci-v9.9. Pins: miniapp-sdk 0.1.25, manifest 0.1.19, conformance 0.1.18, ui 0.3.0.
 
 `tealbrick.manifest.json` is the only description of the app. The SDK derives the routes, input and output validation, OpenAPI, receipts, holds, idempotency, scopes, backups and status from it. You write handlers by operation id (`src/app.ts`) and plain migrations (`migrations/`).
 

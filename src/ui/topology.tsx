@@ -43,7 +43,19 @@ const STATE_TAG: Record<Edge["state"], { status: "live" | "default" | "needs-you
   held: { status: "open", text: "Held" },
 };
 
-const who = (node: Node | undefined): string => (node ? `${node.name} (${KIND_LABEL[node.kind].toLowerCase()})` : "unknown");
+/** The end of an id, so two entries with the same name differ on paper (ids start with a kind prefix and a time; the end is the random part). */
+export const shortId = (id: string): string => (id.length > 8 ? `…${id.slice(-6)}` : id);
+const who = (node: Node | undefined) =>
+  node ? (
+    <>
+      {`${node.name} (${KIND_LABEL[node.kind].toLowerCase()}) `}
+      <span className="mono id" title={node.id}>
+        {shortId(node.id)}
+      </span>
+    </>
+  ) : (
+    "unknown"
+  );
 
 export function TopologyPage() {
   const { data, error, loading, reload } = useLoad(loadTopology);
@@ -141,6 +153,7 @@ export function TopologyPage() {
               <tr>
                 <th>Name</th>
                 <th>Kind</th>
+                <th>Id</th>
                 <th>Trust</th>
                 <th>Status</th>
                 <th>Next review</th>
@@ -151,6 +164,9 @@ export function TopologyPage() {
                 <tr key={n.id}>
                   <td className="strong">{n.name}</td>
                   <td>{KIND_LABEL[n.kind]}</td>
+                  <td className="mono id" title={n.id}>
+                    {shortId(n.id)}
+                  </td>
                   <td>{n.trust ? <TrustTag trust={n.trust} /> : null}</td>
                   <td>{n.status}</td>
                   <td>
