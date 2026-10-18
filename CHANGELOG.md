@@ -2,6 +2,31 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
+## 0.2.2 - Unreleased
+
+Governance, sprint S3a (topology from Governance's own data). Decision C166; refs C230.
+
+### Added
+- Person op `topology_get` (read, no idempotency, no receipt): the workspace network for the owner. Input `layers` (`org`, `contacts`, `access`; default all three) and `focus` (a node id). Output `nodes`, `edges` and `sources`.
+  - Layer `org`: nodes are people, outside agents, agents and teams. A removed agent is listed only while a team still names it (like `directory_feed`). Edges: `owner` (person to agent, label `owns`) and `member` (person, outside agent or agent to team, label = the role `member` or `lead`, `since` = when the member was added). An edge is `blocked` when either end is blocked, else `off` when either end is not active (departed, paused, removed), else `live`. `held` is not used: holds are decided in Rules.
+  - Each person, outside agent and agent node carries `trust`, `status`, `reviewDueAt` and `changedSinceReview` from the review logic in `src/reviews.ts` (the schedule query that `dueSubjects` uses, and the same "picture without trust" comparison as the review page). A departed person and a removed agent have no due date; a subject never reviewed has `changedSinceReview: false`. Teams have `trust: null`.
+  - Layers `contacts` (Connect contact book, G-5) and `access` (copy of Portal access, G-2) are not available to apps yet. A requested layer answers `unavailable` with a plain `sources.note` and no edges; a layer that was not asked for answers `not_requested`. Nothing is invented and nothing is silent.
+  - `focus`: that node, its direct neighbours and every edge between all of them. An unknown id (or a layer set without `org`) is `node_not_found`, 404.
+  - Caps (the draft `maxItems`): 3000 nodes and 10000 edges, checked on the answer that would be returned. Beyond them the call is refused with `topology_too_large` (503, transient, like `feed_too_large`), never cut; `focus` still works on a big directory. The design size (500 teams, 2000 people, 500 agents) is exactly 3000 nodes and fits.
+  - Owner only. The manifest audience is `person`, so agents never get it as a tool, and the handler also refuses every caller that is not a person (`no_access`, 403). The answer carries names, kinds, trust, status, roles and owner links; no email, handles, tags, titles, descriptions or review reasons (they stay in `overview_get` and `review_get`).
+- Page Topology (second tab, after Teams): a plain notice "The network picture comes in a later version. The table below lists every relationship."; notices that channel contacts and app access are not available yet (and that access is changed in Portal); the accessible Relationships table (from, relationship, to, state, with the meaning of Live, Off and Blocked); a table of people and agents with trust, status, next review and "Changed since the last review"; and "Print for a security review" (the browser print of the tables and notices; the page chrome and the button are not printed). A directory beyond the caps shows a plain notice instead.
+- Tests: `test/topology.test.ts` (org layer on the seed, edge states, removed-agent rule, due and changed flags, unavailable layers, focus, caps at 3000 nodes and 10000 edges, agent and app callers refused, run-time marker strings for email, handle, tag, title and review text, output schema, a time check at the design size) and `test/ui-topology.test.ts`.
+
+### Changed
+- `src/reviews.ts`: `dueSubjects` and the new `reviewDueDates` share one schedule query (`reviewSchedule`); the open-request filter moved from SQL into the caller. `dueSubjects` answers exactly as before. New: `changedSinceReview`, `sameShown`.
+- Version 0.2.2. The launch page stays Teams (`ui.launchPath` and `ui.configurePath` are unchanged, `/`). The design lists Topology as the launch page; that waits for the network picture.
+
+### Not in this release
+- The network picture. The read-only `TopologyGraph` (G-10) is not in the ui kit and the design forbids app-local graph code. The Relationships table is the accessible equivalent the design asks for.
+- Contacts (G-5) and access (G-2) data: the layers answer `unavailable`. The inspector panel of the design, "Open in Portal" links (G-7) and review history in the print view (the Trust reviews page has the history).
+- Contact rules (`proposal_send`, 0.2.3).
+- Deviations from the draft manifest: the description is rewritten to say that contacts and access are unavailable; the output schema is unchanged (node kind `app` and edge kinds `contact`, `access`, `companion` stay in the enums for the later layers and are not produced yet; `held` is not produced); `focus` is a node id (the draft said only `string`); no field of the draft was trimmed. Not in the draft: `topology_too_large` and `node_not_found` error codes, and the handler's own `no_access` check.
+
 ## 0.2.1 - Unreleased
 
 Governance, sprint S2 (reviews) and S2b (lean agent views, review UI). Decision C166; refs C230.
