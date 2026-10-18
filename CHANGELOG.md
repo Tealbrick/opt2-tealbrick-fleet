@@ -63,6 +63,9 @@ Governance, sprint S3a (topology from Governance's own data). Decision C166; ref
 - Contact rules (`proposal_send`, 0.2.3).
 - Deviations from the draft manifest: the description is rewritten to say that contacts and access are unavailable; the output schema is unchanged (node kind `app` and edge kinds `contact`, `access`, `companion` stay in the enums for the later layers and are not produced yet; `held` is not produced); `focus` is a node id (the draft said only `string`); no field of the draft was trimmed. Not in the draft: `topology_too_large` and `node_not_found` error codes, and the handler's own `no_access` check.
 
+### Security
+- `directory_feed` interim allowlist (C243): an app caller with a verified product (`Caller.product`) other than `rules` now gets `no_access`, 403, with no feed data in the error. An app caller without a product still reads the feed for now (Rules on qa1 has no signed product yet); the full `caller_unverified` guard comes with SDK 0.1.34 (C261). Agents and people are refused as before.
+
 ## 0.2.1 - Unreleased
 
 Governance, sprint S2 (reviews) and S2b (lean agent views, review UI). Decision C166; refs C230.

@@ -63,9 +63,26 @@ function skip(warn: Warn | undefined, what: string, id: string): void {
   warn?.(`directory_feed leaves out ${what} that does not fit the contract fleet.directory_feed/1`, { what, id: id.slice(0, 80) });
 }
 
-/** Only app callers (companions such as Rules) read the feed. An agent, a person or anything else gets `no_access`. */
-export function assertFeedCaller(caller: { type: string }): void {
+/** The one product allowed to read the feed (C243): Rules, whose read model it is. */
+export const FEED_PRODUCT = "rules";
+
+/**
+ * Only app callers (companions such as Rules) read the feed. An agent, a person or anything else gets `no_access`.
+ *
+ * Interim allowlist (C243, until SDK 0.1.34 / C261 refuses unverified app callers centrally): an app caller that has a
+ * VERIFIED product (`Caller.product`, from the signed grant `prd` or the signed companionCallers entry; SDK 0.1.27+; the
+ * type of the pinned SDK 0.1.25 does not declare it yet, so it is read structurally) must be `rules`. Any other verified
+ * product gets `no_access` 403, and the error carries no feed data. Never a manifest name or any self-claimed string.
+ * An app caller WITHOUT a product keeps today's behaviour for now: Rules on qa1 has no signed product yet and must keep
+ * reading the feed. The full `caller_unverified` guard (an app caller with no product is refused) comes with SDK 0.1.34
+ * (C261/C243); the test "only the verified product rules reads the feed" pins the interim so that change is visible.
+ */
+export function assertFeedCaller(caller: { type: string; product?: unknown }): void {
   if (caller.type !== "app") throw new TbError("no_access", "directory_feed is for apps only", 403);
+  const product = caller.product;
+  if (product !== undefined && product !== null && product !== "" && product !== FEED_PRODUCT) {
+    throw new TbError("no_access", "directory_feed is for the Rules app only", 403);
+  }
 }
 
 /**
