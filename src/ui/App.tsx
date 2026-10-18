@@ -7,6 +7,7 @@ import { AppShell, appArt, appColour, Button, Card, EmptyState, Field, Notice, S
 import { useCallback, useState } from "react";
 import type { IdentitiesViewOutput, MembersSetInput, OverviewGetOutput, PersonSetInput, TeamSetInput } from "#kit";
 import { changeError, EditDialog, LoadFailed, Loading, PageHead, useLoad } from "./common.tsx";
+import { ContactRulesPage } from "./contact-rules.tsx";
 import { loadReviews, ReviewsPage, reviewBadge, TrustTag } from "./reviews.tsx";
 import { HoldsPage, portalHref, useHoldList, useNav } from "./standard.tsx";
 import { TopologyPage } from "./topology.tsx";
@@ -23,11 +24,12 @@ type Role = "member" | "lead";
 type Reload = () => Promise<void>;
 
 /** Shell page id → path under the base `/a/fleet/`. Teams is the launch page and the configure page (manifest `ui.launchPath` = `ui.configurePath` = "/"). */
-const ROUTES = { teams: "", topology: "topology", reviews: "reviews", people: "people", agents: "agents", identities: "identities", holds: "holds" } as const;
+const ROUTES = { teams: "", topology: "topology", reviews: "reviews", rules: "contact-rules", people: "people", agents: "agents", identities: "identities", holds: "holds" } as const;
 const PAGES = [
   { id: "teams", label: "Teams" },
   { id: "topology", label: "Topology" },
   { id: "reviews", label: "Trust reviews" },
+  { id: "rules", label: "Contact rules" },
   { id: "people", label: "People" },
   { id: "agents", label: "Agents" },
   { id: "identities", label: "Identities" },
@@ -521,6 +523,8 @@ export function App() {
         <HoldsPage list={holds} only={nav.hold} empty="No calls wait for your approval." />
       ) : nav.page === "topology" ? (
         <TopologyPage />
+      ) : nav.page === "rules" ? (
+        <ContactRulesPage />
       ) : nav.page === "reviews" ? (
         <ReviewsPage onChanged={() => void badge.reload()} />
       ) : nav.page === "identities" ? (

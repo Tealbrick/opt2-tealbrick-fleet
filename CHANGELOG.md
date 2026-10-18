@@ -2,6 +2,34 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
+## 0.2.3 - Unreleased
+
+Governance, sprint S4a (contact-rule proposals, "now" templates). Decision C166; refs C230, C88.
+
+### Added
+- Person ops `proposal_send` (write, idempotency required) and `proposals_list` (read). `proposal_send` takes `template` (one of four) and `params`, and an optional `review` id. It builds one rule, writes the text itself and sends both to Rules & Approvals as a DRAFT with the companion call `rule_draft_submit`.
+  - Templates: `hold_outward_for_agent` and `deny_outward_for_agent` (match `agents: [agent]`, `effects: ["outward"]`); `hold_on_behalf_of_sender` and `deny_on_behalf_of_sender` (match `onBehalfOf.ids: [handle]`; the claim is unverified, so these can only add a hold or a refusal, as the rule description says). Priority 100; the owner can move the rule in Rules.
+  - Parameters are exactly one agent id (it must be a workspace agent in the directory, not removed) or one handle, made canonical by the shared `normalizeHandle`. There is no free text anywhere in the input (`additionalProperties: false`). The text is a fixed English sentence plus the agent name (through `cleanText`, clipped to 60 characters) or the handle. A review reason, a request `why` or a person name never reaches the draft.
+  - The payload is exactly `{text, rules}`: no source, product, name or note. Rules records the verified product of the calling app itself. The generated rule is checked in the tests against the `RuleSpec` of the Rules 0.3.0 manifest (copied to `test/contracts` with provenance).
+  - `sent` only when Rules answered a draft id. A Rules refusal, a hold or a timeout is kept as `failed` (or `held`) with the exact error code (no upstream text), never `sent`. The row is written first, as `failed` / `interrupted`, and its id (`prp_...`) is the idempotency key of the Rules call; sending the same template and parameter again after a failure retries the SAME proposal, so Rules never holds two drafts, even when the first answer was lost. While a draft waits in Rules the same request answers `duplicate: true`. One state change is one write.
+  - `proposals_list`: newest first, with `rulesStatus` (`pending`, `approved`, `rejected`, `gone` = Rules no longer has the draft, `unknown` = Rules did not answer) and `decidedAt`. Asking refreshes the status of undecided sent drafts through `draft_status`; so does a 60 s timer. A decided draft is final. No answer leaves `unknown`, never `approved`. Neither the list nor the timer can submit a draft.
+- Companion `rules`: `rule_draft_submit` (create) and `draft_status` (read) and nothing else; the Rules call goes through one function that refuses any other name.
+- Migration 0004 `fleet_proposals` (CHECKs tie `sent` to a draft id and a failure to a code).
+- Review flow step 3 "Contact rule": the templates that fit the subject (an agent: the two outward ones; a person or outside agent with a handle: the two sender ones, with a picker when it has several handles), "No rule" by default, and the sentence "Nothing applies yet. This only sends a draft to Rules & Approvals. You approve or reject it there, under Drafts." The rule is sent only at Confirm, after the verdict is recorded and linked to its review. If the rule is not sent the dialog says so in plain words, the verdict stays recorded, and "Send the rule again" does not record twice.
+- Page Contact rules (after Trust reviews): the proposals with what Rules says about each, "Send again" for a proposal that was not sent, and the pointer "Approve or reject a draft in Rules & Approvals, under Drafts". Governance has no approve button.
+- Tests: `test/proposals.test.ts` (templates against Rules' RuleSpec, parameters, exact payload keys, refusal/timeout/hold/bad answer, one draft per key, status, who may call, which Rules operations are called by agent ops, hook, events, verdicts and the timer, M-CP-2) and the UI tests `test/ui-contact-rules.test.ts` and the step-3 cases in `test/ui-reviews.test.ts`.
+
+### Deploy note (M-CP-2)
+- Core validates a companion against the deployed target manifest (`validateCompanions`): each listed operation must exist in the target with audience `agent`, and the crud must fit. `draft_status` is new in Rules 0.3.0, so a workspace that still runs an older Rules fails that check with `companion_op_invalid`; deploy Rules 0.3.0 first (as for the directory feed). A workspace without Rules is not checked; the proposal then fails at send time with `no_grant` and the page says to deploy Rules. The grant lists both operations together, so a missing `draft_status` also takes away `rule_draft_submit`.
+
+### Not in this release
+- Contacts from Connect (G-5) and access from Core (G-2) stay unavailable (Topology says so).
+- Team templates (`hold_outward_for_team`, after Rules reads `callerTeams` from the feed, G-3b) and recipient rules (G-6).
+- Several agents or handles in one proposal (the draft allowed lists of up to 50; one proposal names one subject).
+- Pruning of old proposals (the design says after 2 years).
+- Deviations from the draft manifest: `proposal_send` takes `params: {agent | handle}` (not `agents[]`, `handles[]`, `team`); `template` has four values (no `hold_outward_for_team`); the output adds `duplicate`; a proposal adds `params`, `rulesStatus` and `decidedAt`; `error` is the error code (at most 80 characters). `status` keeps `sent`, `held`, `failed` and describes Governance's own call; what Rules decided is `rulesStatus`.
+- Version 0.2.3; the launch page is still Teams.
+
 ## 0.2.2 - Unreleased
 
 Governance, sprint S3a (topology from Governance's own data). Decision C166; refs C230.

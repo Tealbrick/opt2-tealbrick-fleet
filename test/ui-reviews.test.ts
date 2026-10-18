@@ -101,8 +101,15 @@ interface Stub {
   /** the picture review_get answers (the subject "now") */
   current: ReturnType<typeof snap>;
   networkDown: boolean;
+  /** what proposal_send answers (the proposal in the shape of the manifest) */
+  proposal: (input: any) => any;
 }
-const stub: Stub = { calls: [], fail: {}, list: LIST(), current: snap(DIGEST), networkDown: false };
+const sentProposal = (input: any) => ({
+  proposal: { id: "prp_1", template: input.template, params: input.params, text: "Hold every outward action of the agent Front desk.", review: input.review ?? null, rulesDraftId: "drf_1", status: "sent", error: null, rulesStatus: "pending", decidedAt: null, createdAt: "2026-10-20T09:00:00.000Z" },
+  duplicate: false,
+});
+const failedProposal = (code: string) => (input: any) => ({ proposal: { ...sentProposal(input).proposal, rulesDraftId: null, status: "failed", error: code, rulesStatus: null }, duplicate: false });
+const stub: Stub = { calls: [], fail: {}, list: LIST(), current: snap(DIGEST), networkDown: false, proposal: sentProposal };
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -122,6 +129,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return json(200, { status: "ok", output: { ...stub.list, reviews } });
   }
   if (op === "overview_get") return json(200, { status: "ok", output: DIR });
+  if (op === "proposal_send") return json(200, { status: "ok", output: stub.proposal(body.input) });
   if (op === "review_get") return json(200, { status: "ok", output: { review: null, current: stub.current } });
   if (op === "review_record") return json(200, { status: "ok", output: { review: review("rvw_new", { status: "done", verdict: body.input.verdict }) } });
   if (op === "review_dismiss") {
@@ -204,6 +212,7 @@ const reset = () => {
   stub.list = LIST();
   stub.current = snap(DIGEST);
   stub.networkDown = false;
+  stub.proposal = sentProposal;
   for (const d of document.querySelectorAll("dialog")) d.remove();
 };
 
@@ -313,7 +322,9 @@ describe("Trust reviews page", () => {
     await type(d.querySelector("textarea") as Element, "  Booking bot of the partner clinic.  ");
     assert.ok(!button(d, "Next").disabled);
     await move(d, "Next"); // → 3
-    assert.match(d.textContent ?? "", /Contact rules are not part of this release/);
+    assert.match(d.textContent ?? "", /Nothing applies yet\. This only sends a draft to Rules & Approvals/);
+    assert.match(d.textContent ?? "", /Hold what agents do for this sender/, "an outside agent with a handle gets the sender templates");
+    assert.doesNotMatch(d.textContent ?? "", /Hold its outward actions/, "not the agent templates");
     await move(d, "Skip, no rule"); // → 4
     assert.match(d.textContent ?? "", /Booking bot of the partner clinic\./);
     assert.match(d.textContent ?? "", /In 180 days/);
@@ -468,6 +479,130 @@ describe("Trust reviews: fresh picture, grouped requests, handles not in the dir
       nextReviewDays: 180,
       request: "rvw_p1",
     });
+    await m.unmount();
+  });
+});
+
+describe("Trust reviews: step 3, the contact rule", () => {
+  /** Opens the review of the due agent and goes to step 3 with a verdict. */
+  async function toRuleStep(m: { host: Element }, row = 1) {
+    await click(button(rows(m.host)[row] as Element, "Review"));
+    await fillVerdict("Limited", "Checked.");
+    await move(dialog(), "Next"); // → 3
+    return dialog();
+  }
+  const ruleChoice = (d: Element, title: string) => [...d.querySelectorAll('[role="radio"]')].find((c) => c.textContent?.startsWith(title)) as Element;
+
+  it("an agent is offered the outward templates, a rule is optional, and nothing is sent before Confirm", async () => {
+    reset();
+    stub.current = snap(DIGEST, { kind: "agent", name: "Front desk", handles: [], teams: [] });
+    const m = await mount(h(ui.ReviewsPage, {}));
+    const d = await toRuleStep(m);
+    const radios = [...d.querySelectorAll('[role="radio"]')].map((c) => c.textContent ?? "");
+    assert.ok(radios.some((t) => t.startsWith("No rule")));
+    assert.ok(radios.some((t) => t.startsWith("Hold its outward actions")));
+    assert.ok(radios.some((t) => t.startsWith("Refuse its outward actions")));
+    assert.equal(ruleChoice(d, "Hold what agents do"), undefined, "no sender templates for an agent");
+    assert.match(d.textContent ?? "", /Nothing applies yet\. This only sends a draft to Rules & Approvals\. You approve or reject it there, under Drafts\./);
+    assert.ok(button(d, "Skip, no rule"), "Skip is there while no rule is chosen");
+    await click(ruleChoice(d, "Hold its outward actions"));
+    assert.equal(button(d, "Skip").hidden, true, "a chosen rule cannot be skipped by accident; choose No rule to drop it");
+    assert.equal(stub.calls.filter((c) => c.op === "proposal_send").length, 0, "choosing sends nothing");
+    await move(d, "Next"); // → 4
+    assert.match(d.textContent ?? "", /Contact ruleHold its outward actions/);
+    assert.equal(stub.calls.filter((c) => c.op === "proposal_send").length, 0, "still nothing before the last button");
+    await m.unmount();
+  });
+
+  it("Confirm records the verdict, then sends the rule linked to the recorded review: exact inputs, in this order", async () => {
+    reset();
+    stub.current = snap(DIGEST, { kind: "agent", name: "Front desk", handles: [], teams: [] });
+    const m = await mount(h(ui.ReviewsPage, {}));
+    const d = await toRuleStep(m);
+    await click(ruleChoice(d, "Refuse its outward actions"));
+    await move(d, "Next");
+    await click(button(d, "Record verdict and send rule"));
+    const sent = stub.calls.filter((c) => c.op === "review_record" || c.op === "proposal_send");
+    assert.deepEqual(sent.map((c) => c.op), ["review_record", "proposal_send"]);
+    assert.deepEqual(sent[1]?.input, { template: "deny_outward_for_agent", params: { agent: AGENT }, review: "rvw_new" });
+    assert.equal(document.querySelector("dialog[open]"), null, "closed after both succeeded");
+    await m.unmount();
+  });
+
+  it("no rule chosen: the verdict is recorded and Rules is not called (quiet on good)", async () => {
+    reset();
+    stub.current = snap(DIGEST, { kind: "agent", name: "Front desk", handles: [], teams: [] });
+    const m = await mount(h(ui.ReviewsPage, {}));
+    const d = await toRuleStep(m);
+    await move(d, "Skip, no rule");
+    await click(button(d, "Record verdict"));
+    assert.equal(stub.calls.filter((c) => c.op === "proposal_send").length, 0);
+    assert.equal(stub.calls.filter((c) => c.op === "review_record").length, 1);
+    await m.unmount();
+  });
+
+  it("Rules refuses: the verdict stays recorded, a plain message says the rule was not sent, and Send again does NOT record twice", async () => {
+    reset();
+    stub.current = snap(DIGEST, { kind: "agent", name: "Front desk", handles: [], teams: [] });
+    stub.proposal = failedProposal("too_many_drafts");
+    const m = await mount(h(ui.ReviewsPage, {}));
+    const d = await toRuleStep(m);
+    await click(ruleChoice(d, "Hold its outward actions"));
+    await move(d, "Next");
+    await click(button(d, "Record verdict and send rule"));
+    const [message] = alerts(d);
+    assert.match(message ?? "", /^Your verdict is recorded\. The rule was not sent\. Rules already has too many drafts waiting\./);
+    assert.doesNotMatch(message ?? "", /too_many_drafts|raw upstream/);
+    assert.ok(dialog().hasAttribute("open"), "stays open");
+    stub.proposal = sentProposal;
+    await click(button(d, "Send the rule again"));
+    assert.equal(stub.calls.filter((c) => c.op === "review_record").length, 1, "the verdict is recorded once");
+    assert.equal(stub.calls.filter((c) => c.op === "proposal_send").length, 2);
+    assert.equal(document.querySelector("dialog[open]"), null);
+    await m.unmount();
+  });
+
+  it("a transport failure of proposal_send is a plain message too, never a false 'sent'", async () => {
+    reset();
+    stub.current = snap(DIGEST, { kind: "agent", name: "Front desk", handles: [], teams: [] });
+    const m = await mount(h(ui.ReviewsPage, {}));
+    const d = await toRuleStep(m);
+    await click(ruleChoice(d, "Hold its outward actions"));
+    await move(d, "Next");
+    stub.fail.proposal_send = { status: 500, code: "internal_error" };
+    await click(button(d, "Record verdict and send rule"));
+    assert.match(alerts(d)[0] ?? "", /^Your verdict is recorded\. The rule was not sent\. Something went wrong/);
+    assert.ok(dialog().hasAttribute("open"));
+    await m.unmount();
+  });
+
+  it("a person or outside agent gets the sender templates with its handle; with two handles the owner picks one", async () => {
+    reset();
+    const m = await mount(h(ui.ReviewsPage, {}));
+    stub.current = snap(DIGEST, { handles: ["slack:UBRIGHT01", "slack:UBRIGHT02"] });
+    await click(button(rows(m.host)[0] as Element, "Review"));
+    await fillVerdict("Blocked", "Spam.");
+    const d = dialog();
+    await move(d, "Next");
+    await click(ruleChoice(d, "Refuse what agents do for this sender"));
+    assert.ok(d.querySelector("select, [role='combobox']"), "a handle picker");
+    await move(d, "Next");
+    assert.match(d.textContent ?? "", /Contact ruleRefuse what agents do for this sender \(slack:UBRIGHT01\)/);
+    await click(button(d, "Record verdict and send rule"));
+    assert.deepEqual(stub.calls.find((c) => c.op === "proposal_send")?.input, { template: "deny_on_behalf_of_sender", params: { handle: "slack:UBRIGHT01" }, review: "rvw_new" });
+    await m.unmount();
+  });
+
+  it("a contact without a handle gets no rule choices, only the reason", async () => {
+    reset();
+    stub.current = snap(DIGEST, { handles: [] });
+    const m = await mount(h(ui.ReviewsPage, {}));
+    await click(button(rows(m.host)[0] as Element, "Review"));
+    await fillVerdict("Trusted", "Known.");
+    const d = dialog();
+    await move(d, "Next");
+    assert.match(d.textContent ?? "", /has no channel handle, so a rule cannot name it/);
+    assert.equal(ruleChoice(d, "Hold what agents do"), undefined);
     await m.unmount();
   });
 });
