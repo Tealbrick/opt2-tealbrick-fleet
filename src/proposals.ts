@@ -127,6 +127,15 @@ export function callRules(callApp: CallApp, op: RulesOp, input: Json, key: strin
   return Promise.race([callApp("rules", op, input, key ? { idempotencyKey: key } : undefined), timeout]).finally(() => clearTimeout(timer));
 }
 
+/**
+ * Rules ANSWERED with a refusal, so no draft exists (S3-2): a 4xx from the call, except 408 (timeout) and 409 (the same
+ * idempotency key may still be in flight, so a draft may exist). A transport error, a timeout, a 5xx or a hold is not final.
+ */
+export const isFinalRefusal = (e: unknown): boolean => {
+  const s = e instanceof TbError ? e.httpStatus : (e as { httpStatus?: unknown } | null)?.httpStatus;
+  return typeof s === "number" && s >= 400 && s < 500 && s !== 408 && s !== 409 && codeOf(e) !== "timeout";
+};
+
 /** The exact code of a failure (never the upstream text). */
 const codeOf = (e: unknown): string => {
   const c = e instanceof TbError ? e.code : (e as { code?: unknown } | null)?.code;
@@ -177,8 +186,10 @@ export interface SendInput {
 
 /**
  * Drafts the rule and sends it. Returns the proposal (`sent`, `held` or `failed`) and `duplicate: true` when the same
- * template and parameters already wait in Rules (no second draft). The same template and parameters after a failure or a hold
- * RETRY the same proposal: same id, so the same idempotency key, so Rules never holds two drafts.
+ * template and parameters already wait in Rules (no second draft). The same template and parameters after a failure with no
+ * clear answer, or after a hold, RETRY the same proposal: same id, so the same idempotency key, so Rules never holds two
+ * drafts. After a FINAL refusal (Rules answered no; `error_final`) a new proposal is built from the current directory, so a
+ * permanent failure never blocks the owner (S3-2); the failed row stays in the list.
  */
 export async function sendProposal(db: Db, callApp: CallApp, by: string, input: SendInput, now = Date.now(), timeoutMs = CALL_TIMEOUT_MS): Promise<{ proposal: Proposal; duplicate: boolean }> {
   const { params, subject } = parseParams(db, input.template, input.params);
@@ -190,7 +201,7 @@ export async function sendProposal(db: Db, callApp: CallApp, by: string, input: 
   const { id, duplicate } = db.transaction(() => {
     const open = db
       .prepare(
-        "SELECT id, status FROM fleet_proposals WHERE template = ? AND params_json = ? AND (status <> 'sent' OR rules_status IN ('pending', 'unknown')) ORDER BY created_at DESC, id DESC LIMIT 1",
+        "SELECT id, status FROM fleet_proposals WHERE template = ? AND params_json = ? AND ((status <> 'sent' AND error_final = 0) OR rules_status IN ('pending', 'unknown')) ORDER BY created_at DESC, id DESC LIMIT 1",
       )
       .get(input.template, paramsJson);
     if (open) return { id: String(open.id), duplicate: open.status === "sent" };
@@ -212,11 +223,11 @@ export async function sendProposal(db: Db, callApp: CallApp, by: string, input: 
 
 /** One call to `rule_draft_submit` and ONE write of the outcome. The payload has exactly the keys `text` and `rules`. */
 async function attempt(db: Db, callApp: CallApp, id: string, payload: Payload, timeoutMs: number): Promise<void> {
-  const write = (status: "sent" | "held" | "failed", f: { error?: string; draftId?: string }) => {
+  const write = (status: "sent" | "held" | "failed", f: { error?: string; draftId?: string; final?: boolean }) => {
     const now = Date.now();
     db.prepare(
-      `UPDATE fleet_proposals SET status = ?, error = ?, rules_draft_id = ?, rules_status = ?, rules_checked_at = ?, updated_at = ? WHERE id = ? AND status <> 'sent'`,
-    ).run(status, status === "sent" ? null : (f.error ?? "error"), f.draftId ?? null, status === "sent" ? "pending" : null, status === "sent" ? now : null, now, id);
+      `UPDATE fleet_proposals SET status = ?, error = ?, error_final = ?, rules_draft_id = ?, rules_status = ?, rules_checked_at = ?, updated_at = ? WHERE id = ? AND status <> 'sent'`,
+    ).run(status, status === "sent" ? null : (f.error ?? "error"), f.final === true ? 1 : 0, f.draftId ?? null, status === "sent" ? "pending" : null, status === "sent" ? now : null, now, id);
   };
   try {
     const r = await callRules(callApp, "rule_draft_submit", { text: payload.text, rules: payload.rules as unknown as Json }, id, timeoutMs);
@@ -225,7 +236,7 @@ async function attempt(db: Db, callApp: CallApp, id: string, payload: Payload, t
     if (!out || typeof out.draftId !== "string" || out.draftId.length < 1 || out.draftId.length > 64 || out.status !== "pending") return write("failed", { error: "bad_answer" });
     write("sent", { draftId: out.draftId });
   } catch (e) {
-    write("failed", { error: codeOf(e) });
+    write("failed", { error: codeOf(e), final: isFinalRefusal(e) });
   }
 }
 
@@ -243,7 +254,8 @@ export interface PollBudget {
  * Asks Rules about sent drafts that are not decided (`draft_status`, read). A decided draft is final. An answer that does
  * not come leaves the draft `unknown`, never `approved`. Stops at the first transport failure (no 25 timeouts in a row):
  * the first draft is asked alone, the rest only if Rules answered it. With `budget`, the rest run in parallel and the whole
- * refresh ends at `budgetMs`; an answer that comes later is dropped, the stored status stays.
+ * refresh ends at `budgetMs`: a draft that was ASKED and got no answer by then is `unknown` (N1: a hanging Rules is not
+ * shown as `pending`); a draft not asked yet keeps its stored status; an answer that comes later is dropped.
  * Called by `proposals_list` and by the 60 s timer; never by a hook; it can only call `draft_status`.
  */
 export async function pollStatuses(db: Db, callApp: CallApp, now = Date.now(), timeoutMs = POLL_TIMEOUT_MS, budget: PollBudget = {}): Promise<number> {
@@ -255,7 +267,9 @@ export async function pollStatuses(db: Db, callApp: CallApp, now = Date.now(), t
   let halted = false; // Rules did not answer: ask no further draft
   let expired = false; // the budget is spent: write nothing more
   let at = 0;
+  const asked = new Set<string>(); // in flight: asked, no answer yet
   const one = async (p: (typeof open)[number]): Promise<void> => {
+    asked.add(String(p.id));
     try {
       const r = await callRules(callApp, "draft_status", { draftId: String(p.rules_draft_id) }, undefined, timeoutMs);
       if (expired) return;
@@ -274,6 +288,8 @@ export async function pollStatuses(db: Db, callApp: CallApp, now = Date.now(), t
       const gone = codeOf(e) === "not_found";
       set.run(gone ? "gone" : "unknown", null, now, now, p.id);
       if (!gone) halted = true;
+    } finally {
+      asked.delete(String(p.id));
     }
   };
   const lane = async (): Promise<void> => {
@@ -295,6 +311,7 @@ export async function pollStatuses(db: Db, callApp: CallApp, now = Date.now(), t
     } finally {
       expired = true;
       clearTimeout(timer);
+      for (const id of asked) set.run("unknown", null, now, now, id); // asked, no answer inside the budget (N1)
     }
   }
   return changed;

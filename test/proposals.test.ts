@@ -238,6 +238,7 @@ test("a Rules refusal leaves the proposal failed with the exact code, never sent
     rules.refuse = { code, status };
     const out = await send(db, rules, "deny_on_behalf_of_sender", { handle: SLACK });
     assert.deepEqual([out.proposal.status, out.proposal.error, out.proposal.rulesDraftId, out.proposal.rulesStatus], ["failed", code, null, null], code);
+    assert.equal(row(db, out.proposal.id).error_final, status < 500 ? 1 : 0, `${code}: a 4xx answer is final, a 5xx is not`);
     assert.equal(validOut("proposal_send", out), true);
     assert.ok(!JSON.stringify(out).includes("upstream text"));
     db.prepare("DELETE FROM fleet_proposals").run();
@@ -247,6 +248,7 @@ test("a Rules refusal leaves the proposal failed with the exact code, never sent
   rules.down = true;
   const down = await send(db, rules, "deny_on_behalf_of_sender", { handle: SLACK });
   assert.deepEqual([down.proposal.status, down.proposal.error], ["failed", "network_error"]);
+  assert.equal(row(db, down.proposal.id).error_final, 0, "no answer is never final");
   assert.ok(!JSON.stringify(down).includes("SECRET"));
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM fleet_proposals WHERE status = 'sent'"), 0);
 });
@@ -294,6 +296,41 @@ test("a timeout is failed (retryable): the retry has the same key, so Rules make
   assert.equal(rules.drafts.size, 1, "never two drafts");
   assert.deepEqual(new Set(rules.calls.map((c) => c.key)), new Set([first.proposal.id]), "one key for every attempt");
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM fleet_proposals"), 1);
+});
+
+test("S3-2: after a FINAL refusal (Rules answered no) sending again builds a NEW proposal from the current directory; the failed one stays listed (fire on bad)", async () => {
+  const { db } = fresh();
+  const rules = fakeRules();
+  rules.refuse = { code: "input_invalid", status: 400 }; // e.g. a Rules RuleSpec change: the stored payload will never pass
+  const first = await send(db, rules, "hold_outward_for_agent", { agent: AGENT_A.id });
+  assert.deepEqual([first.proposal.status, first.proposal.error, row(db, first.proposal.id).error_final], ["failed", "input_invalid", 1]);
+  db.prepare("UPDATE fleet_agents SET name = ? WHERE id = ?").run("Renamed Agent", AGENT_A.id);
+  rules.refuse = null;
+  const again = await send(db, rules, "hold_outward_for_agent", { agent: AGENT_A.id });
+  assert.notEqual(again.proposal.id, first.proposal.id, "a new proposal, not a resend of the dead payload");
+  assert.equal(again.proposal.status, "sent");
+  assert.ok(String(row(db, again.proposal.id).text).includes("Renamed Agent"), "the payload is built again from the directory");
+  assert.deepEqual(rules.calls.filter((c) => c.op === "rule_draft_submit").map((c) => c.key), [first.proposal.id, again.proposal.id], "a new key: no draft existed under the first");
+  assert.equal(rules.drafts.size, 1, "one draft in Rules");
+  const list = await run("proposals_list", {}, owner(db, rules));
+  assert.deepEqual(list.proposals.map((x: any) => [x.id, x.status]), [[again.proposal.id, "sent"], [first.proposal.id, "failed"]]);
+});
+
+test("S3-2 quiet on good: an ambiguous failure (409, 408, 5xx, timeout, transport) is NOT final; the retry reuses the proposal and its key", async () => {
+  const { db } = fresh();
+  for (const [code, status] of [["idempotency_in_progress", 409], ["request_timeout", 408], ["unavailable", 503]] as const) {
+    const rules = fakeRules();
+    rules.refuse = { code, status };
+    const first = await send(db, rules, "deny_outward_for_agent", { agent: AGENT_A.id });
+    assert.equal(row(db, first.proposal.id).error_final, 0, code);
+    rules.refuse = null;
+    const again = await send(db, rules, "deny_outward_for_agent", { agent: AGENT_A.id });
+    assert.equal(again.proposal.id, first.proposal.id, `${code}: the same proposal`);
+    assert.equal(again.proposal.status, "sent", code);
+    db.prepare("DELETE FROM fleet_proposals").run();
+  }
+  assert.equal(p.isFinalRefusal(new TbError("timeout", "x", 400)), false, "a timeout code is never final");
+  assert.equal(p.isFinalRefusal(new Error("plain")), false);
 });
 
 test("a process that dies in the call leaves the row failed/interrupted, not sent", async () => {
@@ -402,7 +439,7 @@ function slowRules(slow: (draftId: string) => boolean, ms: number) {
   return rules;
 }
 
-test("S3-5: a slow Rules cannot hold the refresh past its budget; unrefreshed rows keep the stored status and a late answer changes nothing (fire on bad)", async () => {
+test("S3-5 + N1: a slow Rules cannot hold the refresh past its budget; a draft asked without an answer is unknown (never pending or approved) and a late answer changes nothing (fire on bad)", async () => {
   const { db } = fresh();
   const rules = slowRules((id) => id !== "drf_1", 700);
   const ids: string[] = [];
@@ -413,9 +450,9 @@ test("S3-5: a slow Rules cannot hold the refresh past its budget; unrefreshed ro
   assert.ok(Date.now() - t0 < 600, `answered inside the budget, not after the slow calls (${Date.now() - t0} ms)`);
   assert.equal(changed, 1);
   assert.equal(row(db, ids[0] as string).rules_status, "approved", "the draft that answered in time is refreshed");
-  assert.deepEqual(ids.slice(1).map((id) => row(db, id).rules_status), ["pending", "pending", "pending", "pending", "pending"], "not refreshed in time: the stored status stays, never approved");
+  assert.deepEqual(ids.slice(1).map((id) => row(db, id).rules_status), ["unknown", "unknown", "unknown", "unknown", "unknown"], "asked, no answer in time: unknown (N1), never approved");
   await new Promise((resolve) => setTimeout(resolve, 900)); // the slow answers arrive now
-  assert.deepEqual(ids.slice(1).map((id) => row(db, id).rules_status), ["pending", "pending", "pending", "pending", "pending"], "a late answer is dropped, not written");
+  assert.deepEqual(ids.slice(1).map((id) => row(db, id).rules_status), ["unknown", "unknown", "unknown", "unknown", "unknown"], "a late answer is dropped, not written");
   // the next refresh asks them again (quiet on good: with enough budget they are all refreshed, in parallel)
   const t1 = Date.now();
   await p.pollStatuses(db, rules.callApp, Date.now(), 10_000, { concurrency: 5, budgetMs: 3_000 });
@@ -423,7 +460,7 @@ test("S3-5: a slow Rules cannot hold the refresh past its budget; unrefreshed ro
   assert.deepEqual(ids.map((id) => row(db, id).rules_status), Array(6).fill("approved"));
 });
 
-test("S3-5: proposals_list answers inside its budget when Rules does not answer at all, and the rows keep their stored status", async () => {
+test("S3-5 + N1: proposals_list answers inside its budget when Rules does not answer at all; the asked draft is unknown, the rows not asked keep their stored status", async () => {
   const { db } = fresh();
   const rules = slowRules(() => true, 60_000);
   for (let i = 0; i < 3; i++) await send(db, rules, "hold_on_behalf_of_sender", { handle: `slack:UHANG000${i}` });
@@ -432,7 +469,9 @@ test("S3-5: proposals_list answers inside its budget when Rules does not answer 
   const list = await run("proposals_list", {}, owner(db, rules));
   assert.ok(Date.now() - t0 < 9_000, `answered in ${Date.now() - t0} ms`);
   assert.equal(list.proposals.length, 3);
-  assert.ok(list.proposals.every((x: any) => x.rulesStatus === "pending" && x.status === "sent"));
+  assert.ok(list.proposals.every((x: any) => x.status === "sent"));
+  // the first draft is asked alone (a Rules that is down costs one call); it hangs, so it is unknown; the others were not asked
+  assert.deepEqual(list.proposals.map((x: any) => x.rulesStatus).sort(), ["pending", "pending", "unknown"]);
   assert.equal(validOut("proposals_list", list), true);
 });
 

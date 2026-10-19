@@ -1,6 +1,7 @@
 // Contact rules (C166, DESIGN §3.3): the rules Governance drafted from a fixed template and sent to Rules & Approvals.
 // Governance only sends a DRAFT; the owner approves or rejects it in Rules (Drafts) and this page shows what Rules says.
-// A proposal that was not sent says why and can be sent again (the same proposal, so Rules never gets two drafts).
+// A proposal that was not sent says why and can be sent again: the same proposal when Rules gave no clear answer (so Rules
+// never gets two drafts), a new one built from the directory when Rules refused it (S3-2).
 // Only the owner sees this page. Kit components only.
 import { callOp } from "@opt2-tealbrick/miniapp-sdk/client";
 import { Button, EmptyState, Notice, Swatch, Tag } from "@opt2-tealbrick/ui";

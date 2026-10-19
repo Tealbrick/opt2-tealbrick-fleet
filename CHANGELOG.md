@@ -33,6 +33,10 @@ Governance, sprint S4a (contact-rule proposals, "now" templates). Decision C166;
 - Deviations from the draft manifest: `proposal_send` takes `params: {agent | handle}` (not `agents[]`, `handles[]`, `team`); `template` has four values (no `hold_outward_for_team`); the output adds `duplicate`; a proposal adds `params`, `rulesStatus` and `decidedAt`; `error` is the error code (at most 80 characters). `status` keeps `sent`, `held`, `failed` and describes Governance's own call; what Rules decided is `rulesStatus`.
 - Version 0.2.3; the launch page is still Teams.
 
+### Fixed (review S3 before ship)
+- S3-2: a proposal that Rules REFUSED (a 4xx answer other than 408/409, so no draft exists; new column `error_final` in migration 0004) no longer blocks the owner. Sending the same template and parameter again builds a NEW proposal from the directory as it is now, and the failed one stays in the list. A failure with no clear answer (timeout, transport, 5xx, 409, interrupted) or a hold still retries the SAME proposal and key, so Rules never holds two drafts.
+- N1: when `proposals_list` runs out of its refresh budget, a draft that was asked and got no answer is `unknown` (not `pending`); drafts not asked yet keep their status; a late answer is still dropped.
+
 ## 0.2.3 - Unreleased
 
 Fix release for 0.2.2, which never started (QA-GOV022-1, S2: qa1 rolled back to 0.2.1 by itself). No new function; 0.2.2's Topology (S3a) and the directory_feed allow-list (fleet#11) ship here.
