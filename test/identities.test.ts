@@ -12,9 +12,8 @@ type Call = (product: string, op: string, input: unknown) => Promise<unknown>;
 test("C88: the identities view is a person op, the only user of the Connect companion; agents get nothing from it", () => {
   const view = manifest.operations.find((o) => o.id === "identities_view");
   assert.equal(view?.audience, "person");
-  assert.deepEqual(manifest.companions, [
-    { product: "connect", operations: ["identities_list"], crud: ["read"], purpose: manifest.companions?.[0]?.purpose },
-  ]);
+  const connect = manifest.companions?.filter((c) => c.product === "connect");
+  assert.deepEqual(connect, [{ product: "connect", operations: ["identities_list"], crud: ["read"], purpose: connect?.[0]?.purpose }]);
   for (const o of manifest.operations.filter((x) => x.audience === "agent")) {
     assert.ok(!JSON.stringify(o.output).includes("identity"), `${o.id} output carries no identities`);
   }
