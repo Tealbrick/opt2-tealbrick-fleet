@@ -1,4 +1,4 @@
--- Governance 0.2.3 (C166, DESIGN §3.3, §4): contact-rule proposals. Forward-only; 0001 to 0003 are never edited.
+-- Governance 0.2.4 (C166, DESIGN §3.3, §4): contact-rule proposals. Forward-only; 0001 to 0003 are never edited.
 -- A proposal is a rule Governance DRAFTED from a fixed template and sent to Rules & Approvals with the companion call
 -- `rule_draft_submit`. Governance never approves: the owner does that in Rules. `status` is about OUR call:
 --   sent   Rules answered a draft id (rules_draft_id is set; only then)

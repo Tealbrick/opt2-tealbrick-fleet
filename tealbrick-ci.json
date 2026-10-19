@@ -4,5 +4,6 @@
   "paths": ["."],
   "images": [
     { "name": "opt2-tealbrick-fleet", "product": "fleet", "kind": "app", "manifest": "tealbrick.manifest.json" }
-  ]
+  ],
+  "preReleaseChecks": ["scripts/boot-smoke.ts"]
 }

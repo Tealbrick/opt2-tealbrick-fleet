@@ -1,4 +1,4 @@
-// Governance 0.2.3: contact-rule proposals. Governance drafts a rule from one of four fixed templates and sends it to
+// Governance 0.2.4 (S4a): contact-rule proposals. Governance drafts a rule from one of four fixed templates and sends it to
 // Rules & Approvals as a DRAFT; the owner approves in Rules. Every guard has a quiet-on-good and a fire-on-bad case with the
 // exact outcome (L34, L27). The rule shape is validated against Rules' own manifest (test/contracts, L1).
 import assert from "node:assert/strict";
