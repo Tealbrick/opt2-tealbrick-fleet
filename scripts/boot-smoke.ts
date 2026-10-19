@@ -2,7 +2,9 @@
 // ERR_MODULE_NOT_FOUND). Runs `node --run build`, starts `node dist/main.js` exactly as the image CMD does (standalone,
 // no bridge), and passes only when the health path answers 200 with this build's version AND a healthy status twice (the
 // SDK's failed mode answers 200 too, with status "failed") and the UI import map is complete. Exit 1 on a crash, a non-200
-// or no answer within the timeout. CI: tealbrick-ci.json preReleaseChecks (runs before a release can be tagged).
+// or no answer within the timeout. CI: since ci-v9.17 the template step `tb-ci boot-smoke` (ported from this script) smokes
+// every push and tag pipeline, and registry-sync E1 indexes a tag only after one of them passed on that commit. This script
+// stays for local runs and the `--data` / TB_RESTORE_FROM upgrade and rollback proofs.
 // Usage: node scripts/boot-smoke.ts [--no-build] [--data <dir>]  (--data: boot on an existing data dir, e.g. a copy of
 // an older version's data; without it a fresh ephemeral dir under the OS temp dir is used). TB_RESTORE_FROM in the
 // environment is passed on (E3: boot an older version on the restored pre-update snapshot).
