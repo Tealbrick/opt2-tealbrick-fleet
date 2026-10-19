@@ -130,6 +130,9 @@ export function callRules(callApp: CallApp, op: RulesOp, input: Json, key: strin
 /**
  * Rules ANSWERED with a refusal, so no draft exists (S3-2): a 4xx from the call, except 408 (timeout) and 409 (the same
  * idempotency key may still be in flight, so a draft may exist). A transport error, a timeout, a 5xx or a hold is not final.
+ * A refusal only counts as final for a row whose earlier attempts were all clear (`in_doubt`, see `attempt`).
+ * Assumption (review S3-A, not verifiable in this repo): a 4xx means the Rules op did not run. A bridge-level `after`
+ * failure on a call that DID run in Rules would break it; Rules 0.3.1 has no after-hook on `rule_draft_submit`.
  */
 export const isFinalRefusal = (e: unknown): boolean => {
   const s = e instanceof TbError ? e.httpStatus : (e as { httpStatus?: unknown } | null)?.httpStatus;
@@ -198,45 +201,63 @@ export async function sendProposal(db: Db, callApp: CallApp, by: string, input: 
   const paramsJson = JSON.stringify(params);
 
   // select + insert are one synchronous step: two tabs cannot both create a row
-  const { id, duplicate } = db.transaction(() => {
+  const { id, duplicate, inserted } = db.transaction(() => {
     const open = db
       .prepare(
         "SELECT id, status FROM fleet_proposals WHERE template = ? AND params_json = ? AND ((status <> 'sent' AND error_final = 0) OR rules_status IN ('pending', 'unknown')) ORDER BY created_at DESC, id DESC LIMIT 1",
       )
       .get(input.template, paramsJson);
-    if (open) return { id: String(open.id), duplicate: open.status === "sent" };
+    if (open) return { id: String(open.id), duplicate: open.status === "sent", inserted: false };
     const fresh = `prp_${ulid(now)}`;
     db.prepare(
-      `INSERT INTO fleet_proposals (id, template, params_json, text, rules_json, status, error, review_id, created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'failed', 'interrupted', ?, ?, ?, ?)`,
+      `INSERT INTO fleet_proposals (id, template, params_json, text, rules_json, status, error, in_doubt, review_id, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'failed', 'interrupted', 1, ?, ?, ?, ?)`,
     ).run(fresh, input.template, paramsJson, payload.text, JSON.stringify(payload.rules), input.review ?? null, by, now, now);
-    return { id: fresh, duplicate: false };
+    return { id: fresh, duplicate: false, inserted: true };
   });
   if (duplicate) return { proposal: toProposal(getRow(db, id)), duplicate: true };
 
   // what is sent is what is stored (a retry sends the first text, whatever the agent is called now)
   const row = getRow(db, id);
   const sending: Payload = { text: String(row.text), rules: JSON.parse(String(row.rules_json)) as RuleSpec[] };
-  await attempt(db, callApp, id, sending, timeoutMs);
+  await attempt(db, callApp, id, sending, timeoutMs, inserted);
   return { proposal: toProposal(getRow(db, id)), duplicate: false };
 }
 
-/** One call to `rule_draft_submit` and ONE write of the outcome. The payload has exactly the keys `text` and `rules`. */
-async function attempt(db: Db, callApp: CallApp, id: string, payload: Payload, timeoutMs: number): Promise<void> {
-  const write = (status: "sent" | "held" | "failed", f: { error?: string; draftId?: string; final?: boolean }) => {
+/**
+ * One call to `rule_draft_submit` and ONE write of the outcome. The payload has exactly the keys `text` and `rules`.
+ * `in_doubt` (review S2-1) is 1 while a call may have reached Rules with an unknown outcome. It is set BEFORE every call,
+ * so a crash in the call leaves it: a new row is inserted with it (the first call follows at once; nothing came before
+ * it), a retry sets it in the same synchronous step that reads its earlier value. A refusal is FINAL only when no earlier
+ * attempt was in doubt; otherwise a draft may exist under this key and the row must keep it (a timeout with a created
+ * draft, then a 403 on the retry, must not lead to a new key).
+ */
+async function attempt(db: Db, callApp: CallApp, id: string, payload: Payload, timeoutMs: number, firstCall: boolean): Promise<void> {
+  const before = firstCall
+    ? 0
+    : db.transaction(() => {
+        const was = Number(db.prepare("SELECT in_doubt FROM fleet_proposals WHERE id = ?").get(id)?.in_doubt ?? 1);
+        db.prepare("UPDATE fleet_proposals SET in_doubt = 1 WHERE id = ? AND status <> 'sent'").run(id);
+        return was;
+      });
+  const write = (status: "sent" | "held" | "failed", f: { error?: string; draftId?: string; final?: boolean; doubt: boolean }) => {
     const now = Date.now();
+    const final = status === "failed" && f.final === true && before === 0;
     db.prepare(
-      `UPDATE fleet_proposals SET status = ?, error = ?, error_final = ?, rules_draft_id = ?, rules_status = ?, rules_checked_at = ?, updated_at = ? WHERE id = ? AND status <> 'sent'`,
-    ).run(status, status === "sent" ? null : (f.error ?? "error"), f.final === true ? 1 : 0, f.draftId ?? null, status === "sent" ? "pending" : null, status === "sent" ? now : null, now, id);
+      `UPDATE fleet_proposals SET status = ?, error = ?, error_final = ?, in_doubt = ?, rules_draft_id = ?, rules_status = ?, rules_checked_at = ?, updated_at = ? WHERE id = ? AND status <> 'sent'`,
+    ).run(status, status === "sent" ? null : (f.error ?? "error"), final ? 1 : 0, status === "sent" ? 0 : f.doubt ? 1 : before, f.draftId ?? null, status === "sent" ? "pending" : null, status === "sent" ? now : null, now, id);
   };
   try {
     const r = await callRules(callApp, "rule_draft_submit", { text: payload.text, rules: payload.rules as unknown as Json }, id, timeoutMs);
-    if (r.status === "held") return write("held", { error: "held" });
+    // a hold created nothing in Rules: the doubt stays what it was before this attempt
+    if (r.status === "held") return write("held", { error: "held", doubt: false });
     const out = r.output as { draftId?: unknown; status?: unknown } | null;
-    if (!out || typeof out.draftId !== "string" || out.draftId.length < 1 || out.draftId.length > 64 || out.status !== "pending") return write("failed", { error: "bad_answer" });
-    write("sent", { draftId: out.draftId });
+    // Rules answered, but not in the contract: a draft may exist
+    if (!out || typeof out.draftId !== "string" || out.draftId.length < 1 || out.draftId.length > 64 || out.status !== "pending") return write("failed", { error: "bad_answer", doubt: true });
+    write("sent", { draftId: out.draftId, doubt: false });
   } catch (e) {
-    write("failed", { error: codeOf(e), final: isFinalRefusal(e) });
+    const final = isFinalRefusal(e);
+    write("failed", { error: codeOf(e), final, doubt: !final });
   }
 }
 

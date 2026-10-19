@@ -316,6 +316,43 @@ test("S3-2: after a FINAL refusal (Rules answered no) sending again builds a NEW
   assert.deepEqual(list.proposals.map((x: any) => [x.id, x.status]), [[again.proposal.id, "sent"], [first.proposal.id, "failed"]]);
 });
 
+test("review S2-1: a refusal AFTER an attempt in doubt is not final; the next send keeps the row and key, so Rules holds ONE draft (fire on bad)", async () => {
+  const { db } = fresh();
+  const rules = fakeRules();
+  rules.stall = true; // 1. Rules creates the draft, the answer is lost
+  const first = await p.sendProposal(db, rules.callApp, OWNER, { template: "hold_outward_for_agent", params: { agent: AGENT_A.id } }, Date.now(), 30);
+  assert.deepEqual([first.proposal.error, row(db, first.proposal.id).in_doubt], ["timeout", 1]);
+  rules.stall = false;
+  rules.refuse = { code: "no_grant", status: 403 }; // 2. the retry is refused before Rules replays the key
+  const second = await send(db, rules, "hold_outward_for_agent", { agent: AGENT_A.id });
+  assert.equal(second.proposal.id, first.proposal.id);
+  assert.deepEqual([second.proposal.error, row(db, first.proposal.id).error_final, row(db, first.proposal.id).in_doubt], ["no_grant", 0, 1], "not final: a draft may exist under this key");
+  rules.refuse = null; // 3. send again
+  const third = await send(db, rules, "hold_outward_for_agent", { agent: AGENT_A.id });
+  assert.equal(third.proposal.id, first.proposal.id, "the same proposal, the same key");
+  assert.deepEqual([third.proposal.status, third.proposal.rulesDraftId], ["sent", "drf_1"], "Rules replayed the first draft");
+  assert.equal(rules.drafts.size, 1, "never two drafts");
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM fleet_proposals"), 1);
+});
+
+test("review S2-1: a process that died in the call leaves the row in doubt; a later 4xx is not final", async () => {
+  const { db } = fresh();
+  const rules = fakeRules();
+  rules.refuse = { code: "input_invalid", status: 400 };
+  const first = await send(db, rules, "deny_outward_for_agent", { agent: AGENT_A.id });
+  assert.equal(row(db, first.proposal.id).error_final, 1, "a clear first refusal is final (quiet on good)");
+  // a second proposal whose call was cut by a crash: the row stays failed/interrupted with in_doubt set before the call
+  db.prepare("DELETE FROM fleet_proposals").run();
+  db.prepare(
+    "INSERT INTO fleet_proposals (id, template, params_json, text, rules_json, status, error, in_doubt, created_by, created_at, updated_at) VALUES ('prp_crash', 'deny_outward_for_agent', ?, 'x', '[]', 'failed', 'interrupted', 1, ?, 1, 1)",
+  ).run(JSON.stringify({ agent: AGENT_A.id }), OWNER);
+  const retry = await send(db, rules, "deny_outward_for_agent", { agent: AGENT_A.id });
+  assert.equal(retry.proposal.id, "prp_crash");
+  assert.deepEqual([row(db, "prp_crash").error, row(db, "prp_crash").error_final, row(db, "prp_crash").in_doubt], ["input_invalid", 0, 1]);
+  const again = await send(db, rules, "deny_outward_for_agent", { agent: AGENT_A.id });
+  assert.equal(again.proposal.id, "prp_crash", "still the same row: the crashed call may have made a draft");
+});
+
 test("S3-2 quiet on good: an ambiguous failure (409, 408, 5xx, timeout, transport) is NOT final; the retry reuses the proposal and its key", async () => {
   const { db } = fresh();
   for (const [code, status] of [["idempotency_in_progress", 409], ["request_timeout", 408], ["unavailable", 503]] as const) {

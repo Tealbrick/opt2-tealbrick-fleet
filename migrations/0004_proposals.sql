@@ -22,6 +22,10 @@ CREATE TABLE fleet_proposals (
   -- parameter again starts a NEW proposal with a freshly built payload (S3-2). 0 = no answer, a hold or an ambiguous
   -- answer: a retry reuses this row and its idempotency key, so Rules never holds two drafts.
   error_final INTEGER NOT NULL DEFAULT 0 CHECK (error_final IN (0, 1)),
+  -- 1 = some attempt may have reached Rules and its outcome is not known (set BEFORE every call, so a crash leaves it;
+  -- kept by a timeout, transport error, 5xx, 409 or a malformed answer). While it is 1 a later 4xx is NOT final: a draft
+  -- may exist under this key, so the row keeps its key (review S2-1).
+  in_doubt INTEGER NOT NULL DEFAULT 0 CHECK (in_doubt IN (0, 1)),
   rules_status TEXT CHECK (rules_status IS NULL OR rules_status IN ('pending', 'approved', 'rejected', 'gone', 'unknown')),
   rules_decided_at INTEGER,
   rules_checked_at INTEGER,

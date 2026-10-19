@@ -36,6 +36,8 @@ const ERRORS: Record<string, string> = {
   held: "Rules asked you to approve this call first. Approve it under Holds, then send it again.",
   bad_answer: "Rules gave an answer this app does not understand, so the rule counts as not sent.",
   input_invalid: "Rules did not accept this draft. Send it again: Governance makes a new draft from the directory as it is now.",
+  idempotency_outcome_unknown: `Rules may have this draft already: look under Drafts in Rules. ${AGAIN}`,
+  idempotency_in_flight: `Rules is still working on this draft. Wait a moment. ${AGAIN}`,
 };
 /** Plain sentence for the code a proposal failed with. */
 export const proposalError = (code: string | null): string => (code && ERRORS[code]) || `Rules did not take the draft (${code ?? "no reason given"}). Nothing was sent.`;

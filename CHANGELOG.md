@@ -21,6 +21,10 @@ Governance, sprint S4a (contact-rule proposals, "now" templates). Decision C166;
 
 ### Fixed
 - Review flow: choosing another subject resets step 3 (rule choice and recorded verdict), so a new subject records its own verdict and gets only its own templates. `proposals_list` refreshes statuses with 5 calls at once and for at most 5 s; rows not refreshed in time keep their stored status.
+- S3-2: a proposal that Rules REFUSED (a 4xx answer other than 408/409, so no draft exists; column `error_final`) no longer blocks the owner: sending the same template and parameter again builds a NEW proposal from the directory as it is now; the failed one stays in the list. A failure with no clear answer (timeout, transport, 5xx, 409, interrupted, malformed answer) or a hold still retries the SAME proposal and key.
+- Review S2-1: a refusal counts as final only when no earlier attempt of that proposal was in doubt (column `in_doubt`, set before every call, so a crash leaves it). A timeout whose draft was created, then a 403 on the retry, keeps the row and its key: Rules never holds two drafts.
+- N1: when `proposals_list` runs out of its refresh budget, a draft that was asked and got no answer is `unknown` (not `pending`); drafts not asked yet keep their status; a late answer is still dropped.
+- Plain sentences for `input_invalid`, `idempotency_outcome_unknown` ("Rules may have this draft already: look under Drafts") and `idempotency_in_flight`.
 
 ### Deploy note (M-CP-2)
 - Core validates a companion against the deployed target manifest (`validateCompanions`): each listed operation must exist in the target with audience `agent`, and the crud must fit. `draft_status` is new in Rules 0.3.0, so a workspace that still runs an older Rules fails that check with `companion_op_invalid`; deploy Rules 0.3.0 first (as for the directory feed). A workspace without Rules is not checked; the proposal then fails at send time with `no_grant` and the page says to deploy Rules. The grant lists both operations together, so a missing `draft_status` also takes away `rule_draft_submit`.
@@ -31,11 +35,7 @@ Governance, sprint S4a (contact-rule proposals, "now" templates). Decision C166;
 - Several agents or handles in one proposal (the draft allowed lists of up to 50; one proposal names one subject).
 - Pruning of old proposals (the design says after 2 years).
 - Deviations from the draft manifest: `proposal_send` takes `params: {agent | handle}` (not `agents[]`, `handles[]`, `team`); `template` has four values (no `hold_outward_for_team`); the output adds `duplicate`; a proposal adds `params`, `rulesStatus` and `decidedAt`; `error` is the error code (at most 80 characters). `status` keeps `sent`, `held`, `failed` and describes Governance's own call; what Rules decided is `rulesStatus`.
-- Version 0.2.3; the launch page is still Teams.
-
-### Fixed (review S3 before ship)
-- S3-2: a proposal that Rules REFUSED (a 4xx answer other than 408/409, so no draft exists; new column `error_final` in migration 0004) no longer blocks the owner. Sending the same template and parameter again builds a NEW proposal from the directory as it is now, and the failed one stays in the list. A failure with no clear answer (timeout, transport, 5xx, 409, interrupted) or a hold still retries the SAME proposal and key, so Rules never holds two drafts.
-- N1: when `proposals_list` runs out of its refresh budget, a draft that was asked and got no answer is `unknown` (not `pending`); drafts not asked yet keep their status; a late answer is still dropped.
+- The launch page is still Teams.
 
 ## 0.2.3 - Unreleased
 

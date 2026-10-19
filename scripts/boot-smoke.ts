@@ -89,11 +89,13 @@ let lastBody = "";
  * done yet).
  */
 async function healthOf(url: string): Promise<number> {
+  // 200 ok, -1 another version/process, -2 not healthy yet (e.g. restoring), -3 failed mode
   const r = await fetch(url);
   if (r.status !== 200) return r.status;
   const body = (await r.json().catch(() => null)) as { version?: unknown; status?: unknown; failure?: unknown } | null;
   lastBody = JSON.stringify({ version: body?.version, status: body?.status, failure: body?.failure }).slice(0, 400);
   if (body?.version !== version) return -1;
+  if (body.status === "failed") return -3; // the SDK's failed mode: final, no point in waiting
   return typeof body.status === "string" && HEALTHY.has(body.status) ? 200 : -2;
 }
 const deadline = Date.now() + TIMEOUT_MS;
@@ -103,6 +105,10 @@ while (Date.now() < deadline) {
   try {
     health = await healthOf(base + manifest.runtime.healthPath);
     if (health === 200) break;
+    if (health === -3) {
+      child.kill("SIGTERM");
+      fail(`the app is in the SDK's failed mode: ${lastBody}`);
+    }
   } catch {
     // not listening yet
   }
