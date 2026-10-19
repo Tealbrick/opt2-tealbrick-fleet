@@ -14,10 +14,10 @@
 import { createHash } from "node:crypto";
 import { canonicalize, normalizeHandle, ulid } from "@opt2-tealbrick/manifest";
 import type { Db, Json } from "@opt2-tealbrick/miniapp-sdk";
+import { type Shown, sameShown } from "./shown.ts";
 import { bump, fail, MAX_TEAMS_PER_ANSWER, setPerson } from "./store.ts";
 import { cleanText } from "./text.ts";
 import { REVIEW_DAYS_DEFAULT, type Trust } from "./trust.ts";
-import { type Shown, sameShown } from "./ui/shown.ts";
 
 export type SubjectKind = "agent" | "person" | "outside_agent";
 export type ReviewStatus = "requested" | "done" | "dismissed";
