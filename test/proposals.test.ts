@@ -335,6 +335,19 @@ test("review S2-1: a refusal AFTER an attempt in doubt is not final; the next se
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM fleet_proposals"), 1);
 });
 
+test("review S3-G: a NEW proposal is in doubt while its first call runs (a crash right then must leave it in doubt; fire on bad)", async () => {
+  const { db } = fresh();
+  const rules = fakeRules();
+  let during: Record<string, any> | undefined;
+  const inner = rules.callApp;
+  const probe = (async (...a: unknown[]) => {
+    during = db.prepare("SELECT status, error, in_doubt FROM fleet_proposals").get() as Record<string, any>;
+    return (inner as unknown as (...x: unknown[]) => unknown)(...a);
+  }) as unknown as OpContext["callApp"];
+  await p.sendProposal(db, probe, OWNER, { template: "hold_outward_for_agent", params: { agent: AGENT_A.id } });
+  assert.deepEqual([during?.status, during?.error, during?.in_doubt], ["failed", "interrupted", 1], "the INSERT itself marks the row in doubt");
+});
+
 test("review S2-1: a process that died in the call leaves the row in doubt; a later 4xx is not final", async () => {
   const { db } = fresh();
   const rules = fakeRules();
