@@ -2,7 +2,18 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
-## 0.2.2 - Unreleased
+## 0.2.3 - Unreleased
+
+Fix release for 0.2.2, which never started (QA-GOV022-1, S2: qa1 rolled back to 0.2.1 by itself). No new function; 0.2.2's Topology (S3a) and the directory_feed allow-list (fleet#11) ship here.
+
+### Fixed
+- Boot crash `ERR_MODULE_NOT_FOUND: /app/dist/ui/shown.js imported from /app/dist/reviews.js`. The server imported the shared "changed since the last review" rule from `src/ui/shown.ts`; `scripts/build-ui.ts` moves everything in `dist/ui/` into the hashed assets directory, so that file is not at `dist/ui/shown.js` in the image. The rule now lives in `src/shown.ts` (server); the browser keeps a byte-for-byte copy in `src/ui/shown.ts`.
+
+### Added
+- `test/boundaries.test.ts`: no server module imports anything under `src/ui` (with a fire-on-bad case for the 0.2.2 import), and the browser copy of the rule equals `src/shown.ts`.
+- `scripts/boot-smoke.ts` in `tealbrick-ci.json` `preReleaseChecks`: builds, starts `node dist/main.js` as the image does (standalone), needs `/tb/v1/health` 200 twice and a complete UI import map. `--data <dir>` boots on an existing data dir. Proof: it fails on the v0.2.2 tree with the qa1 error and passes on 0.2.3, also on a copy of 0.2.1 data.
+
+## 0.2.2 - Unreleased (never started; superseded by 0.2.3)
 
 Governance, sprint S3a (topology from Governance's own data). Decision C166; refs C230.
 

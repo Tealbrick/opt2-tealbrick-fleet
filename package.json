@@ -1,6 +1,6 @@
 {
   "name": "opt2-tealbrick-fleet",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "description": "Governance: a Teal Brick opt2 miniapp (product id fleet).",
   "license": "Apache-2.0",
