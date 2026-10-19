@@ -1,6 +1,7 @@
 // Boot smoke of the BUILT output (0.2.2 QA-GOV022-1: unit tests on src passed while `node dist/main.js` crashed with
 // ERR_MODULE_NOT_FOUND). Runs `node --run build`, starts `node dist/main.js` exactly as the image CMD does (standalone,
-// no bridge), and passes only when the health path answers 200 twice and the UI import map is complete. Exit 1 on a crash, a non-200
+// no bridge), and passes only when the health path answers 200 with this build's version twice and the UI import map is
+// complete. Exit 1 on a crash, a non-200
 // or no answer within the timeout. CI: tealbrick-ci.json preReleaseChecks (runs before a release can be tagged).
 // Usage: node scripts/boot-smoke.ts [--no-build] [--data <dir>]  (--data: boot on an existing data dir, e.g. a copy of
 // an older version's data; without it a fresh ephemeral dir under the OS temp dir is used).
@@ -75,12 +76,20 @@ child.on("exit", (code) => {
 });
 
 const base = `http://127.0.0.1:${port}`;
+const version = (JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { version: string }).version;
+/** 200 only when the answer is OURS: the health body names this build's version (another process on the port fails). */
+async function healthOf(url: string): Promise<number> {
+  const r = await fetch(url);
+  if (r.status !== 200) return r.status;
+  const body = (await r.json().catch(() => null)) as { version?: unknown } | null;
+  return body?.version === version ? 200 : -1;
+}
 const deadline = Date.now() + TIMEOUT_MS;
 let health = 0;
 while (Date.now() < deadline) {
   if (exited !== undefined) fail(`the app exited ${exited} before it was healthy\n${stderr.slice(-2000)}`);
   try {
-    health = (await fetch(base + manifest.runtime.healthPath)).status;
+    health = await healthOf(base + manifest.runtime.healthPath);
     if (health === 200) break;
   } catch {
     // not listening yet
@@ -92,12 +101,12 @@ const stop = () => {
 };
 if (health !== 200) {
   stop();
-  fail(`no 200 from ${manifest.runtime.healthPath} within ${TIMEOUT_MS / 1000} s (last ${health || "no answer"})`);
+  fail(`no 200 with version ${version} from ${manifest.runtime.healthPath} within ${TIMEOUT_MS / 1000} s (last ${health === -1 ? "200 from another version or process" : health || "no answer"})`);
 }
 // still alive a moment after the first 200 (a crash right after listen would otherwise pass)
 await new Promise((r) => setTimeout(r, 1500));
 if (exited !== undefined) fail(`the app exited ${exited} right after the first health answer\n${stderr.slice(-2000)}`);
-const again = (await fetch(base + manifest.runtime.healthPath)).status;
+const again = await healthOf(base + manifest.runtime.healthPath).catch(() => 0);
 stop();
 if (again !== 200) fail(`second health read ${again}`);
 // The UI the SDK serves (behind owner auth at /a/<product>/): its index and every module URL in the import map exist.
