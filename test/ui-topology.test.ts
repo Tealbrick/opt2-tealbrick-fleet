@@ -240,10 +240,10 @@ describe("Topology page", () => {
   it("the inspector: select a card (click, or Enter) to see what ties it to the rest; select it again to close", async () => {
     reset();
     const m = await mount(h(ui.TopologyPage, {}));
-    assert.match(m.host.querySelector("aside")?.textContent ?? "", /Select a card or a team to see what ties it to the rest\./);
+    assert.match(m.host.querySelector('[aria-label="Inspector"]')?.textContent ?? "", /Select a card or a team to see what ties it to the rest\./);
     const card = m.host.querySelector(`g.g-node[data-id="${FRONT}"]`) as Element;
     await act(async () => (card as unknown as HTMLElement).dispatchEvent(new (win.KeyboardEvent as unknown as typeof KeyboardEvent)("keydown", { key: "Enter", bubbles: true, cancelable: true })));
-    const panel = m.host.querySelector('aside [aria-label="About Front desk"]');
+    const panel = m.host.querySelector('[aria-label="Inspector"] [aria-label="About Front desk"]');
     assert.ok(panel, "Enter opens the inspector");
     const text = panel.textContent ?? "";
     assert.match(text, /Front desk\s*Agent/);
@@ -252,14 +252,15 @@ describe("Topology page", () => {
     assert.match(text, /Owner and agents\s*is owned by Ann Example/);
     assert.match(text, /Teams\s*is a member of Support/);
     assert.equal(card.getAttribute("aria-pressed"), "true");
+    preview("topology-inspector", m.host);
     await click(card);
-    assert.equal(m.host.querySelector('aside [aria-label="About Front desk"]'), null);
+    assert.equal(m.host.querySelector('[aria-label="Inspector"] [aria-label="About Front desk"]'), null);
     // a team region opens it too, and a card that changed since the last review says so
     stub.answer = ANSWER();
     await click(m.host.querySelector(`g.g-region[data-id="tm_support"]`) as Element);
-    assert.match(m.host.querySelector('aside [aria-label="About Support"]')?.textContent ?? "", /Teams\s*is led by Ann Example.*has member Outside Bot/);
+    assert.match(m.host.querySelector('[aria-label="Inspector"] [aria-label="About Support"]')?.textContent ?? "", /Teams\s*is led by Ann Example.*has member Outside Bot/);
     await click(m.host.querySelector(`g.g-node[data-id="psn_bot"]`) as Element);
-    assert.match(m.host.querySelector('aside [aria-label="About Outside Bot"]')?.textContent ?? "", /It changed since the last review\./);
+    assert.match(m.host.querySelector('[aria-label="Inspector"] [aria-label="About Outside Bot"]')?.textContent ?? "", /It changed since the last review\./);
     await m.unmount();
   });
 

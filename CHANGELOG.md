@@ -7,10 +7,42 @@ Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`
 Governance sprint C373 WP-D part 2: the grant view, the graph, the contacts layer and the "Add outside agent" form are wired
 into the app. Updates from 0.3.0 and every 0.2.x: migration 0007 is forward-only and keeps all data.
 
+### Added
+- Person op `access_get` (read, owner only, never an agent tool): the grant picture for the Access page and the graph's
+  "App access" layer. Output `{status: available|unavailable|not_consented, note, topology|null, agents[{id,name}],
+  identities[{agent,channel,handle}], generatedAt}`. It reads the COMPACT `SliceTopology` (spec 0.1.80: tuple rows,
+  `held` as a bitmask over the hold families in `HOLD_FAMILIES` order, pinned by a test) with the SDK `ctx.topology()`,
+  defensively (`src/topology-slice.ts`; the pinned SDK 0.1.40 has no such function, so today the answer is
+  `unavailable` with "Turn on 'See who has access' for Governance in the Portal (app settings) to show this."). Rows with an
+  index out of range or a wrong shape are dropped and the picture is marked `truncated`. Decoded on the server into the
+  object form the UI uses. The agent list the indexes point into comes from `agentsChanged` (`src/slice-agents.ts`).
+- Topology `contacts` layer from Connect `contacts_list` (connect#34; companion `connect` now lists `identities_list` and
+  `contacts_list`, read). Read on demand by `topology_get` only (at most 20 pages of 200, nothing cached or stored): an edge
+  from the agent to the directory entry that owns the handle, or to an outside node named by the handle. Any failure makes
+  the layer `unavailable` with a plain sentence ("Connect does not offer contacts yet; update Connect." for an older Connect).
+- `person_set` input `kind` (`person` | `outside_agent`), `org`, `relationship`; migration 0007 (`fleet_people.org`,
+  `relationship`, owner-side text only: in `overview_get` and `person_set`, in no agent op, hook fact or feed).
+- UI: the Topology page draws the read-only graph with the layers "People and contacts" / "App access", an inspector, and
+  keeps the Relationships table and print view; new Access page after Topology (`access_get`, "Change access in Portal");
+  People > "Add outside agent" (starts unreviewed; its second step offers "Trust", which records a real review verdict through
+  `review_get` and `review_record`).
+
+### Changed
+- An OUTSIDE AGENT the owner adds starts `unreviewed` (Coordinator rule, C373 Q13; `defaultTrust(source, kind)`); a person the
+  owner adds still starts `trusted`.
+- Graph: wire labels sit on their own wire and move ALONG it near a node with several wires (no overlap with cards or
+  each other); column gap 96 to 120 px. Access view: held actions are words ("first contact", "money", "public link"), workflow
+  ops show "All" when the grant lists none, a shortened copy is said.
+- `topology_get` notes: the access layer says it is on the Access page. `access` is still `unavailable` there.
+- Version 0.3.1 in `package.json` and the manifest. Pins unchanged.
+
 ### TODO when sdk#60 / spec#61 / connect#34 are released
-- `needsTopology` flag + re-pin when sdk#60 is released: the manifest declares `needsTopology: true` (needs the manifest
-  package that validates it and `needsAgentDirectory`, which Governance has), the SDK pin gets `ctx.topology()` and the spec
-  `SliceTopology`; then `src/topology-slice.ts` shrinks to the decoder. Until then the Access page says it is not available.
+- needsTopology flag + re-pin when sdk#60 is released: declare `needsTopology: true` in the manifest (needs the manifest package
+  that validates it; Governance already has `needsAgentDirectory`), re-pin the SDK/spec for `ctx.topology()` and
+  `SliceTopology`, and shrink `src/topology-slice.ts` to the decoder. The Access page then shows data once the owner turns on
+  "See who has access".
+- Replace `test/contracts/connect.0.7.5-pr34.excerpt.json` with the released Connect manifest (byte copy).
+- If the SDK offers `ctx.agents()` or topology rows carry agent ids, delete `src/slice-agents.ts`.
 
 ## 0.3.0 - Released (dev, `08a711a`)
 

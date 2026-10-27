@@ -249,14 +249,13 @@ export function TopologyPage({ portalHref }: { portalHref?: string } = {}) {
         </Notice>
       ) : null}
 
-      <div className="split">
-        <section className="tb-stack" aria-label="Network picture">
-          {view ? <TopologyGraph input={view} selected={selected} onSelect={(id) => setSelected((cur) => (cur === id ? undefined : id))} /> : null}
-        </section>
-        <aside className="no-print" aria-label="Inspector">
-          {chosen && view ? <Inspector node={chosen} view={view} byId={byId} layer={layer} portalHref={portalHref} /> : <p className="tb-soft page-note">Select a card or a team to see what ties it to the rest.</p>}
-        </aside>
-      </div>
+      <section className="tb-stack" aria-label="Network picture">
+        {view ? <TopologyGraph input={view} selected={selected} onSelect={(id) => setSelected((cur) => (cur === id ? undefined : id))} /> : null}
+      </section>
+      {/* the inspector sits under the picture, full width, so the picture keeps all the room it needs */}
+      <section className="no-print" aria-label="Inspector">
+        {chosen && view ? <Inspector node={chosen} view={view} byId={byId} layer={layer} portalHref={portalHref} /> : <p className="tb-soft page-note">Select a card or a team to see what ties it to the rest.</p>}
+      </section>
 
       <section className="tb-stack" aria-label="Relationships">
         <h2 className="sub-head">Relationships</h2>
@@ -318,7 +317,7 @@ export function TopologyPage({ portalHref }: { portalHref?: string } = {}) {
                   <td>{n.trust ? <TrustTag trust={n.trust} /> : null}</td>
                   <td>{n.status}</td>
                   <td>
-                    {n.reviewDueAt ? day(n.reviewDueAt) : "Not scheduled"}
+                    <span className="nowrap">{n.reviewDueAt ? day(n.reviewDueAt) : "Not scheduled"}</span>
                     {n.changedSinceReview ? <Tag status="needs-you">Changed since the last review</Tag> : null}
                   </td>
                 </tr>
