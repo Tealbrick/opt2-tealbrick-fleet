@@ -408,7 +408,12 @@ export function setMembers(
 export function setAgent(db: Db, input: { agent: string; owner?: string | null; role?: string; tags?: string[] }, now = Date.now()): Agent {
   return db.transaction(() => {
     const old = db.prepare("SELECT * FROM fleet_agents WHERE id = ?").get(input.agent) ?? fail("agent_not_found", "no workspace agent with this id", 404);
-    if (input.owner && !db.prepare("SELECT 1 FROM fleet_people WHERE id = ?").get(input.owner)) fail("person_not_found", "the owner is not in the directory", 404);
+    if (input.owner) {
+      const who = db.prepare("SELECT kind FROM fleet_people WHERE id = ?").get(input.owner) ?? fail("person_not_found", "the owner is not in the directory", 404);
+      // C373e: an agent's owner is a person; an outside agent cannot own a workspace agent. Rows set before 0.3.0 stay as
+      // they are (the feed still carries their owner id; readers check contacts[].kind).
+      if (who.kind !== "person") fail("owner_not_person", "the owner must be a person, not an outside agent", 400);
+    }
     db.prepare("UPDATE fleet_agents SET owner_id = ?, role = ?, tags = ?, updated_at = ? WHERE id = ?").run(
       input.owner === undefined ? old.owner_id : input.owner,
       input.role ?? String(old.role),

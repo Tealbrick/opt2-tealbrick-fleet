@@ -867,7 +867,7 @@
     {
       "id": "directory_feed",
       "title": "Directory feed for apps",
-      "description": "For apps only (the Rules & Approvals read model), contract fleet.directory_feed/1: team member ids and roles, contacts (people and outside agents) with canonical handles, status and trust, and agents with status, trust and owner id. No email, no titles, no tags. Agents get no_access. Pass accept: [\"agent_handles\"] to also get each agent's channel handles (from Connect, cached). Pass sinceRevision; the answer is {v, revision, unchanged:true} when nothing changed.",
+      "description": "For the reader apps only (Rules & Approvals, Knowledge), contract fleet.directory_feed/1: team member ids and roles, contacts (people and outside agents) with canonical handles, status and trust, and agents with status, trust and owner id. No email, no titles, no tags. Agents get no_access. Pass accept: [\"agent_handles\"] to also get each agent's channel handles (from Connect, cached). Pass sinceRevision; the answer is {v, revision, unchanged:true} when nothing changed.",
       "input": {
         "type": "object",
         "additionalProperties": false,

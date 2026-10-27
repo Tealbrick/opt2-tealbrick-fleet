@@ -84,18 +84,21 @@ function skip(warn: Warn | undefined, what: string, id: string): void {
   warn?.(`directory_feed leaves out ${what} that does not fit the contract fleet.directory_feed/1`, { what, id: id.slice(0, 80) });
 }
 
-/** The one product allowed to read the feed (C243): Rules, whose read model it is. */
-export const FEED_PRODUCT = "rules";
+/**
+ * The VERIFIED products allowed to read the feed: Rules (its read model, C243, C373 §2) and Knowledge (C373e, a second
+ * reader). Exact product ids only; never a manifest name.
+ */
+export const FEED_READERS: readonly string[] = Object.freeze(["rules", "knowledge"]);
 
 /** Refusal text for an app caller the SDK could not verify (same words as the SDK's own `caller_unverified`). */
 export const FEED_UNVERIFIED_MESSAGE = "the calling app is not verified for this workspace yet: update the bridge, or retry after the workspace config refreshes";
 
 /**
- * Only the Rules app reads the feed (C243, C373 RULES-INTERFACE §2). The check uses ONLY the verified caller fields the
- * SDK sets (SDK-CALLER-PRODUCT, spec `Caller`):
+ * Only the reader apps in FEED_READERS read the feed (C243, C373 RULES-INTERFACE §2, C373e). The check uses ONLY the
+ * verified caller fields the SDK sets (SDK-CALLER-PRODUCT, spec `Caller`):
  *  - `caller.type` must be `app`; an agent, a person or anything else gets `no_access` 403;
  *  - `caller.product` is the VERIFIED product (the signed grant `prd`, else the signed slice `companionCallers` entry);
- *    it must be exactly `rules`. Never the display `name` or any self-claimed string;
+ *    it must be exactly one of FEED_READERS. Never the display `name` or any self-claimed string;
  *  - `caller.listed` must be `true`: the caller instance is in the CURRENT signed slice `companionCallers` under that
  *    product (the spec asks apps that share data with a calling app to re-check it at use time; false when the slice is
  *    expired or the companion edge was removed after the grant was minted).
@@ -107,7 +110,7 @@ export function assertFeedCaller(caller: { type: string; product?: unknown; list
   if (caller.type !== "app") throw new TbError("no_access", "directory_feed is for apps only", 403);
   const product = caller.product;
   if (product === undefined || product === null || product === "") throw new TbError("caller_unverified", FEED_UNVERIFIED_MESSAGE, 403, { retryable: true });
-  if (product !== FEED_PRODUCT) throw new TbError("no_access", "directory_feed is for the Rules app only", 403);
+  if (typeof product !== "string" || !FEED_READERS.includes(product)) throw new TbError("no_access", "directory_feed is for the reader apps only (Rules, Knowledge)", 403);
   if (caller.listed !== true) throw new TbError("caller_unverified", FEED_UNVERIFIED_MESSAGE, 403, { retryable: true });
 }
 

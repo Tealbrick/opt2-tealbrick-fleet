@@ -357,7 +357,11 @@ function AgentDialog({ agent, dir, onClose, reload }: { agent: Agent; dir: Dir; 
   return (
     <EditDialog title={`Edit ${agent.name}`} onClose={onClose} save={save}>
       <Field label="Owner">
-        <Select options={[{ value: "", label: "No owner" }, ...dir.people.map((p) => ({ value: p.id, label: p.name }))]} value={owner} onValueChange={setOwner} />
+        <Select
+          options={[{ value: "", label: "No owner" }, ...dir.people.filter((p) => p.kind === "person" || p.id === agent.owner?.id).map((p) => ({ value: p.id, label: p.name }))]}
+          value={owner}
+          onValueChange={setOwner}
+        />
       </Field>
       <Field label="Role" hint="Optional, for example Support triage.">
         <TextInput value={role} maxLength={80} onChange={(e) => setRole(e.target.value)} />

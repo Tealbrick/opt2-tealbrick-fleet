@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { isNpub, normalizeHandle, npubFromHex } from "@opt2-tealbrick/manifest";
 import { TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { factsFor } from "../src/facts.ts";
+import { directoryFeed } from "../src/feed.ts";
 import * as store from "../src/store.ts";
 import { AGENT_A, AGENT_B, migratedDb, NOSTR } from "./helpers.ts";
 
@@ -98,6 +99,30 @@ test("members, agent owner and resolve_sender for a Buzz npub (J3 sender → per
   const a = store.setAgent(db, { agent: AGENT_A.id, owner: ann.id, role: "triage" });
   assert.deepEqual(a.owner, { id: ann.id, name: "Ann" });
   assert.equal(code(() => store.setAgent(db, { agent: AGENT_A.id, owner: "psn_missing" })), "person_not_found");
+  // C373e: the owner must be a person. Fire on bad: an outside agent is refused 400 owner_not_person and nothing changes
+  const outside = store.setPerson(db, { name: "Outside Bot", kind: "outside_agent" });
+  const rev = store.revision(db);
+  let caught: unknown;
+  try {
+    store.setAgent(db, { agent: AGENT_A.id, owner: outside.id, role: "changed" });
+  } catch (e) {
+    caught = e;
+  }
+  assert.deepEqual([(caught as { code?: string }).code, (caught as { httpStatus?: number }).httpStatus], ["owner_not_person", 400]);
+  assert.equal(store.revision(db), rev, "a refused agent_set changes nothing");
+  assert.deepEqual(store.getAgent(db, AGENT_A.id).owner, { id: ann.id, name: "Ann" });
+  assert.equal(store.getAgent(db, AGENT_A.id).role, "triage");
+  // quiet on good: a person (also a departed one), no owner, or leaving the owner out
+  assert.equal(store.setAgent(db, { agent: AGENT_A.id, owner: null }).owner, null);
+  assert.deepEqual(store.setAgent(db, { agent: AGENT_A.id, owner: ann.id }).owner, { id: ann.id, name: "Ann" });
+  assert.deepEqual(store.setAgent(db, { agent: AGENT_A.id, role: "triage" }).owner, { id: ann.id, name: "Ann" });
+  // a row set before 0.3.0 with an outside-agent owner is left as it is, and the feed keeps the owner id
+  db.prepare("UPDATE fleet_agents SET owner_id = ? WHERE id = ?").run(outside.id, AGENT_A.id);
+  assert.equal(store.setAgent(db, { agent: AGENT_A.id, role: "kept" }).owner?.id, outside.id, "an edit without owner does not touch it");
+  const feed = directoryFeed(db, {});
+  assert.equal(feed.unchanged === false && feed.agents.find((x) => x.id === AGENT_A.id)?.owner, outside.id);
+  assert.equal(feed.unchanged === false && feed.contacts.find((x) => x.id === outside.id)?.kind, "outside_agent", "readers see the kind");
+  store.setAgent(db, { agent: AGENT_A.id, owner: ann.id, role: "triage" });
 
   // departed: still found, no team facts (narrow, never widen)
   store.setPerson(db, { id: ann.id, name: "Ann", status: "departed" });

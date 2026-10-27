@@ -91,7 +91,7 @@ export const handlers = {
     },
   }),
   [OP.directoryFeed]: op<DirectoryFeedInput, DirectoryFeedOutput>({
-    // Contract fleet.directory_feed/1, for apps (Rules' read model). Agents get no_access until the manifest has an `app` audience (G-1).
+    // Contract fleet.directory_feed/1, for the reader apps (FEED_READERS: Rules, Knowledge). Agents get no_access until the manifest has an `app` audience (G-1).
     async run(input, ctx) {
       assertFeedCaller(ctx.caller);
       return directoryFeed(ctx.db, input, (msg, fields) => ctx.log.warn(msg, fields));

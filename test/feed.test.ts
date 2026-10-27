@@ -10,7 +10,7 @@ import { ulid, validateAgainstSchema } from "@opt2-tealbrick/manifest";
 import { type Db, type Json, type OpContext, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { handlers, manifest } from "../src/app.ts";
 import { factsAnswer, factsFor } from "../src/facts.ts";
-import { AGENT_ID_PATTERN, assertFeedCaller, directoryFeed, FEED_CAPS, HANDLE_PATTERN, ID_MAX, TEAM_NAME_MAX } from "../src/feed.ts";
+import { AGENT_ID_PATTERN, assertFeedCaller, directoryFeed, FEED_CAPS, FEED_READERS, HANDLE_PATTERN, ID_MAX, TEAM_NAME_MAX } from "../src/feed.ts";
 import * as store from "../src/store.ts";
 import { defaultTrust } from "../src/trust.ts";
 import { bigDirectory } from "./big.ts";
@@ -85,14 +85,18 @@ test("directory_feed: an agent caller gets no_access 403; a person caller too; a
   assert.doesNotThrow(() => assertFeedCaller({ type: "app", product: "rules", listed: true }));
 });
 
-test("directory_feed: only an app whose VERIFIED product is `rules` and that is listed reads the feed (C373 §2, SDK verified caller)", async () => {
+test("directory_feed: only a listed app whose VERIFIED product is in FEED_READERS (rules, knowledge) reads the feed (C373 §2, C373e)", async () => {
   const db = migratedDb();
   seed(db);
   const { product: _p, listed: _l, ...bare } = APP;
-  // quiet on good: Rules with a verified product, listed in the current slice
+  assert.deepEqual([...FEED_READERS], ["rules", "knowledge"]);
+  assert.ok(Object.isFrozen(FEED_READERS), "the list cannot be changed at run time");
+  // quiet on good: Rules and Knowledge with a verified product, listed in the current slice; the same feed for both
   const rules = (await feedOp(db, APP)) as { teams: unknown[] };
   assert.equal(rules.teams.length, 2);
-  assert.doesNotThrow(() => assertFeedCaller({ type: "app", product: "rules", listed: true }));
+  const knowledge = (await feedOp(db, { ...APP, id: "ins_01J0000000000000000000000K", name: "Knowledge", product: "knowledge" })) as { teams: unknown[] };
+  assert.deepEqual(knowledge, rules);
+  for (const product of FEED_READERS) assert.doesNotThrow(() => assertFeedCaller({ type: "app", product, listed: true }));
   const noFeedData = (e: unknown) => assert.doesNotMatch(JSON.stringify({ code: (e as TbError).code, message: (e as Error).message, details: (e as TbError).details }), /agt_|teams|contacts|handles|slack:|buzz:/, "the error carries no feed data");
   const refused = async (caller: object, code: string, input: object = {}) => {
     let caught: unknown;
@@ -116,10 +120,12 @@ test("directory_feed: only an app whose VERIFIED product is `rules` and that is 
     await refused({ ...bare, listed: true }, "caller_unverified", input);
     // Rules, verified, but no longer listed in the CURRENT slice (edge removed, slice expired) or listed unknown
     await refused({ ...APP, listed: false }, "caller_unverified", input);
+    await refused({ ...APP, product: "knowledge", listed: false }, "caller_unverified", input);
+    await refused({ ...bare, name: "Knowledge" }, "caller_unverified", input);
     await refused({ ...bare, product: "rules" }, "caller_unverified", input);
     await refused({ ...APP, listed: "true" }, "caller_unverified", input);
     // fire on bad: any other verified product gets no_access, listed or not
-    for (const product of ["observer", "inbox", "Rules", "rules2", " rules"]) {
+    for (const product of ["observer", "inbox", "Rules", "rules2", " rules", "Knowledge", "knowledge2", "connect", "fleet"]) {
       await refused({ ...APP, product }, "no_access", input);
       await refused({ ...APP, product, listed: false }, "no_access", input);
     }
@@ -131,6 +137,7 @@ test("directory_feed: only an app whose VERIFIED product is `rules` and that is 
     // agents (and persons) stay refused no_access, whatever product/listed fields they carry
     await refused(AGENT, "no_access", input);
     await refused({ ...AGENT, product: "rules", listed: true }, "no_access", input);
+    await refused({ ...AGENT, product: "knowledge", listed: true }, "no_access", input);
     await refused({ ...PERSON, product: "rules", listed: true }, "no_access", input);
   }
 });
