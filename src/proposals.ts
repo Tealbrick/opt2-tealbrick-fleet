@@ -1,14 +1,14 @@
-// Contact-rule proposals (C166, DESIGN §3.3, §5 "rule-draft injection", C88). Governance DRAFTS a rule from one of four
-// fixed templates and sends it to Rules & Approvals as a DRAFT. It never decides: the owner approves or rejects the draft
+// Contact-rule proposals (C166, DESIGN §3.3, §5 "rule-draft injection", C88, C373 §5). Governance DRAFTS a rule from one of
+// five fixed templates and sends it to Rules & Approvals as a DRAFT. It never decides: the owner approves or rejects the draft
 // in Rules (Drafts page), and Governance only follows `draft_status`.
 //
 // What keeps this safe:
 // - Only a PERSON op starts a proposal (`assertOwner`). No agent op, no hook and no timer calls `rule_draft_submit`; the
 //   timer only calls `draft_status` (read). The two Rules operations Governance may call are the only two the companion
 //   lists in the manifest (`RULES_OPS`), and `callRules` refuses any other name.
-// - The parameters are ONE canonical agent id that is in Governance's directory, or ONE canonical handle. There is no free
-//   text parameter. The `text` is a fixed English sentence plus the agent's name (or the handle); a name passes through
-//   `cleanText` and is clipped. Review reasons, request text and anything else an agent wrote never reach `text`.
+// - The parameters are ONE canonical agent id that is in Governance's directory, ONE canonical handle, or ONE team id that
+//   is in Governance's directory. There is no free text parameter. The `text` is a fixed English sentence plus the agent's
+//   or team's name (or the handle); a name passes through `cleanText` and is clipped. Review reasons, request text and anything else an agent wrote never reach `text`.
 // - The payload is exactly `{text, rules}`. There is no source, product or name field: Rules records the VERIFIED product
 //   of the calling app itself (the app cannot set it).
 // - The proposal row is written first, as `failed` / `interrupted` (the truth if the process dies in the call), and its id
@@ -19,14 +19,15 @@ import { type Db, type Json, type OpContext, TbError } from "@opt2-tealbrick/min
 import { fail } from "./store.ts";
 import { cleanText } from "./text.ts";
 
-export const TEMPLATES = ["hold_outward_for_agent", "deny_outward_for_agent", "hold_on_behalf_of_sender", "deny_on_behalf_of_sender"] as const;
+export const TEMPLATES = ["hold_outward_for_agent", "deny_outward_for_agent", "hold_on_behalf_of_sender", "deny_on_behalf_of_sender", "hold_outward_for_team"] as const;
 export type Template = (typeof TEMPLATES)[number];
 /** The only two Rules operations Governance calls (the companion in the manifest lists exactly these). */
 export const RULES_OPS = ["rule_draft_submit", "draft_status"] as const;
 type RulesOp = (typeof RULES_OPS)[number];
 export type CallApp = OpContext["callApp"];
 
-export type Params = { agent: string } | { handle: string };
+export type Params = { agent: string } | { handle: string } | { team: string };
+type Subject = { agent: string; name: string } | { handle: string } | { team: string; name: string };
 export type RulesStatus = "pending" | "approved" | "rejected" | "gone" | "unknown";
 
 /** A rule in the shape of `RuleSpec` in Rules' manifest (`$defs` of `rule_draft_submit.input`). */
@@ -35,7 +36,7 @@ export interface RuleSpec {
   description: string;
   active: true;
   priority: number;
-  match: { agents: string[]; effects: ["outward"] } | { onBehalfOf: { ids: string[] } };
+  match: { agents: string[]; effects: ["outward"] } | { onBehalfOf: { ids: string[] } } | { callerTeams: string[]; effects: ["outward"] };
   outcome: { decision: "hold" | "deny"; reason: string };
 }
 export interface Payload {
@@ -52,16 +53,38 @@ const POLL_BATCH = 25;
 /** `proposals_list` refreshes with this many calls at once and for at most this long (the op has a 30 s limit). */
 export const LIST_POLL: PollBudget = { concurrency: 5, budgetMs: 5_000 };
 const AGENT_ID = /^agt_[A-Za-z0-9]+$/;
+/** Rules' `match.callerTeams` items are 1-64 characters (Rules 0.4.1 RuleSpec); Governance team ids fit (ID_MAX of the feed). */
+const TEAM_ID_MAX = 64;
 
-const isAgentTemplate = (t: Template) => t.endsWith("_outward_for_agent");
+const paramOf = (t: Template): "agent" | "handle" | "team" => (t.endsWith("_outward_for_agent") ? "agent" : t.endsWith("_for_team") ? "team" : "handle");
 const decisionOf = (t: Template): "hold" | "deny" => (t.startsWith("hold_") ? "hold" : "deny");
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 // ── building (pure) ─────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The draft for a template and ONE subject. `name` is the agent's directory name (untrusted text: cleaned and clipped here). */
-export function buildPayload(template: Template, subject: { agent: string; name: string } | { handle: string }): Payload {
+export function buildPayload(template: Template, subject: Subject): Payload {
   const hold = decisionOf(template) === "hold";
+  if ("team" in subject) {
+    // hold only (C373 §5): Rules matches `callerTeams` against the calling agent's teams from the directory feed, and
+    // fails closed for hold/deny when the feed facts are missing or stale (Rules C236).
+    const name = clip(cleanText(subject.name), NAME_MAX) || subject.team;
+    const label = `${name} (${subject.team})`;
+    return {
+      text: `Hold every outward action of the agents in the team ${label} until I approve it.`,
+      rules: [
+        {
+          title: clip(`Hold outward actions of team ${name}`, 120),
+          description:
+            "Proposed by Governance. It applies to every action that reaches outside the workspace (sends a message, an email, a post) by an agent that is a member of this team in Governance.",
+          active: true,
+          priority: RULE_PRIORITY,
+          match: { callerTeams: [subject.team], effects: ["outward"] },
+          outcome: { decision: "hold", reason: "Governance proposal: outward actions of this team's agents wait for the owner." },
+        },
+      ],
+    };
+  }
   if ("agent" in subject) {
     const name = clip(cleanText(subject.name), NAME_MAX) || subject.agent;
     const label = `${name} (${subject.agent})`;
@@ -96,10 +119,10 @@ export function buildPayload(template: Template, subject: { agent: string; name:
 }
 
 /** The canonical parameters, or a 400/404 with a plain code. The agent must be in the directory; the handle is canonicalized by the shared `normalizeHandle`. */
-export function parseParams(db: Db, template: Template, params: Record<string, unknown>): { params: Params; subject: { agent: string; name: string } | { handle: string } } {
+export function parseParams(db: Db, template: Template, params: Record<string, unknown>): { params: Params; subject: Subject } {
   if (!(TEMPLATES as readonly string[]).includes(template)) fail("template_invalid", "unknown template", 400);
   const keys = Object.keys(params);
-  const want = isAgentTemplate(template) ? "agent" : "handle";
+  const want = paramOf(template);
   if (keys.length !== 1 || keys[0] !== want) fail("params_invalid", `this template takes exactly one parameter: ${want}`, 400);
   const raw = params[want];
   if (typeof raw !== "string") fail("params_invalid", `${want} must be a string`, 400);
@@ -109,6 +132,13 @@ export function parseParams(db: Db, template: Template, params: Record<string, u
     const a = db.prepare("SELECT id, name FROM fleet_agents WHERE id = ? AND status <> 'removed'").get(id);
     if (!a) fail("agent_not_found", "no workspace agent with this id", 404);
     return { params: { agent: id }, subject: { agent: id, name: String(a?.name) } };
+  }
+  if (want === "team") {
+    const id = String(raw);
+    if (id.length < 1 || id.length > TEAM_ID_MAX) fail("params_invalid", "not a team id", 400);
+    const t = db.prepare("SELECT id, name FROM fleet_teams WHERE id = ?").get(id);
+    if (!t) fail("team_not_found", "no team with this id", 404);
+    return { params: { team: id }, subject: { team: id, name: String(t?.name) } };
   }
   const handle = normalizeHandle(String(raw)) ?? fail("handle_invalid", "not a buzz, slack or telegram handle", 400);
   return { params: { handle }, subject: { handle } };

@@ -1,7 +1,7 @@
 // The words of the contact-rule proposals in the owner's pages (L18): what each template does, and one plain sentence for
 // every way sending can fail. Pure; shared by the review flow and the Contact rules page.
 
-export type Template = "hold_outward_for_agent" | "deny_outward_for_agent" | "hold_on_behalf_of_sender" | "deny_on_behalf_of_sender";
+export type Template = "hold_outward_for_agent" | "deny_outward_for_agent" | "hold_on_behalf_of_sender" | "deny_on_behalf_of_sender" | "hold_outward_for_team";
 
 export const TEMPLATE_INFO: Record<Template, { title: string; body: string }> = {
   hold_outward_for_agent: { title: "Hold its outward actions", body: "Every message, email or post this agent sends outside the workspace waits for your approval." },
@@ -13,6 +13,10 @@ export const TEMPLATE_INFO: Record<Template, { title: string; body: string }> = 
   deny_on_behalf_of_sender: {
     title: "Refuse what agents do for this sender",
     body: "When an agent acts for a message from this sender, the action is refused. The sender is only a claim the agent passes on, so this can add a refusal and never grants anything.",
+  },
+  hold_outward_for_team: {
+    title: "Hold the team's outward actions",
+    body: "Every message, email or post that an agent of this team sends outside the workspace waits for your approval. Rules reads the team members from Governance.",
   },
 };
 

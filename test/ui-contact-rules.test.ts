@@ -57,14 +57,19 @@ const LIST = () => ({
   ],
   nextCursor: null,
 });
+const TEAMS = () => [
+  { id: "tm_1", name: "Front line", description: "", tags: [], members: [] },
+  { id: "tm_2", name: "<i>Ops</i>", description: "", tags: [], members: [] },
+];
 interface Stub {
+  teams: ReturnType<typeof TEAMS>;
   calls: { op: string; input: any }[];
   fail: Record<string, { status: number; code: string } | undefined>;
   list: ReturnType<typeof LIST>;
   send: (input: any) => any;
 }
 const sent = (input: any) => ({ proposal: P("prp_7", { template: input.template, params: input.params, review: input.review ?? null }), duplicate: false });
-const stub: Stub = { calls: [], fail: {}, list: LIST(), send: sent };
+const stub: Stub = { teams: TEAMS(), calls: [], fail: {}, list: LIST(), send: sent };
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, "http://localhost");
@@ -78,6 +83,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (failure) return json(failure.status, { error: { code: failure.code, message: `raw upstream text for ${failure.code}`, requestId: "req_1" } });
   if (op === "proposals_list") return json(200, { status: "ok", output: stub.list });
   if (op === "proposal_send") return json(200, { status: "ok", output: stub.send(body.input) });
+  if (op === "overview_get") return json(200, { status: "ok", output: { revision: 1, teams: stub.teams, people: [], agents: [] } });
   return json(404, { error: { code: "not_found", message: op } });
 }) as typeof fetch;
 
@@ -125,6 +131,7 @@ before(async () => {
 });
 after(() => rmSync(outDir, { recursive: true, force: true }));
 const reset = () => {
+  stub.teams = TEAMS();
   stub.calls = [];
   stub.fail = {};
   stub.list = LIST();
@@ -136,7 +143,13 @@ describe("Contact rules page", () => {
   it("lists the proposals with what Rules says about each, and where to approve", async () => {
     reset();
     const m = await mount(h(ui.ContactRulesPage, {}));
-    assert.deepEqual(stub.calls, [{ op: "proposals_list", input: { limit: 100 } }]);
+    assert.deepEqual(
+      stub.calls.sort((a, b) => a.op.localeCompare(b.op)),
+      [
+        { op: "overview_get", input: {} },
+        { op: "proposals_list", input: { limit: 100 } },
+      ],
+    );
     assert.equal(m.host.querySelector("h1")?.textContent, "Contact rules");
     assert.match(m.host.textContent ?? "", /Approve or reject a draft in Rules & Approvals, under Drafts\. Nothing applies yet\./);
     const r = rows(m.host);
@@ -217,5 +230,50 @@ describe("Contact rules page", () => {
     assert.equal(rows(m.host).length, 7);
     assert.deepEqual(alerts(m.host), []);
     await m.unmount();
+  });
+
+  it("team rules: one explicit click per team proposes hold_outward_for_team with exactly that team id", async () => {
+    reset();
+    const m = await mount(h(ui.ContactRulesPage, {}));
+    const list = m.host.querySelector('ul[aria-label="Team rules"]');
+    assert.ok(list, "the team list");
+    assert.deepEqual([...(list as Element).querySelectorAll("li > span")].map((x) => x.textContent), ["Front line", "<i>Ops</i>"], "names as text");
+    assert.equal((list as Element).querySelector("i"), null);
+    assert.equal(stub.calls.filter((c) => c.op === "proposal_send").length, 0, "nothing is sent without a click");
+    const btn = [...(list as Element).querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Hold the outward actions of the team Front line");
+    assert.ok(btn);
+    await click(btn as Element);
+    assert.deepEqual(stub.calls.filter((c) => c.op === "proposal_send").map((c) => c.input), [{ template: "hold_outward_for_team", params: { team: "tm_1" } }]);
+    assert.equal(stub.calls.filter((c) => c.op === "proposals_list").length, 2, "reloaded");
+    assert.deepEqual(alerts(m.host), []);
+    assert.match(m.host.textContent ?? "", /Every message, email or post that an agent of this team sends outside the workspace waits for your approval/);
+    await m.unmount();
+  });
+
+  it("team rules: a gone team or a refused send is a plain message; a failed team load hides only the team list", async () => {
+    reset();
+    stub.fail.proposal_send = { status: 404, code: "team_not_found" };
+    const m = await mount(h(ui.ContactRulesPage, {}));
+    await click(button(m.host.querySelector('ul[aria-label="Team rules"]') as Element, "Hold outward actions"));
+    assert.match(alerts(m.host)[0] ?? "", /This entry is gone\. Reload the page and try again\./);
+    assert.doesNotMatch(alerts(m.host).join(), /team_not_found|raw upstream/);
+    stub.fail.proposal_send = undefined;
+    stub.send = (input) => ({ proposal: P("prp_8", { template: input.template, params: input.params, rulesDraftId: null, status: "failed", error: "too_many_drafts", rulesStatus: null }), duplicate: false });
+    await click(button(m.host.querySelector('ul[aria-label="Team rules"]') as Element, "Hold outward actions"));
+    assert.match(alerts(m.host)[0] ?? "", /^The rule was not sent\. Rules already has too many drafts waiting/);
+    await m.unmount();
+    reset();
+    stub.fail.overview_get = { status: 500, code: "internal_error" };
+    const m2 = await mount(h(ui.ContactRulesPage, {}));
+    assert.equal(m2.host.querySelector('ul[aria-label="Team rules"]'), null);
+    assert.match(m2.host.textContent ?? "", /The teams could not be loaded/);
+    assert.equal(rows(m2.host).length, 7, "the proposals still show");
+    assert.deepEqual(alerts(m2.host), []);
+    await m2.unmount();
+    reset();
+    stub.teams = [];
+    const m3 = await mount(h(ui.ContactRulesPage, {}));
+    assert.match(m3.host.textContent ?? "", /Make a team first to propose a team rule\./);
+    await m3.unmount();
   });
 });

@@ -1,4 +1,4 @@
-// Governance 0.2.4 (S4a): contact-rule proposals. Governance drafts a rule from one of four fixed templates and sends it to
+// Governance 0.2.4 (S4a) + 0.3.0 (C373 §5): contact-rule proposals. Governance drafts a rule from one of five fixed templates and sends it to
 // Rules & Approvals as a DRAFT; the owner approves in Rules. Every guard has a quiet-on-good and a fire-on-bad case with the
 // exact outcome (L34, L27). The rule shape is validated against Rules' own manifest (test/contracts, L1).
 import assert from "node:assert/strict";
@@ -11,12 +11,13 @@ import { definition, handlers, hooks, manifest } from "../src/app.ts";
 import { factsFor } from "../src/facts.ts";
 import * as p from "../src/proposals.ts";
 import * as r from "../src/reviews.ts";
+import * as store from "../src/store.ts";
 import { cleanText } from "../src/text.ts";
-import { AGENT_A, AGENT_B, migratedDb, NOSTR } from "./helpers.ts";
+import { AGENT_A, AGENT_B, migratedDb, migrationFiles, NOSTR } from "./helpers.ts";
 import { seed } from "./seed.ts";
 
-const RULES_PATH = new URL("./contracts/rules.0.3.0.manifest.json", import.meta.url);
-const RULES_SHA = "9a84f072e8623729e5de14521ec7dbad7cca3e29722c21dad82959d456f8e227";
+const RULES_PATH = new URL("./contracts/rules.0.4.1.manifest.json", import.meta.url);
+const RULES_SHA = "3e334f4715efed335e9736c50577445776f9d6b5d131746b894b0227ec0d1f41";
 type RulesManifest = { operations: { id: string; input: Json; output: Json; audience: string; crud: string[]; idempotency: string }[] };
 const rulesManifest = JSON.parse(readFileSync(RULES_PATH, "utf8")) as RulesManifest;
 const rulesOp = (id: string) => rulesManifest.operations.find((o) => o.id === id) as RulesManifest["operations"][number];
@@ -36,7 +37,7 @@ interface Call {
   input: Json;
   key: string | undefined;
 }
-/** A recording callApp that behaves like Rules 0.3.0: validates the input against Rules' schema, replays an idempotency key, keeps drafts. */
+/** A recording callApp that behaves like Rules 0.4.1: validates the input against Rules' schema, replays an idempotency key, keeps drafts. */
 function fakeRules() {
   const calls: Call[] = [];
   const drafts = new Map<string, { status: string; decidedAt: string | null }>();
@@ -118,11 +119,13 @@ test("the Rules manifest copy is byte for byte the one in PROVENANCE.md", () => 
 
 test("each template builds exactly one rule in the RuleSpec shape of Rules, with the fixed sentence", () => {
   const agent = { agent: AGENT_A.id, name: "Front desk" };
-  const cases: [p.Template, { agent: string; name: string } | { handle: string }, string, object, string][] = [
+  const team = { team: "tm_01J00000000000000000000TM", name: "Front line" };
+  const cases: [p.Template, { agent: string; name: string } | { handle: string } | { team: string; name: string }, string, object, string][] = [
     ["hold_outward_for_agent", agent, `Hold every outward action of the agent Front desk (${AGENT_A.id}) until I approve it.`, { agents: [AGENT_A.id], effects: ["outward"] }, "hold"],
     ["deny_outward_for_agent", agent, `Refuse every outward action of the agent Front desk (${AGENT_A.id}).`, { agents: [AGENT_A.id], effects: ["outward"] }, "deny"],
     ["hold_on_behalf_of_sender", { handle: SLACK }, `Hold every action an agent takes on behalf of the sender ${SLACK} until I approve it.`, { onBehalfOf: { ids: [SLACK] } }, "hold"],
     ["deny_on_behalf_of_sender", { handle: SLACK }, `Refuse every action an agent takes on behalf of the sender ${SLACK}.`, { onBehalfOf: { ids: [SLACK] } }, "deny"],
+    ["hold_outward_for_team", team, `Hold every outward action of the agents in the team Front line (${team.team}) until I approve it.`, { callerTeams: [team.team], effects: ["outward"] }, "hold"],
   ];
   assert.deepEqual(cases.map((c) => c[0]), [...p.TEMPLATES]);
   for (const [template, subject, text, match, decision] of cases) {
@@ -135,21 +138,77 @@ test("each template builds exactly one rule in the RuleSpec shape of Rules, with
     // fires on bad below: the same check refuses a wrong shape
     const v = validateAgainstSchema(rulesOp("rule_draft_submit").input as never, payload as unknown as Json);
     assert.equal(v.ok, true, `${template}: ${v.ok ? "" : JSON.stringify(v.errors)}`);
+    // and Rules' writer checks beyond the schema (specProblem, Rules 0.4.1) find nothing
+    for (const rule of payload.rules) assert.equal(rulesSpecProblem(rule as unknown as Spec), "", template);
   }
   const bad = { text: "x", rules: [{ title: "t", active: true, priority: 100, match: { agents: ["agt_x1234"], recipients: ["a"] }, outcome: { decision: "hold", reason: "r" } }] };
   assert.equal(validateAgainstSchema(rulesOp("rule_draft_submit").input as never, bad as unknown as Json).ok, false, "a field Rules does not know is refused by the same schema");
 });
 
-test("the only operations are the four templates; no template takes text, a team or a recipient", () => {
-  assert.deepEqual(p.TEMPLATES, ["hold_outward_for_agent", "deny_outward_for_agent", "hold_on_behalf_of_sender", "deny_on_behalf_of_sender"]);
+// Rules 0.4.1 `specProblem` (src/engine.ts at 5842ae4), the checks a JSON schema cannot state that a template could hit.
+type Spec = { outcome: { decision: string }; narrowing?: unknown; match: { operations?: string[]; tools?: string[]; products?: string[] } };
+function rulesSpecProblem(spec: Spec): string {
+  if (spec.narrowing && spec.outcome.decision !== "allow") return "narrowing applies only to rules that allow";
+  if (spec.match.operations?.length && !spec.match.products?.length) return "operations need products";
+  if (spec.match.tools?.length && !spec.match.products?.length) return "tools need products";
+  return "";
+}
+
+test("contract: every template, with every directory subject, is a draft Rules 0.4.1 accepts; the copy of Rules' schema fires on bad team drafts", () => {
+  const { db, support, ops } = fresh();
+  const schema = rulesOp("rule_draft_submit").input as never;
+  const subjects: [p.Template, Record<string, unknown>][] = [
+    ...[AGENT_A.id, AGENT_B.id].flatMap((agent) => (["hold_outward_for_agent", "deny_outward_for_agent"] as const).map((t) => [t, { agent }] as [p.Template, Record<string, unknown>])),
+    ...[SLACK, `buzz:${NOSTR.npub}`, "telegram:-1001234567890"].flatMap((handle) => (["hold_on_behalf_of_sender", "deny_on_behalf_of_sender"] as const).map((t) => [t, { handle }] as [p.Template, Record<string, unknown>])),
+    ["hold_outward_for_team", { team: support.id }],
+    ["hold_outward_for_team", { team: ops.id }],
+  ];
+  assert.deepEqual([...new Set(subjects.map((x) => x[0]))].sort(), [...p.TEMPLATES].sort(), "every template is covered");
+  // a team with the longest name and control characters still fits Rules' limits (title <= 120, reason <= 280, text <= 2000)
+  const long = store.setTeam(db, { name: `Team‮\u0007 ${"y".repeat(300)}`.slice(0, 200) });
+  subjects.push(["hold_outward_for_team", { team: long.id }]);
+  for (const [template, params] of subjects) {
+    const payload = p.buildPayload(template, p.parseParams(db, template, params).subject);
+    const v = validateAgainstSchema(schema, payload as unknown as Json);
+    assert.equal(v.ok, true, `${template} ${JSON.stringify(params)}: ${v.ok ? "" : JSON.stringify(v.errors)}`);
+    for (const rule of payload.rules) assert.equal(rulesSpecProblem(rule as unknown as Spec), "");
+  }
+  const teamDraft = p.buildPayload("hold_outward_for_team", { team: support.id, name: "Support" });
+  assert.deepEqual(teamDraft.rules[0]?.match, { callerTeams: [support.id], effects: ["outward"] });
+  assert.equal(teamDraft.rules[0]?.outcome.decision, "hold", "hold only (C373 §5)");
+  // fire on bad: the same schema refuses team drafts Rules would refuse
+  const mutate = (f: (r: Record<string, any>) => void) => {
+    const d = structuredClone(teamDraft) as unknown as { rules: Record<string, any>[] };
+    f(d.rules[0] as Record<string, any>);
+    return validateAgainstSchema(schema, d as unknown as Json).ok;
+  };
+  assert.equal(mutate(() => {}), true, "control: unchanged is accepted");
+  assert.equal(mutate((r) => (r.match.callerTeams = [""])), false, "an empty team id");
+  assert.equal(mutate((r) => (r.match.callerTeams = ["x".repeat(65)])), false, "a team id over 64");
+  assert.equal(mutate((r) => (r.match.callerTeams = "tm_1")), false, "not a list");
+  assert.equal(mutate((r) => (r.match.teams = ["tm_1"])), false, "a match field Rules does not know");
+  assert.equal(mutate((r) => (r.match.effects = ["outbound"])), false, "an effect Rules does not know");
+  assert.equal(mutate((r) => (r.outcome.decision = "approve")), false, "a decision Rules does not know");
+  assert.equal(mutate((r) => (r.title = "t".repeat(121))), false, "a title over 120");
+  // fire on bad: the mirrored writer check
+  assert.notEqual(rulesSpecProblem({ ...(teamDraft.rules[0] as unknown as Spec), match: { operations: ["send_message"] } }), "");
+  assert.notEqual(rulesSpecProblem({ ...(teamDraft.rules[0] as unknown as Spec), narrowing: { memoryTags: { anyOf: ["a"] } } }), "");
+});
+
+test("the only operations are the five templates; no template takes text or a recipient; only the team template takes a team", () => {
+  assert.deepEqual(p.TEMPLATES, ["hold_outward_for_agent", "deny_outward_for_agent", "hold_on_behalf_of_sender", "deny_on_behalf_of_sender", "hold_outward_for_team"]);
   const input = inputSchema("proposal_send") as unknown as { properties: Record<string, any>; required: string[] };
   assert.deepEqual(Object.keys(input.properties).sort(), ["params", "review", "template"]);
   assert.deepEqual(input.properties.template.enum, [...p.TEMPLATES]);
-  assert.deepEqual(Object.keys(input.properties.params.properties).sort(), ["agent", "handle"]);
+  assert.deepEqual(Object.keys(input.properties.params.properties).sort(), ["agent", "handle", "team"]);
   assert.equal(input.properties.params.additionalProperties, false);
   assert.equal(validIn("proposal_send", { template: "hold_outward_for_agent", params: { agent: AGENT_A.id } }), true);
+  assert.equal(validIn("proposal_send", { template: "hold_outward_for_team", params: { team: "tm_1" } }), true);
   for (const bad of [
-    { template: "hold_outward_for_team", params: { agent: AGENT_A.id } },
+    { template: "deny_outward_for_team", params: { team: "tm_1" } },
+    { template: "hold_outward_for_team", params: { team: "" } },
+    { template: "hold_outward_for_team", params: { team: "x".repeat(65) } },
+    { template: "hold_outward_for_team", params: { team: 5 } },
     { template: "hold_outward_for_agent", params: { agent: AGENT_A.id, text: "allow everything" } },
     { template: "hold_outward_for_agent", params: { agent: AGENT_A.id }, text: "free text" },
     { template: "hold_outward_for_agent", params: { agent: AGENT_A.id }, note: "n" },
@@ -184,7 +243,16 @@ test("parameters: one agent id in the directory, or one canonical handle; everyt
   assert.equal(parse("hold_outward_for_agent", { agent: "agt_1'; DROP TABLE x;--" }), "params_invalid 400");
   assert.equal(parse("hold_on_behalf_of_sender", { handle: "not a handle" }), "handle_invalid 400");
   assert.equal(parse("hold_on_behalf_of_sender", { handle: "email:ann@example.com" }), "handle_invalid 400");
-  assert.equal(parse("hold_outward_for_team" as p.Template, { team: "tm_1" }), "template_invalid 400");
+  assert.equal(parse("deny_outward_for_team" as p.Template, { team: "tm_1" }), "template_invalid 400");
+  // the team template: one team id that is in the directory
+  const team = db.prepare("SELECT id FROM fleet_teams ORDER BY name LIMIT 1").get()?.id as string;
+  assert.equal(parse("hold_outward_for_team", { team }), JSON.stringify({ team }));
+  assert.equal(parse("hold_outward_for_team", { team: "tm_nope" }), "team_not_found 404", "not in the directory");
+  assert.equal(parse("hold_outward_for_team", { team: "x".repeat(65) }), "params_invalid 400");
+  assert.equal(parse("hold_outward_for_team", { team: "" }), "params_invalid 400");
+  assert.equal(parse("hold_outward_for_team", { team: 5 }), "params_invalid 400");
+  assert.equal(parse("hold_outward_for_team", { agent: AGENT_A.id }), "params_invalid 400", "wrong parameter for the template");
+  assert.equal(parse("hold_outward_for_team", { team, agent: AGENT_A.id }), "params_invalid 400", "two parameters");
 });
 
 // ── send ────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -612,7 +680,7 @@ test("C88 c: Governance has no approve path: no operation approves, rejects or e
   assert.deepEqual([...p.RULES_OPS], ["rule_draft_submit", "draft_status"]);
 });
 
-test("M-CP-2: the companion matches Rules 0.3.0; an older Rules without draft_status fails the check; an absent Rules is not checked", () => {
+test("M-CP-2: the companion matches Rules 0.4.1; an older Rules without draft_status fails the check; an absent Rules is not checked", () => {
   const v = validateManifest(manifest);
   assert.equal(v.ok, true, v.ok ? "" : JSON.stringify(v.errors));
   const targets = (ops: string[]) => [{ id: "rules", operations: rulesManifest.operations.filter((o) => ops.includes(o.id)).map((o) => ({ id: o.id, audience: o.audience, crud: o.crud })) }];
@@ -622,7 +690,7 @@ test("M-CP-2: the companion matches Rules 0.3.0; an older Rules without draft_st
   assert.equal(old.ok, false);
   assert.deepEqual(old.ok ? [] : old.errors.map((e) => [e.rule, e.code]), [["M-CP-2", "companion_op_invalid"], ["M-CP-2", "companion_op_invalid"]]);
   assert.equal(validateCompanions(manifest as never, []).ok, true, "no Rules deployed: nothing to check");
-  // Rules 0.3.0 has both as agent operations with the crud the companion asks for
+  // Rules 0.4.1 has both as agent operations with the crud the companion asks for
   assert.deepEqual([rulesOp("rule_draft_submit").crud, rulesOp("draft_status").crud, rulesOp("rule_draft_submit").idempotency], [["create"], ["read"], "required"]);
 });
 
@@ -672,4 +740,50 @@ test("the table refuses a sent row without a draft id and a failed row without a
   assert.equal(ins("status", "'failed'"), "check", "failed needs a reason");
   assert.equal(ins("status, error", "'failed', 'timeout'"), "ok");
   assert.equal(ins("status, error", "'approved', 'x'"), "check");
+});
+
+// ── the team template end to end, and migration 0006 (C373 §5) ──────────────────────────────────────────────────
+
+test("hold_outward_for_team: sent to Rules as a draft that Rules' schema accepts; a repeat waits as a duplicate", async () => {
+  const { db, support } = fresh();
+  const rules = fakeRules();
+  const out = await send(db, rules, "hold_outward_for_team", { team: support.id });
+  assert.equal(validOut("proposal_send", out), true);
+  assert.deepEqual([out.proposal.status, out.proposal.template, out.proposal.params, out.duplicate], ["sent", "hold_outward_for_team", { team: support.id }, false]);
+  assert.equal(out.proposal.text, `Hold every outward action of the agents in the team Support (${support.id}) until I approve it.`);
+  const call = rules.calls.find((c) => c.op === "rule_draft_submit");
+  assert.ok(call);
+  assert.deepEqual((call.input as { rules: { match: unknown }[] }).rules[0]?.match, { callerTeams: [support.id], effects: ["outward"] });
+  assert.equal(call.key, out.proposal.id);
+  const again = await send(db, rules, "hold_outward_for_team", { team: support.id });
+  assert.equal(again.duplicate, true, "no second draft while the first waits");
+  assert.equal(rules.calls.filter((c) => c.op === "rule_draft_submit").length, 1);
+  const list = await run("proposals_list", {}, owner(db, rules));
+  assert.equal(validOut("proposals_list", list), true);
+  // fire on bad: an agent cannot propose a team rule; a missing team is a 404 and nothing is sent
+  assert.equal(await outcome(() => run("proposal_send", { template: "hold_outward_for_team", params: { team: support.id } }, ctxOf(db, { type: "agent", id: AGENT_A.id, name: "A", mode: "free" }, rules))), "no_access 403");
+  assert.equal(await outcome(() => send(db, rules, "hold_outward_for_team", { team: "tm_gone" })), "team_not_found 404");
+  assert.equal(rules.calls.filter((c) => c.op === "rule_draft_submit").length, 1);
+});
+
+test("migration 0006 keeps every 0.2.4 proposal row and only widens the template CHECK", async () => {
+  const db = migratedDb(5); // as 0.2.4 + 0005 left it
+  seed(db);
+  const rules = fakeRules();
+  await send(db, rules, "hold_outward_for_agent", { agent: AGENT_A.id });
+  rules.down = true;
+  await send(db, rules, "deny_on_behalf_of_sender", { handle: SLACK });
+  const before = db.prepare("SELECT * FROM fleet_proposals ORDER BY id").all();
+  assert.equal(before.length, 2);
+  assert.throws(() => db.prepare("UPDATE fleet_proposals SET template = 'hold_outward_for_team'").run(), "0004 refuses the new template");
+  for (const m of migrationFiles().slice(5)) db.exec(`BEGIN;\n${m.sql}\nCOMMIT;`);
+  assert.deepEqual(db.prepare("SELECT * FROM fleet_proposals ORDER BY id").all(), before, "every row and column is the same");
+  const idx = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'fleet_proposals' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((r) => r.name);
+  assert.deepEqual(idx, ["fleet_proposals_created", "fleet_proposals_open"]);
+  // quiet on good: the new template can be stored; fire on bad: anything else still cannot, and the other CHECKs hold
+  rules.down = false;
+  const support = db.prepare("SELECT id FROM fleet_teams WHERE name = 'Support'").get() as { id: string };
+  assert.equal((await send(db, rules, "hold_outward_for_team", { team: support.id })).proposal.status, "sent");
+  assert.throws(() => db.prepare("UPDATE fleet_proposals SET template = 'deny_outward_for_team'").run());
+  assert.throws(() => db.prepare("UPDATE fleet_proposals SET rules_draft_id = NULL WHERE status = 'sent'").run(), "sent needs a draft id");
 });

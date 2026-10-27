@@ -2504,7 +2504,8 @@
                     "hold_outward_for_agent",
                     "deny_outward_for_agent",
                     "hold_on_behalf_of_sender",
-                    "deny_on_behalf_of_sender"
+                    "deny_on_behalf_of_sender",
+                    "hold_outward_for_team"
                   ]
                 },
                 "params": {
@@ -2519,6 +2520,10 @@
                     "handle": {
                       "type": "string",
                       "maxLength": 140
+                    },
+                    "team": {
+                      "type": "string",
+                      "maxLength": 64
                     }
                   }
                 },
@@ -2638,7 +2643,8 @@
               "hold_outward_for_agent",
               "deny_outward_for_agent",
               "hold_on_behalf_of_sender",
-              "deny_on_behalf_of_sender"
+              "deny_on_behalf_of_sender",
+              "hold_outward_for_team"
             ]
           },
           "params": {
@@ -2655,6 +2661,11 @@
                 "type": "string",
                 "maxLength": 140,
                 "minLength": 3
+              },
+              "team": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
               }
             }
           },
@@ -2698,7 +2709,8 @@
                   "hold_outward_for_agent",
                   "deny_outward_for_agent",
                   "hold_on_behalf_of_sender",
-                  "deny_on_behalf_of_sender"
+                  "deny_on_behalf_of_sender",
+                  "hold_outward_for_team"
                 ]
               },
               "params": {
@@ -2713,6 +2725,10 @@
                   "handle": {
                     "type": "string",
                     "maxLength": 140
+                  },
+                  "team": {
+                    "type": "string",
+                    "maxLength": 64
                   }
                 }
               },
@@ -5013,7 +5029,7 @@
       "crud": [
         "read"
       ],
-      "purpose": "Show the owner which channel identities Connect issued to which agents (Identities page; never shown to agents)."
+      "purpose": "Show the owner the channel identities Connect issued to agents, and give Rules their handles in the directory feed. Never shown to agents."
     },
     {
       "product": "rules",

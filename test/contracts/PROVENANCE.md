@@ -19,17 +19,21 @@ How the tests use them: every `directory_feed` answer is validated with the JSON
 `normalizeHandle(h) === h` for every handle. The fixtures `valid`, `invalid` and `invalidByNormalizeHandle` run through
 the same wrapper (`test/feed-contract.ts`).
 
-## Rules & Approvals 0.3.0 manifest (companion target, contact-rule proposals)
+## Rules & Approvals 0.4.1 manifest (companion target, contact-rule proposals)
 
-`rules.0.3.0.manifest.json` is a byte copy. Do not edit it. It is the source of the rule shape (`RuleSpec` in
+`rules.0.4.1.manifest.json` is a byte copy. Do not edit it. It is the source of the rule shape (`RuleSpec` in
 `$defs` of `rule_draft_submit.input`) and of the two Rules operations Governance calls (`rule_draft_submit`,
-`draft_status`). `test/proposals.test.ts` fails when the file no longer matches the sha256 below.
+`draft_status`). `test/proposals.test.ts` fails when the file no longer matches the sha256 below. It replaces the
+0.3.0 copy (Governance 0.3.0, C373 §5: `match.callerTeams` for the template `hold_outward_for_team`).
 
-- Source repo: `Tealbrick/opt2-tealbrick-rules`, branch `main`, commit `bed1a37` ("Rules 0.3.0: verified caller product for app callers"), file `tealbrick.manifest.json` (version 0.3.0)
-- sha256: `9a84f072e8623729e5de14521ec7dbad7cca3e29722c21dad82959d456f8e227`
-- Fetched with `git -C <rules> show origin/main:tealbrick.manifest.json`.
+- Source repo: `Tealbrick/opt2-tealbrick-rules`, branch `main`, commit `5842ae42bf8fb193ad23894465b68e3bab505471` ("rules 0.4.1: writer checks tools entries with the catalog-name rule (#21)"), file `tealbrick.manifest.json` (version 0.4.1)
+- sha256: `3e334f4715efed335e9736c50577445776f9d6b5d131746b894b0227ec0d1f41`
+- Fetched with `git -C <rules> show 5842ae4:tealbrick.manifest.json`.
 
 Use: every generated rule is validated against `RuleSpec`; the M-CP-2 check (`validateCompanions`) runs against this manifest.
+Rules also refuses a draft by checks a JSON schema cannot state (`specProblem` in its `src/engine.ts` at that commit:
+narrowing only on allow rules, `operations`/`tools` need `products`, catalog tool names); `test/proposals.test.ts` mirrors
+the ones a template could hit.
 
 ## fleet.directory_feed/1 with agent handles (C373, RULES-INTERFACE §3) — DERIVED, not a byte copy
 
