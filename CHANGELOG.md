@@ -33,7 +33,7 @@ carries everything in 0.2.4 below (S4a contact-rule proposals), which was never 
   `knowledge`, and whose `Caller.listed` is true, reads the feed. An app with no verified product, or one that is not
   listed in the current slice, gets `caller_unverified` 403 (retryable). Before, an app with no product could read the
   feed. Another product gets `no_access` 403; agents and persons stay `no_access`.
-- `agent_set` refuses an owner whose directory entry is not a person (an outside agent) with 400 `owner_not_person`.
+- `agent_set` refuses an owner whose directory entry is not a person (an outside agent) with 400 `owner_not_person` only when the owner CHANGES (an owner set before 0.3.0 does not block a role or tag edit); `person_set` refuses to turn a person who owns workspace agents into an outside agent (409 `person_owns_agents`). Draft text is clipped by code point; Unicode tag characters and supplementary variation selectors are removed from untrusted text.
   Rows set before keep their owner; the feed still carries the owner id (readers check `contacts[].kind`). The owner
   picker lists persons only (plus the current owner).
 - Pins: miniapp-sdk 0.1.25 → 0.1.40, manifest 0.1.19 → 0.1.31, conformance 0.1.18 → 0.1.30 (ui 0.3.0 unchanged); no code
