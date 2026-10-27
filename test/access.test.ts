@@ -28,14 +28,14 @@ const SLICE = (): SliceTopology => ({
   ],
   edges: [
     { agent: FRONT, ins: "ins_kn", product: "knowledge", crud: ["read", "create"], mode: "free", held: [] },
-    { agent: FRONT, ins: "ins_cn", product: "connect", crud: ["delete", "read", "update", "create"], mode: "free", held: ["money", "first_contact"], wf: ["wf.a", "wf.b"] },
+    { agent: FRONT, ins: "ins_cn", product: "connect", crud: ["delete", "read", "update", "create"], mode: "free", held: ["money", "first_contact"], wf: 2 },
     { agent: SCOUT, ins: "ins_kn", product: "knowledge", crud: ["read"], mode: "bound", held: [], paused: true },
     { agent: GHOST, ins: "ins_kn", product: "knowledge", crud: ["read", "delete"], mode: "free", held: [] },
     { agent: FRONT, ins: "ins_gone", product: "gone", crud: ["read"], mode: "free", held: [] },
     { agent: FRONT, ins: "ins_kn", product: "knowledge", crud: ["delete"], mode: "free", held: [] }, // repeat: first wins
   ],
   companions: [
-    { from: "ins_rl", to: "ins_cn", product: "connect", crud: ["read"], ops: ["contacts_list"] },
+    { from: "ins_rl", to: "ins_cn", product: "connect", crud: ["read"], ops: 1 },
     { from: "ins_kn", to: "ins_cn", product: "connect", crud: ["read", "create"] },
     { from: "ins_gone", to: "ins_cn", product: "connect", crud: ["read"] },
   ],

@@ -21,7 +21,7 @@ const run = (id: string, input: unknown, c: OpContext) => (handlers as unknown a
 
 // What no agent output may carry: contact data and everything the owner keeps for herself.
 const FORBIDDEN_TEXT = ["@", "npub1", "buzz:", "slack:", "telegram:", "U012ABCDEF", "UCY00001", "W0BOT123", "123456", "-1001234567890", NOSTR.npub, NOSTR.hex];
-const FORBIDDEN_KEYS = ["email", "handles", "handle", "tags", "mode", "identity", "identities", "reason"];
+const FORBIDDEN_KEYS = ["email", "handles", "handle", "tags", "mode", "identity", "identities", "reason", "org", "relationship"];
 
 function keysOf(v: unknown, out = new Set<string>()): Set<string> {
   if (Array.isArray(v)) for (const x of v) keysOf(x, out);
@@ -137,7 +137,8 @@ test("owner view (overview_get) shows kind and trust; person_set and agent_set a
   const ag = await run("agent_set", { agent: AGENT_A.id, role: "x" }, owner);
   assert.equal(valid("agent_set", ag), true);
   assert.equal(ag.agent.trust, "trusted");
-  // the owner's person_set cannot set trust: the input schema has no such member
+  // the owner's person_set cannot set trust: the input schema has no such member (since 0.3.1 it has kind, org, relationship)
   const inputProps = (manifest.operations.find((o) => o.id === "person_set") as unknown as { input: { properties: object } }).input.properties;
-  assert.ok(!("trust" in inputProps) && !("kind" in inputProps));
+  assert.ok(!("trust" in inputProps) && !("source" in inputProps));
+  assert.ok("kind" in inputProps && "org" in inputProps && "relationship" in inputProps);
 });

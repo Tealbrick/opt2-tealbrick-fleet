@@ -115,7 +115,7 @@ export function accessView(slice: SliceTopology, agents: readonly AccessAgent[],
       words: crudWords(crud),
       mode: e.mode,
       held: [...e.held].sort(cmp),
-      workflowOps: e.wf?.length ?? 0,
+      workflowOps: e.wf ?? 0,
       paused: e.paused === true,
     });
   }
@@ -161,7 +161,7 @@ export function accessView(slice: SliceTopology, agents: readonly AccessAgent[],
       continue;
     }
     callerSeen.add(key);
-    to.callers.push({ ins: from.ins, name: from.name, letters: crudLetters(c.crud), words: crudWords(c.crud), ops: c.ops?.length ?? 0 });
+    to.callers.push({ ins: from.ins, name: from.name, letters: crudLetters(c.crud), words: crudWords(c.crud), ops: c.ops ?? 0 });
   }
   for (const a of apps) a.callers.sort((x, y) => byNameThenId({ name: x.name, id: x.ins }, { name: y.name, id: y.ins }));
 

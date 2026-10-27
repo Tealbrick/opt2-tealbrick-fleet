@@ -1,0 +1,147 @@
+{
+  "_comment": "Excerpt of Connect 0.7.5 (PR connect#34, commit bdea54a) for the M-CP-2 check: id, audience, crud, listing and the contacts_list input/output schema of the two operations Governance calls. See PROVENANCE.md.",
+  "id": "connect",
+  "version": "0.7.5",
+  "operations": [
+    {
+      "id": "identities_list",
+      "audience": "agent",
+      "crud": [
+        "read"
+      ],
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "type": "string",
+            "pattern": "^agt_[0-9A-Za-z]{1,60}$",
+            "description": "Optional: only this agent."
+          },
+          "cursor": {
+            "type": "string",
+            "maxLength": 600
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "identities",
+          "nextCursor"
+        ],
+        "properties": {
+          "identities": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "agent",
+                "channel",
+                "identity"
+              ],
+              "properties": {
+                "agent": {
+                  "type": "string"
+                },
+                "channel": {
+                  "type": "string"
+                },
+                "identity": {
+                  "type": "string",
+                  "description": "\"<channel>:<value>\" (SDK-API \u00a718)"
+                }
+              }
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "contacts_list",
+      "audience": "agent",
+      "crud": [
+        "read"
+      ],
+      "listing": "workflow",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "type": "string",
+            "maxLength": 600,
+            "description": "nextCursor of the previous page."
+          },
+          "since": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional: only contacts first made at or after this time (epoch milliseconds)."
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contacts",
+          "nextCursor"
+        ],
+        "properties": {
+          "contacts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "agent",
+                "channel",
+                "handle",
+                "firstContactAt"
+              ],
+              "properties": {
+                "agent": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "agt_ id; null for the workspace sender, an app caller or a bot account bound to no agent."
+                },
+                "channel": {
+                  "type": "string",
+                  "description": "buzz, the chat service of the bot account (slack, telegram, teams, discord), or tool."
+                },
+                "handle": {
+                  "type": "string",
+                  "description": "\"<channel>:<value>\" (normalizeHandle) where it applies; else the raw id or address."
+                },
+                "account": {
+                  "type": "string",
+                  "description": "Label of the Connect account (chat and tool contacts)."
+                },
+                "firstContactAt": {
+                  "type": "integer",
+                  "description": "Epoch milliseconds."
+                }
+              }
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

@@ -45,6 +45,9 @@ export interface Person {
   trust: Trust;
   email: string | null;
   title: string;
+  /** owner-side text for an outside agent (the organisation and how you know it); '' when not given */
+  org: string;
+  relationship: string;
   status: PersonStatus;
   tags: string[];
   handles: string[];
@@ -150,6 +153,8 @@ function toPerson(db: Db, r: Row): Person {
     trust: r.trust as Trust,
     email: r.email === null ? null : String(r.email),
     title: String(r.title),
+    org: r.org === undefined ? "" : String(r.org),
+    relationship: r.relationship === undefined ? "" : String(r.relationship),
     status: r.status as PersonStatus,
     tags: tags(r.tags),
     handles: handlesOf(db, id),
@@ -307,8 +312,10 @@ export function deleteTeam(db: Db, id: string): boolean {
 
 export interface PersonInput {
   id?: string;
-  /** Not an operation input yet (person_set stays as released); the store is ready for outside agents. */
+  /** person_set input since 0.3.1 (the owner form "Add outside agent"). An outside agent the owner adds starts `unreviewed`. */
   kind?: ContactKind;
+  org?: string;
+  relationship?: string;
   /** Who creates the entry (default owner). Decides the start trust (`defaultTrust`); ignored on update. */
   source?: Source;
   name: string;
@@ -336,33 +343,42 @@ export function setPerson(db: Db, input: PersonInput, now = Date.now()): Person 
       // C373e: a person who owns workspace agents cannot become an outside agent (the owner_not_person rule of agent_set)
       if (input.kind && input.kind !== "person" && String(old.kind) === "person" && db.prepare("SELECT 1 FROM fleet_agents WHERE owner_id = ? AND status <> 'removed'").get(id))
         fail("person_owns_agents", "this person owns workspace agents; give the agents another owner first", 409);
-      db.prepare("UPDATE fleet_people SET name = ?, email = ?, title = ?, status = ?, kind = ?, tags = ?, updated_at = ? WHERE id = ?").run(
-        name,
-        input.email === undefined ? old.email : input.email,
-        input.title ?? String(old.title),
-        input.status ?? String(old.status),
-        input.kind ?? String(old.kind),
-        JSON.stringify(cleanTags(input.tags) ?? tags(old.tags)),
-        now,
-        id,
+      // org and relationship are written only when given (a write without them leaves the stored text alone)
+      const extra = input.org !== undefined || input.relationship !== undefined;
+      db.prepare(`UPDATE fleet_people SET name = ?, email = ?, title = ?, ${extra ? "org = ?, relationship = ?, " : ""}status = ?, kind = ?, tags = ?, updated_at = ? WHERE id = ?`).run(
+        ...([
+          name,
+          input.email === undefined ? old.email : input.email,
+          input.title ?? String(old.title),
+          ...(extra ? [input.org === undefined ? String(old.org) : input.org.trim(), input.relationship === undefined ? String(old.relationship) : input.relationship.trim()] : []),
+          input.status ?? String(old.status),
+          input.kind ?? String(old.kind),
+          JSON.stringify(cleanTags(input.tags) ?? tags(old.tags)),
+          now,
+          id,
+        ] as never[]),
       );
     } else {
       const count = Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_people").get()?.n);
       if (count >= LIMITS.people) fail("limit_reached", `a workspace has at most ${LIMITS.people} people`, 409);
       id = `psn_${ulid(now)}`;
       const source = input.source ?? "owner";
-      db.prepare("INSERT INTO fleet_people (id, name, email, title, status, kind, trust, source, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
-        id,
-        name,
-        input.email ?? null,
-        input.title ?? "",
-        input.status ?? "active",
-        input.kind ?? "person",
-        defaultTrust(source),
-        source,
-        JSON.stringify(cleanTags(input.tags) ?? []),
-        now,
-        now,
+      const extra = input.org !== undefined || input.relationship !== undefined;
+      db.prepare(`INSERT INTO fleet_people (id, name, email, title, ${extra ? "org, relationship, " : ""}status, kind, trust, source, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ${extra ? "?, ?, " : ""}?, ?, ?, ?, ?, ?, ?)`).run(
+        ...([
+          id,
+          name,
+          input.email ?? null,
+          input.title ?? "",
+          ...(extra ? [(input.org ?? "").trim(), (input.relationship ?? "").trim()] : []),
+          input.status ?? "active",
+          input.kind ?? "person",
+          defaultTrust(source, input.kind ?? "person"),
+          source,
+          JSON.stringify(cleanTags(input.tags) ?? []),
+          now,
+          now,
+        ] as never[]),
       );
     }
     if (handles) {

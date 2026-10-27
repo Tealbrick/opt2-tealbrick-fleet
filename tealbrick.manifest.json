@@ -5,7 +5,7 @@
   "name": "Governance",
   "summary": "Governance: who is who in your workspace, who owns which agent, and how far each person, outside agent and agent is trusted.",
   "description": "Governance is the workspace directory and its trust record.\n\n- **Directory:** teams, people and outside agents with their Buzz, Slack and Telegram handles, and every workspace agent with its owner, role and teams.\n- **Trust:** every person, outside agent and agent has a trust state (unreviewed, trusted, limited or blocked). People you add start trusted; entries that an agent adds start unreviewed.\n- **Trust reviews:** an agent can ask for a review and say why; only you decide. Each verdict is kept with a copy of what the subject could do at that time, and it sets the trust state.\n- **Topology:** who owns which agent and who is in which team, as a table you can print for a security review. Contacts and app access appear when Connect and Core give apps that data.\n- **Contact rules:** you can propose a rule from a fixed template (hold or refuse an agent's outward actions, or the actions done for one sender, or hold the outward actions of a team's agents). It is sent to Rules & Approvals as a draft; you approve it there.\n- **Feed for apps:** Rules & Approvals and Knowledge read a small, versioned directory feed. It has no email addresses and no job titles.\n\nGovernance never grants access, never decides a hold and holds no credentials. People are directory entries, not sign-ins.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "sdkMajor": 1,
   "publisher": {
     "name": "Teal Brick opt2"
@@ -1234,7 +1234,9 @@
                 "tags",
                 "handles",
                 "teams",
-                "updatedAt"
+                "updatedAt",
+                "org",
+                "relationship"
               ],
               "properties": {
                 "id": {
@@ -1315,6 +1317,12 @@
                   }
                 },
                 "updatedAt": {
+                  "type": "string"
+                },
+                "org": {
+                  "type": "string"
+                },
+                "relationship": {
                   "type": "string"
                 }
               }
@@ -1571,7 +1579,7 @@
     {
       "id": "person_set",
       "title": "Save person",
-      "description": "Create a directory entry for a person (no id) or update one (id). Handles replace the person's channel handles.",
+      "description": "Create a directory entry for a person or an outside agent (no id) or update one (id). Handles replace the entry's channel handles. An outside agent you add starts unreviewed; a person you add starts trusted. Trust is never set here: record a review.",
       "input": {
         "type": "object",
         "additionalProperties": false,
@@ -1629,6 +1637,20 @@
               "pattern": "^(buzz|slack|telegram):\\S+$"
             },
             "maxItems": 10
+          },
+          "kind": {
+            "enum": [
+              "person",
+              "outside_agent"
+            ]
+          },
+          "org": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "relationship": {
+            "type": "string",
+            "maxLength": 120
           }
         }
       },
@@ -1653,7 +1675,9 @@
               "tags",
               "handles",
               "teams",
-              "updatedAt"
+              "updatedAt",
+              "org",
+              "relationship"
             ],
             "properties": {
               "id": {
@@ -1734,6 +1758,12 @@
                 }
               },
               "updatedAt": {
+                "type": "string"
+              },
+              "org": {
+                "type": "string"
+              },
+              "relationship": {
                 "type": "string"
               }
             }
@@ -2436,6 +2466,301 @@
                 "maxLength": 280
               }
             }
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "access_get",
+      "title": "Who has access",
+      "description": "The grant picture for the owner: which agents may use which apps (create, read, update, delete letters, mode, the op families held for approval, paused), which apps may call which, the connections issued to agents, and the agents' channel identities from Connect. Read from the copy of access that Core puts in the app's slice, which needs the owner's consent ('See who has access'); without it the answer says so and carries no picture. Owner only; display only, it never authorizes anything. Change access in Portal.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {}
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "note",
+          "topology",
+          "agents",
+          "identities",
+          "generatedAt"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "available",
+              "unavailable",
+              "not_consented"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 600
+          },
+          "topology": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "instances",
+                  "edges",
+                  "companions",
+                  "connections"
+                ],
+                "properties": {
+                  "instances": {
+                    "type": "array",
+                    "maxItems": 40,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "ins",
+                        "product",
+                        "name",
+                        "version"
+                      ],
+                      "properties": {
+                        "ins": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "product": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "name": {
+                          "type": "string",
+                          "maxLength": 200
+                        },
+                        "version": {
+                          "type": "string",
+                          "maxLength": 40
+                        }
+                      }
+                    }
+                  },
+                  "edges": {
+                    "type": "array",
+                    "maxItems": 600,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "agent",
+                        "ins",
+                        "product",
+                        "crud",
+                        "mode",
+                        "held"
+                      ],
+                      "properties": {
+                        "agent": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "ins": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "product": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "crud": {
+                          "type": "array",
+                          "maxItems": 4,
+                          "items": {
+                            "enum": [
+                              "create",
+                              "read",
+                              "update",
+                              "delete"
+                            ]
+                          }
+                        },
+                        "mode": {
+                          "enum": [
+                            "free",
+                            "bound"
+                          ]
+                        },
+                        "held": {
+                          "type": "array",
+                          "maxItems": 32,
+                          "items": {
+                            "type": "string",
+                            "maxLength": 40
+                          }
+                        },
+                        "wf": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 128
+                        },
+                        "paused": {
+                          "const": true
+                        }
+                      }
+                    }
+                  },
+                  "companions": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "from",
+                        "to",
+                        "product",
+                        "crud"
+                      ],
+                      "properties": {
+                        "from": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "to": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "product": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "crud": {
+                          "type": "array",
+                          "maxItems": 4,
+                          "items": {
+                            "enum": [
+                              "create",
+                              "read",
+                              "update",
+                              "delete"
+                            ]
+                          }
+                        },
+                        "ops": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 128
+                        }
+                      }
+                    }
+                  },
+                  "connections": {
+                    "type": "array",
+                    "maxItems": 300,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "con",
+                        "agt",
+                        "method",
+                        "status"
+                      ],
+                      "properties": {
+                        "con": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "agt": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "method": {
+                          "enum": [
+                            "key",
+                            "pairing"
+                          ]
+                        },
+                        "status": {
+                          "enum": [
+                            "active",
+                            "revoked"
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "truncated": {
+                    "const": true
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "agents": {
+            "type": "array",
+            "maxItems": 2000,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "name"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                "name": {
+                  "type": "string",
+                  "maxLength": 200
+                }
+              }
+            }
+          },
+          "identities": {
+            "type": "array",
+            "maxItems": 2000,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "agent",
+                "channel",
+                "handle"
+              ],
+              "properties": {
+                "agent": {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                "channel": {
+                  "type": "string",
+                  "maxLength": 40
+                },
+                "handle": {
+                  "type": "string",
+                  "maxLength": 400
+                }
+              }
+            }
+          },
+          "generatedAt": {
+            "type": "string",
+            "maxLength": 40
           }
         }
       },
@@ -5024,12 +5349,13 @@
     {
       "product": "connect",
       "operations": [
-        "identities_list"
+        "identities_list",
+        "contacts_list"
       ],
       "crud": [
         "read"
       ],
-      "purpose": "Show the owner the channel identities Connect issued to agents, and give Rules their handles in the directory feed. Never shown to agents."
+      "purpose": "Reads agent channel identities (owner view, Rules' feed handles) and which addresses each agent first-contacted (Topology contacts layer). Never shown to agents"
     },
     {
       "product": "rules",

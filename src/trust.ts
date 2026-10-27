@@ -10,11 +10,12 @@ export type Source = "owner" | "agent";
 export type ContactKind = "person" | "outside_agent";
 
 /**
- * The start state of a new entry (Governance answer, C166): an entry the owner adds starts `trusted`; an entry that an
- * agent adds starts `unreviewed` until the owner records a review. Every insert uses this function.
+ * The start state of a new entry (Governance answer, C166): a PERSON the owner adds starts `trusted`; an entry that an
+ * agent adds starts `unreviewed` until the owner records a review. Coordinator rule (C373, Q13): an OUTSIDE AGENT starts
+ * `unreviewed` even when the owner adds it. Trust for it is always an explicit act: a recorded review verdict. Every insert uses this function.
  */
-export function defaultTrust(source: Source): Trust {
-  return source === "owner" ? "trusted" : "unreviewed";
+export function defaultTrust(source: Source, kind: ContactKind = "person"): Trust {
+  return source === "owner" && kind === "person" ? "trusted" : "unreviewed";
 }
 
 /** Days between reviews, stored in `fleet_review_policy` by migration 0002 (the review operations come later). */

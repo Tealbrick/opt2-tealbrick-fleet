@@ -124,11 +124,11 @@ const SLICE = (): SliceTopology => ({
   ],
   edges: [
     { agent: FRONT, ins: "ins_kn", product: "knowledge", crud: ["read", "create"], mode: "free", held: [] },
-    { agent: FRONT, ins: "ins_cn", product: "connect", crud: ["read", "create", "update"], mode: "free", held: ["first_contact", "money"], wf: ["wf.a"] },
+    { agent: FRONT, ins: "ins_cn", product: "connect", crud: ["read", "create", "update"], mode: "free", held: ["first_contact", "money"], wf: 1 },
     { agent: SCOUT, ins: "ins_kn", product: "knowledge", crud: ["read"], mode: "bound", held: [], paused: true },
     { agent: "agt_ghost", ins: "ins_kn", product: "knowledge", crud: ["read"], mode: "free", held: [] },
   ],
-  companions: [{ from: "ins_kn", to: "ins_cn", product: "connect", crud: ["read"], ops: ["contacts_list", "contact_get"] }],
+  companions: [{ from: "ins_kn", to: "ins_cn", product: "connect", crud: ["read"], ops: 2 }],
   connections: [
     { con: "con_01J0000000000000000000KEY", agt: FRONT, method: "key", status: "active" },
     { con: "con_01J0000000000000000000PAIR", agt: SCOUT, method: "pairing", status: "revoked" },

@@ -216,7 +216,7 @@ test("contacts and access: an explicit unavailable state with a plain reason and
   for (const input of [{}, { layers: ["org", "contacts", "access"] }, { layers: ["contacts", "access"] }]) {
     const out = await topo(db, input);
     assert.deepEqual([out.sources.contacts, out.sources.access], ["unavailable", "unavailable"], JSON.stringify(input));
-    assert.equal(out.sources.note, "Channel contacts are not shown: the Connect contact book is not available to apps yet. App access is not shown: the copy of access from Portal is not available to apps yet. Change access in Portal.");
+    assert.equal(out.sources.note, "Channel contacts are not shown. Contacts need the workspace bridge (this app runs on its own). App access is not part of this answer: see the Access page. Change access in Portal.");
     assert.equal(out.edges.filter((e) => e.kind === "contact" || e.kind === "access" || e.kind === "companion").length, 0);
     assert.equal(validOut(out), true);
   }
@@ -230,7 +230,7 @@ test("a layer that was not asked for says not_requested; asking for contacts alo
   const contactsOnly = await topo(db, { layers: ["contacts"] });
   assert.deepEqual([contactsOnly.nodes, contactsOnly.edges], [[], []]);
   assert.deepEqual([contactsOnly.sources.contacts, contactsOnly.sources.access], ["unavailable", "not_requested"]);
-  assert.equal(contactsOnly.sources.note, "Channel contacts are not shown: the Connect contact book is not available to apps yet.");
+  assert.equal(contactsOnly.sources.note, "Channel contacts are not shown. Contacts need the workspace bridge (this app runs on its own).");
   const accessOnly = await topo(db, { layers: ["access"] });
   assert.deepEqual([accessOnly.sources.contacts, accessOnly.sources.access], ["not_requested", "unavailable"]);
   assert.match(accessOnly.sources.note, /Change access in Portal\.$/);

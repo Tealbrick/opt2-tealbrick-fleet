@@ -1,6 +1,6 @@
-// The grant view's input (C373 WP-D). Local copy, used until the spec ships `SliceTopology` (G-2: Core's copy of who may
-// use which app, read by apps). When the spec type exists, import it from the kit and delete this file; the shape below
-// is the one the Governance lead agreed for the Access view, nothing more.
+// The grant view's input (C373 WP-D): the OBJECT form of the grant picture. The server (src/topology-slice.ts) decodes Core's
+// compact slice form into exactly this shape and `access_get` returns it (the UI never sees the compact tuples). A test keeps
+// the two types assignable. `wf` / `ops` are COUNTS of the workflow ops a grant lists; absent means all ops.
 
 /** until spec ships SliceTopology */
 export type Crud = "create" | "read" | "update" | "delete";
@@ -13,7 +13,7 @@ export interface SliceInstance {
   version: string;
 }
 
-/** One agent's access to one app instance. `held` = the op families that wait for the owner's approval; `wf` = the workflow ops it may run. */
+/** One agent's access to one app instance. `held` = the op families that wait for the owner's approval; `wf` = how many workflow ops its grant lists (absent: all ops). */
 export interface SliceEdge {
   agent: string;
   ins: string;
@@ -21,7 +21,7 @@ export interface SliceEdge {
   crud: Crud[];
   mode: string;
   held: string[];
-  wf?: string[];
+  wf?: number;
   paused?: true;
 }
 
@@ -31,7 +31,7 @@ export interface SliceCompanion {
   to: string;
   product: string;
   crud: string[];
-  ops?: string[];
+  ops?: number;
 }
 
 /** A connection issued to an agent: an API key or a pairing. */
@@ -48,6 +48,8 @@ export interface SliceTopology {
   edges: SliceEdge[];
   companions: SliceCompanion[];
   connections: SliceConnection[];
+  /** the workspace sent a shortened copy: some rows are not here */
+  truncated?: true;
 }
 
 /** An agent as the page knows it (from the directory). */

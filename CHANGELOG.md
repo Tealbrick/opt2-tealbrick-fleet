@@ -2,7 +2,17 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
-## 0.3.0 - Unreleased
+## 0.3.1 - Unreleased
+
+Governance sprint C373 WP-D part 2: the grant view, the graph, the contacts layer and the "Add outside agent" form are wired
+into the app. Updates from 0.3.0 and every 0.2.x: migration 0007 is forward-only and keeps all data.
+
+### TODO when sdk#60 / spec#61 / connect#34 are released
+- `needsTopology` flag + re-pin when sdk#60 is released: the manifest declares `needsTopology: true` (needs the manifest
+  package that validates it and `needsAgentDirectory`, which Governance has), the SDK pin gets `ctx.topology()` and the spec
+  `SliceTopology`; then `src/topology-slice.ts` shrinks to the decoder. Until then the Access page says it is not available.
+
+## 0.3.0 - Released (dev, `08a711a`)
 
 Governance ↔ Rules interface (C373, agreed with the Rules lead 2026-10-27: `RULES-INTERFACE.md`), C373e. This release also
 carries everything in 0.2.4 below (S4a contact-rule proposals), which was never released on its own. Updates from 0.2.3
