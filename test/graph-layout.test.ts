@@ -1,8 +1,8 @@
-// The topology picture's layout (src/graph-layout.ts, C373 WP-D): pure, deterministic, capped. Each guard has a
+// The topology picture's layout (src/ui/graph-layout.ts, C373 WP-D): pure, deterministic, capped. Each guard has a
 // quiet-on-good and a fire-on-bad case with the exact outcome (L34, L27).
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { fit, GEOMETRY, type GraphLayout, graphSummary, layoutGraph, metaOf, moreNote, relationLabel, type TopoEdge, type TopoNode, wireClass } from "../src/graph-layout.ts";
+import { fit, GEOMETRY, type GraphLayout, graphSummary, layoutGraph, metaOf, moreNote, relationLabel, type TopoEdge, type TopoNode, wireClass } from "../src/ui/graph-layout.ts";
 
 const node = (id: string, kind: TopoNode["kind"], name: string, over: Partial<TopoNode> = {}): TopoNode => ({ id, kind, name, trust: kind === "team" || kind === "app" ? null : "trusted", status: "active", reviewDueAt: null, changedSinceReview: false, ...over });
 const edge = (kind: TopoEdge["kind"], from: string, to: string, label: string = kind, state: TopoEdge["state"] = "live"): TopoEdge => ({ id: `${kind}:${from}:${to}`, kind, from, to, label, state, since: null });

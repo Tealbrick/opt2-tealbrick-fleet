@@ -58,7 +58,11 @@ const TEAM_ID_MAX = 64;
 
 const paramOf = (t: Template): "agent" | "handle" | "team" => (t.endsWith("_outward_for_agent") ? "agent" : t.endsWith("_for_team") ? "team" : "handle");
 const decisionOf = (t: Template): "hold" | "deny" => (t.startsWith("hold_") ? "hold" : "deny");
-const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+/** Clips by code point, so a surrogate pair is never split (QA fleet 0.3.0 S3). */
+const clip = (s: string, n: number) => {
+  const cps = Array.from(s);
+  return cps.length > n ? `${cps.slice(0, n - 1).join("")}…` : s;
+};
 
 // ── building (pure) ─────────────────────────────────────────────────────────────────────────────────────────────
 

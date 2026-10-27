@@ -1,15 +1,15 @@
 // Access (C373 WP-D): the grant view, read only. Per agent: the connections issued to it (key or pairing, active or
 // revoked), its own channel identities, and the apps it may use (create/read/update/delete letters, mode, the op
 // families held for approval, workflow ops, paused). "By app" turns it round: per app, which agents may use it and which
-// apps may call it. Built by src/access.ts from the workspace's access copy (`SliceTopology`, local type until the spec
+// apps may call it. Built by src/ui/access-rows.ts from the workspace's access copy (`SliceTopology`, local type until the spec
 // ships it). Governance changes nothing here; access is changed in Portal. Not wired into App.tsx yet (WP-D first half).
 // Kit components only; every state says something (L18): not available, nothing yet, nothing matches.
 import { Card, EmptyState, Field, NativeSelect, Notice, Segmented, Table, Tag, TextLink } from "@opt2-tealbrick/ui";
 import { useMemo, useState } from "react";
-import { type AccessView as AccessRows, type AgentAccess, type AppAccess, accessView, filterAccess } from "../access.ts";
-import type { AccessAgent, ChannelIdentity, SliceTopology } from "../access-types.ts";
+import { type AccessView as AccessRows, type AgentAccess, type AppAccess, accessView, filterAccess } from "./access-rows.ts";
+import type { AccessAgent, ChannelIdentity, SliceTopology } from "./access-types.ts";
 
-export type { AccessAgent, ChannelIdentity, SliceTopology } from "../access-types.ts";
+export type { AccessAgent, ChannelIdentity, SliceTopology } from "./access-types.ts";
 
 export interface AccessProps {
   /** the workspace's access copy, or null while it is not available to apps (G-2) */

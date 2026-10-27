@@ -1,5 +1,5 @@
 // The topology picture (C373 WP-D, DESIGN §6 canvas look): a read-only SVG of the `topology_get` answer, laid out by
-// `layoutGraph()` (src/graph-layout.ts, pure). Neutral agent cards with a filled initial avatar, person cards with an
+// `layoutGraph()` (src/ui/graph-layout.ts, pure). Neutral agent cards with a filled initial avatar, person cards with an
 // outlined avatar, outside contacts with a plate avatar inside the dashed "outside the workspace" region, teams as paper
 // regions, apps with a teal-wash avatar; teal live wires, brick dashed "waits", dotted "off" (ink-line) and "blocked"
 // (brick). Read only: no ports, no drag, nothing to connect. Every card (and every team region) is a focusable button:
@@ -8,9 +8,9 @@
 // accessible equivalent of the picture; a big workspace is drawn up to the caps with a "+M more — see the table" note.
 import { EmptyState } from "@opt2-tealbrick/ui";
 import { type KeyboardEvent, useMemo } from "react";
-import { type Caps, GEOMETRY, type GraphInput, type GraphLayout, graphSummary, KIND_WORD, layoutGraph, moreNote, type PlacedNode, type Region, type WireClass } from "../graph-layout.ts";
+import { type Caps, GEOMETRY, type GraphInput, type GraphLayout, graphSummary, KIND_WORD, layoutGraph, moreNote, type PlacedNode, type Region, type WireClass } from "./graph-layout.ts";
 
-export type { GraphInput } from "../graph-layout.ts";
+export type { GraphInput } from "./graph-layout.ts";
 
 const LEGEND_NODES: { kind: PlacedNode["kind"]; text: string }[] = [
   { kind: "agent", text: "Agent" },

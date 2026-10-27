@@ -1,11 +1,11 @@
-// The grant view as rows (src/access.ts, C373 WP-D): per agent, per app, filters, and the "App access" graph layer.
+// The grant view as rows (src/ui/access-rows.ts, C373 WP-D): per agent, per app, filters, and the "App access" graph layer.
 // Fire-on-bad: a row never shows data for an agent the page does not know or the slice does not name, and an agent's
 // card never carries another agent's handles (L34, L27).
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { accessLayer, accessView, crudLetters, crudWords, filterAccess, withAccess } from "../src/access.ts";
-import type { AccessAgent, ChannelIdentity, SliceTopology } from "../src/access-types.ts";
-import { layoutGraph, type TopoEdge, type TopoNode } from "../src/graph-layout.ts";
+import { accessLayer, accessView, crudLetters, crudWords, filterAccess, withAccess } from "../src/ui/access-rows.ts";
+import type { AccessAgent, ChannelIdentity, SliceTopology } from "../src/ui/access-types.ts";
+import { layoutGraph, type TopoEdge, type TopoNode } from "../src/ui/graph-layout.ts";
 
 const FRONT = "agt_01J0000000000000000000000A";
 const SCOUT = "agt_01J0000000000000000000000B";

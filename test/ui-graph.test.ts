@@ -13,12 +13,12 @@ import { after, before, describe, it } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Window } from "happy-dom";
 import type { ReactElement } from "react";
-import type { SliceTopology } from "../src/access-types.ts";
-import type { TopoEdge, TopoNode } from "../src/graph-layout.ts";
+import type { SliceTopology } from "../src/ui/access-types.ts";
+import type { TopoEdge, TopoNode } from "../src/ui/graph-layout.ts";
 
 type GraphUi = typeof import("../src/ui/graph.tsx");
 type AccessUi = typeof import("../src/ui/access.tsx");
-type AccessHelpers = typeof import("../src/access.ts");
+type AccessHelpers = typeof import("../src/ui/access-rows.ts");
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const outDir = join(root, "dist", "ui-test-graph");
@@ -154,7 +154,7 @@ before(() => {
 before(async () => {
   graph = (await import(pathToFileURL(join(outDir, "ui", "graph.js")).href)) as GraphUi;
   access = (await import(pathToFileURL(join(outDir, "ui", "access.js")).href)) as AccessUi;
-  helpers = (await import(pathToFileURL(join(outDir, "access.js")).href)) as AccessHelpers;
+  helpers = (await import(pathToFileURL(join(outDir, "ui", "access-rows.js")).href)) as AccessHelpers;
 });
 after(() => rmSync(outDir, { recursive: true, force: true }));
 
