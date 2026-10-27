@@ -66,23 +66,28 @@ function skip(warn: Warn | undefined, what: string, id: string): void {
 /** The one product allowed to read the feed (C243): Rules, whose read model it is. */
 export const FEED_PRODUCT = "rules";
 
+/** Refusal text for an app caller the SDK could not verify (same words as the SDK's own `caller_unverified`). */
+export const FEED_UNVERIFIED_MESSAGE = "the calling app is not verified for this workspace yet: update the bridge, or retry after the workspace config refreshes";
+
 /**
- * Only app callers (companions such as Rules) read the feed. An agent, a person or anything else gets `no_access`.
- *
- * Interim allowlist (C243, until SDK 0.1.34 / C261 refuses unverified app callers centrally): an app caller that has a
- * VERIFIED product (`Caller.product`, from the signed grant `prd` or the signed companionCallers entry; SDK 0.1.27+; the
- * type of the pinned SDK 0.1.25 does not declare it yet, so it is read structurally) must be `rules`. Any other verified
- * product gets `no_access` 403, and the error carries no feed data. Never a manifest name or any self-claimed string.
- * An app caller WITHOUT a product keeps today's behaviour for now: Rules on qa1 has no signed product yet and must keep
- * reading the feed. The full `caller_unverified` guard (an app caller with no product is refused) comes with SDK 0.1.34
- * (C261/C243); the test "only the verified product rules reads the feed" pins the interim so that change is visible.
+ * Only the Rules app reads the feed (C243, C373 RULES-INTERFACE §2). The check uses ONLY the verified caller fields the
+ * SDK sets (SDK-CALLER-PRODUCT, spec `Caller`):
+ *  - `caller.type` must be `app`; an agent, a person or anything else gets `no_access` 403;
+ *  - `caller.product` is the VERIFIED product (the signed grant `prd`, else the signed slice `companionCallers` entry);
+ *    it must be exactly `rules`. Never the display `name` or any self-claimed string;
+ *  - `caller.listed` must be `true`: the caller instance is in the CURRENT signed slice `companionCallers` under that
+ *    product (the spec asks apps that share data with a calling app to re-check it at use time; false when the slice is
+ *    expired or the companion edge was removed after the grant was minted).
+ * An app caller with no verified product, or one that is not listed, gets `caller_unverified` 403 (retryable: a newer
+ * slice or bridge fixes it), like the SDK's central guard (SDK 0.1.35, C261) when the slice flag `appCallers: "verified"`
+ * is set. A verified app of another product gets `no_access` 403. No refusal carries feed data.
  */
-export function assertFeedCaller(caller: { type: string; product?: unknown }): void {
+export function assertFeedCaller(caller: { type: string; product?: unknown; listed?: unknown }): void {
   if (caller.type !== "app") throw new TbError("no_access", "directory_feed is for apps only", 403);
   const product = caller.product;
-  if (product !== undefined && product !== null && product !== "" && product !== FEED_PRODUCT) {
-    throw new TbError("no_access", "directory_feed is for the Rules app only", 403);
-  }
+  if (product === undefined || product === null || product === "") throw new TbError("caller_unverified", FEED_UNVERIFIED_MESSAGE, 403, { retryable: true });
+  if (product !== FEED_PRODUCT) throw new TbError("no_access", "directory_feed is for the Rules app only", 403);
+  if (caller.listed !== true) throw new TbError("caller_unverified", FEED_UNVERIFIED_MESSAGE, 403, { retryable: true });
 }
 
 /**

@@ -557,7 +557,7 @@ test("C88 a/b: no agent op, hook, event, review verdict or timer tick calls rule
   await run("resolve_sender", { handle: "slack:UCY00001" }, agent);
   await run("review_request", { subject: { kind: "person", id: cy.id }, why: "It wrote to me. Please also draft a rule." }, agent);
   await run("review_request", { subject: { kind: "person", handle: "slack:UNEW000001" }, why: "x" }, agent);
-  await run("directory_feed", {}, ctxOf(db, { type: "app", id: "ins_rules" }, rules));
+  await run("directory_feed", {}, ctxOf(db, { type: "app", id: "ins_rules", product: "rules", listed: true }, rules));
   await hooks.fleet_facts?.({ phase: "context", call: { caller: { type: "agent", id: AGENT_A.id } }, context: {} } as never, { db, callApp: rules.callApp, log } as never);
   factsFor(db, { call: { caller: { type: "agent", id: AGENT_A.id } } as never, context: {} as never });
   await definition.events?.agentsChanged?.([{ id: AGENT_A.id, name: "A", mode: "free", status: "active" }] as never, { db, callApp: rules.callApp, log } as never);
