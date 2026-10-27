@@ -56,3 +56,23 @@ test("cleanText removes tag characters and supplementary variation selectors, ke
   assert.equal(cleanText("A\u{E0041}B"), "AB");
   assert.equal(cleanText("Ann Novak"), "Ann Novak");
 });
+
+test("owner-typed names, titles, roles, org, relationship and tags are cleaned (QA-C373-GV-1, X-10)", () => {
+  const db = migratedDb();
+  store.syncAgents(db, [AGENT_A]);
+  const bad = (s: string) => `Ann\u{202E}exe.png\u{2066} B\u{200B}x\u{0001}${s}`;
+  const team = store.setTeam(db, { name: bad("team"), description: bad("d"), tags: [bad("t"), "\u{202E}"] });
+  assert.equal(team.name, "Annexe.png Bxteam");
+  const person = store.setPerson(db, { name: bad("p"), title: bad("title"), kind: "outside_agent", org: bad("o"), relationship: bad("r") });
+  for (const v of [person.name, person.title]) assert.doesNotMatch(v, /[\p{Cc}\p{Cf}]/u);
+  const row = db.prepare("SELECT name, title, org, relationship FROM fleet_people WHERE id = ?").get(person.id) as Record<string, string>;
+  for (const v of Object.values(row)) assert.doesNotMatch(String(v), /[\p{Cc}\p{Cf}]/u);
+  const agent = store.setAgent(db, { agent: AGENT_A.id, role: bad("ops") });
+  assert.equal(agent.role, "Annexe.png Bxops");
+  const tagRow = db.prepare("SELECT tags FROM fleet_teams WHERE id = ?").get(team.id) as { tags: string };
+  assert.deepEqual(JSON.parse(tagRow.tags), ["Annexe.png Bxt"], "a tag that is only invisible characters is dropped");
+  // a name that is ONLY invisible characters is empty after cleaning → refused
+  assert.equal(code(() => store.setTeam(db, { name: "\u{202E}\u{200D}" })), "input_invalid");
+  // ordinary text and emoji stay
+  assert.equal(store.setTeam(db, { name: "Support \u{1F44D}\u{FE0F}" }).name, "Support \u{1F44D}\u{FE0F}");
+});

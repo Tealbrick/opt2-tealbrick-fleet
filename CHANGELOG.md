@@ -3,6 +3,7 @@
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
 ## 0.3.1 - Unreleased
+- QA-C373-GV-1 (X-10): owner-typed text (team name, description and tags; person name, title, org, relationship and tags; agent role and tags) is cleaned like agent text: control, bidi and format characters are removed on write. A name that is only invisible characters is refused (`input_invalid`). Rows stored before 0.3.1 stay as they are.
 
 Governance sprint C373 WP-D part 2: the grant view, the graph, the contacts layer and the "Add outside agent" form are wired
 into the app. Updates from 0.3.0 and every 0.2.x: migration 0007 is forward-only and keeps all data.

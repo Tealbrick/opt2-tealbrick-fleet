@@ -5,6 +5,7 @@
 // tenants, roles-per-tenant or license; people are directory entries, never sign-ins (C84).
 import { type HandleChannel, handleChannel, normalizeHandle, ulid } from "@opt2-tealbrick/manifest";
 import { type Db, type SliceAgent, TbError } from "@opt2-tealbrick/miniapp-sdk";
+import { cleanText } from "./text.ts";
 import { type ContactKind, defaultTrust, NEW_AGENT_TRUST, type Source, type Trust } from "./trust.ts";
 
 export type Role = "member" | "lead";
@@ -265,11 +266,15 @@ export function peopleHandles(db: Db): Identities["people"] {
 
 // ── writes (owner, person ops) ─────────────────────────────────────────────────────────────────────────────────
 
-const cleanTags = (t: readonly string[] | undefined) => (t ? [...new Set(t)].sort() : undefined);
+// QA-C373-GV-1 (X-10): owner-typed text is cleaned like agent text (control, bidi and format characters removed), so a
+// name can never reorder or hide what the owner, Rules or an agent reads. Cleaned on write; old rows stay as stored.
+const own = (s: string): string => cleanText(s);
+const ownOpt = (s: string | undefined): string | undefined => (s === undefined ? undefined : cleanText(s));
+const cleanTags = (t: readonly string[] | undefined) => (t ? [...new Set(t.map(own).filter((x) => x !== ""))].sort() : undefined);
 
 export function setTeam(db: Db, input: { id?: string; name: string; description?: string; tags?: string[] }, now = Date.now()): Team {
   return db.transaction(() => {
-    const name = input.name.trim();
+    const name = own(input.name);
     if (!name) fail("input_invalid", "name is empty", 400);
     const clash = db.prepare("SELECT id FROM fleet_teams WHERE name = ? COLLATE NOCASE AND id <> ?").get(name, input.id ?? "");
     if (clash) fail("team_name_taken", "another team has this name", 409);
@@ -278,7 +283,7 @@ export function setTeam(db: Db, input: { id?: string; name: string; description?
       const old = db.prepare("SELECT * FROM fleet_teams WHERE id = ?").get(id) ?? fail("team_not_found", "no team with this id", 404);
       db.prepare("UPDATE fleet_teams SET name = ?, description = ?, tags = ?, updated_at = ? WHERE id = ?").run(
         name,
-        input.description ?? String(old.description),
+        ownOpt(input.description) ?? String(old.description),
         JSON.stringify(cleanTags(input.tags) ?? tags(old.tags)),
         now,
         id,
@@ -290,7 +295,7 @@ export function setTeam(db: Db, input: { id?: string; name: string; description?
       db.prepare("INSERT INTO fleet_teams (id, name, description, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run(
         id,
         name,
-        input.description ?? "",
+        ownOpt(input.description) ?? "",
         JSON.stringify(cleanTags(input.tags) ?? []),
         now,
         now,
@@ -328,7 +333,7 @@ export interface PersonInput {
 
 export function setPerson(db: Db, input: PersonInput, now = Date.now()): Person {
   return db.transaction(() => {
-    const name = input.name.trim();
+    const name = own(input.name);
     if (!name) fail("input_invalid", "name is empty", 400);
     let handles: string[] | undefined;
     if (input.handles) {
@@ -349,8 +354,8 @@ export function setPerson(db: Db, input: PersonInput, now = Date.now()): Person 
         ...([
           name,
           input.email === undefined ? old.email : input.email,
-          input.title ?? String(old.title),
-          ...(extra ? [input.org === undefined ? String(old.org) : input.org.trim(), input.relationship === undefined ? String(old.relationship) : input.relationship.trim()] : []),
+          ownOpt(input.title) ?? String(old.title),
+          ...(extra ? [input.org === undefined ? String(old.org) : own(input.org), input.relationship === undefined ? String(old.relationship) : own(input.relationship)] : []),
           input.status ?? String(old.status),
           input.kind ?? String(old.kind),
           JSON.stringify(cleanTags(input.tags) ?? tags(old.tags)),
@@ -369,8 +374,8 @@ export function setPerson(db: Db, input: PersonInput, now = Date.now()): Person 
           id,
           name,
           input.email ?? null,
-          input.title ?? "",
-          ...(extra ? [(input.org ?? "").trim(), (input.relationship ?? "").trim()] : []),
+          ownOpt(input.title) ?? "",
+          ...(extra ? [own(input.org ?? ""), own(input.relationship ?? "")] : []),
           input.status ?? "active",
           input.kind ?? "person",
           defaultTrust(source, input.kind ?? "person"),
@@ -436,7 +441,7 @@ export function setAgent(db: Db, input: { agent: string; owner?: string | null; 
     }
     db.prepare("UPDATE fleet_agents SET owner_id = ?, role = ?, tags = ?, updated_at = ? WHERE id = ?").run(
       input.owner === undefined ? old.owner_id : input.owner,
-      input.role ?? String(old.role),
+      ownOpt(input.role) ?? String(old.role),
       JSON.stringify(cleanTags(input.tags) ?? tags(old.tags)),
       now,
       input.agent,
