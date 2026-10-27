@@ -30,3 +30,13 @@ the same wrapper (`test/feed-contract.ts`).
 - Fetched with `git -C <rules> show origin/main:tealbrick.manifest.json`.
 
 Use: every generated rule is validated against `RuleSpec`; the M-CP-2 check (`validateCompanions`) runs against this manifest.
+
+## fleet.directory_feed/1 with agent handles (C373, RULES-INTERFACE §3) — DERIVED, not a byte copy
+
+`fleet.directory_feed.1.agent_handles.schema.json` is the spec-v0.1.42 schema above plus ONE optional property,
+`$defs.full.properties.agents.items.properties.handles` (array of `#/$defs/handle`, maxItems 16, uniqueItems). Nothing else
+differs; `test/agent-handles.test.ts` rebuilds it from the byte copy and fails on any other difference. Rules keeps a
+copy of this file for its contract test (Rules lead, 2026-10-27). It replaces nothing: an answer without
+`accept: ["agent_handles"]` still validates against the byte copy above.
+
+- sha256: `9a11657d8ac88580aa76af647118ed57e19798c56498e804b03b4fcd49515823`

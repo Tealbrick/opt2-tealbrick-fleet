@@ -35,6 +35,15 @@ export interface FeedAgent {
   status: "active" | "paused" | "removed";
   trust: Trust;
   owner: string | null;
+  /** only with `accept: ["agent_handles"]` (C373 §3): canonical handles Connect issued to the agent, sorted, <= 16 */
+  handles?: string[];
+}
+
+/** The one `accept` value this version knows (C373 §3). Unknown values are ignored. */
+export const ACCEPT_AGENT_HANDLES = "agent_handles";
+export interface FeedInput {
+  sinceRevision?: number;
+  accept?: string[];
 }
 export type DirectoryFeed =
   | { v: 1; revision: number; unchanged: false; teams: FeedTeam[]; contacts: FeedContact[]; agents: FeedAgent[] }
@@ -51,6 +60,18 @@ export const HANDLE_PATTERN = /^(buzz:npub1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]{58
 export const ID_MAX = 64;
 export const TEAM_NAME_MAX = 80;
 const validId = (id: string): boolean => id.length >= 1 && id.length <= ID_MAX;
+
+/** The cached Connect handles per agent (table fleet_agent_handles, written only by the timer in agent-handles.ts). */
+export function cachedAgentHandles(db: Db): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const r of db.prepare("SELECT agent_id, handle FROM fleet_agent_handles ORDER BY agent_id, handle").all()) {
+    const id = String(r.agent_id);
+    const list = out.get(id) ?? [];
+    list.push(String(r.handle));
+    out.set(id, list);
+  }
+  return out;
+}
 
 /** Warn once per skipped id (bounded memory): one bad legacy row must not flood the log on every pull. */
 const warned = new Set<string>();
@@ -98,10 +119,16 @@ export function assertFeedCaller(caller: { type: string; product?: unknown; list
  * canonical (`normalizeHandle(h) !== h` or off the schema pattern), an agent id that is not `agt_<26 Crockford>`, an
  * id of 0 or over 64 characters. A member or owner that names a left-out row is left out too. Removed agents are
  * listed only while a team still names them (so a reader can drop the member); they do not count against the cap.
+ *
+ * `accept: ["agent_handles"]` (C373 §3, additive): every agents[] entry also carries `handles` (the cached Connect
+ * handles, canonical, sorted, <= 16; [] when none). One more indexed read; nothing is called. Without it (or with only
+ * unknown values) the answer is byte-for-byte the fleet.directory_feed/1 shape of 0.2.x.
  */
-export function directoryFeed(db: Db, input: { sinceRevision?: number }, warn?: Warn): DirectoryFeed {
+export function directoryFeed(db: Db, input: FeedInput, warn?: Warn): DirectoryFeed {
   const rev = revision(db);
   if (input.sinceRevision !== undefined && input.sinceRevision === rev) return { v: 1, revision: rev, unchanged: true };
+  // C373 §3: agent handles only when the reader asks for them; without `accept` the answer is exactly the old shape
+  const agentHandles = Array.isArray(input.accept) && input.accept.includes(ACCEPT_AGENT_HANDLES) ? cachedAgentHandles(db) : null;
 
   const handles = new Map<string, string[]>();
   for (const r of db.prepare("SELECT person_id, handle FROM fleet_handles ORDER BY person_id, handle").all()) {
@@ -140,7 +167,19 @@ export function directoryFeed(db: Db, input: { sinceRevision?: number }, warn?: 
     }
     agentIds.add(id);
     const owner = a.owner_id === null ? null : String(a.owner_id);
-    agents.push({ id, status: a.status as FeedAgent["status"], trust: a.trust as Trust, owner: owner !== null && contactIds.has(owner) ? owner : null });
+    const agent: FeedAgent = { id, status: a.status as FeedAgent["status"], trust: a.trust as Trust, owner: owner !== null && contactIds.has(owner) ? owner : null };
+    if (agentHandles) {
+      const list: string[] = [];
+      for (const h of agentHandles.get(id) ?? []) {
+        if (normalizeHandle(h) !== h || !HANDLE_PATTERN.test(h)) {
+          skip(warn, "an agent handle", h);
+          continue;
+        }
+        if (list.length < FEED_CAPS.handlesPerContact) list.push(h);
+      }
+      agent.handles = list;
+    }
+    agents.push(agent);
   }
   if (agents.length > FEED_CAPS.agents) tooLarge("agents", FEED_CAPS.agents);
 

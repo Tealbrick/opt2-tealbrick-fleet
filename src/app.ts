@@ -53,6 +53,7 @@ import {
   type TopologyGetInput,
   type TopologyGetOutput,
 } from "#kit";
+import { startAgentHandlesTimer } from "./agent-handles.ts";
 import { factsAnswer } from "./facts.ts";
 import { assertFeedCaller, directoryFeed } from "./feed.ts";
 import { identitiesView } from "./identities.ts";
@@ -214,18 +215,23 @@ export const hooks: Record<string, HookHandler> = {
 };
 
 let stopTimer: (() => void) | null = null;
+let stopHandlesTimer: (() => void) | null = null;
 
 export const definition: SdkAppDefinition = {
   manifest,
   handlers,
   hooks,
   // Every 60 s (C85): the status of drafts sent to Rules. draft_status only; the timer never submits a draft.
+  // Every 60 s (C373 §3): the agent handles cache from Connect identities_list, outside every call (read only).
   async onStart(ctx) {
     stopTimer = startProposalTimer(ctx.db, ctx.callApp, ctx.log);
+    stopHandlesTimer = startAgentHandlesTimer(ctx.db, ctx.callApp, ctx.log);
   },
   async onStop() {
     stopTimer?.();
     stopTimer = null;
+    stopHandlesTimer?.();
+    stopHandlesTimer = null;
   },
   migrations: migrationsDir,
   events: {

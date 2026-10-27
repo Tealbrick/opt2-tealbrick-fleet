@@ -10,6 +10,8 @@ type Schema = Parameters<typeof validateAgainstSchema>[0];
 const read = (name: string): unknown => JSON.parse(readFileSync(new URL(`./contracts/${name}`, import.meta.url), "utf8"));
 
 export const FEED_SCHEMA = read("fleet.directory_feed.1.schema.json") as Schema & { $defs: Record<string, any> };
+/** C373 §3: the v1 schema plus the optional agents[].handles (derived; PROVENANCE.md). */
+export const FEED_SCHEMA_AGENT_HANDLES = read("fleet.directory_feed.1.agent_handles.schema.json") as Schema & { $defs: Record<string, any> };
 export const FEED_FIXTURES = read("fleet.directory_feed.1.json") as {
   valid: Json[];
   invalid: { why: string; doc: Json }[];
@@ -25,15 +27,19 @@ export interface FeedCheck {
   errors: string[];
 }
 
-/** Every `contacts[].handles[]` string of a document (tolerates any shape; the schema reports shape errors). */
+/** Every `contacts[].handles[]` and `agents[].handles[]` string of a document (tolerates any shape; the schema reports shape errors). */
 export function handlesOf(doc: unknown): string[] {
-  const contacts = (doc as { contacts?: unknown } | null)?.contacts;
-  if (!Array.isArray(contacts)) return [];
-  return contacts.flatMap((c) => (Array.isArray((c as { handles?: unknown })?.handles) ? ((c as { handles: unknown[] }).handles.filter((h) => typeof h === "string") as string[]) : []));
+  const of = (key: "contacts" | "agents"): string[] => {
+    const rows = (doc as Record<string, unknown> | null)?.[key];
+    if (!Array.isArray(rows)) return [];
+    return rows.flatMap((c) => (Array.isArray((c as { handles?: unknown })?.handles) ? ((c as { handles: unknown[] }).handles.filter((h) => typeof h === "string") as string[]) : []));
+  };
+  return [...of("contacts"), ...of("agents")];
 }
 
-export function checkFeed(doc: unknown): FeedCheck {
-  const v = validateAgainstSchema(FEED_SCHEMA, doc as Json);
+/** `schema`: the v1 byte copy (default) or FEED_SCHEMA_AGENT_HANDLES for an answer to `accept: ["agent_handles"]`. */
+export function checkFeed(doc: unknown, schema: Schema = FEED_SCHEMA): FeedCheck {
+  const v = validateAgainstSchema(schema, doc as Json);
   const schemaOk = v.ok;
   const bad = handlesOf(doc).filter((h) => normalizeHandle(h) !== h);
   const handlesOk = bad.length === 0;
