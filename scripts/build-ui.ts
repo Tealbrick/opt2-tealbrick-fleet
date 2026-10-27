@@ -24,7 +24,7 @@ if (existsSync(out)) for (const d of readdirSync(out)) if (/^assets-[0-9a-f]+$/.
 const VENDOR = "vendor";
 const STYLES = ["@opt2-tealbrick/ui/tokens.css", "@opt2-tealbrick/ui/components.css"];
 /** The app's own stylesheets, after the kit sheets so they can use the tokens. pages.css = the template's page layout; app.css = this app's layout only. */
-const APP_STYLES = ["pages.css", "app.css"];
+const APP_STYLES = ["pages.css", "app.css", "graph.css"];
 
 /** CommonJS entries (production builds), by bare specifier: package, file inside it, package to resolve it from. */
 const CJS: Record<string, { pkg: string; file: string; from?: string }> = {

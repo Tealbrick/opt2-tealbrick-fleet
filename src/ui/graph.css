@@ -1,0 +1,58 @@
+/* Governance: the topology picture (src/ui/graph.tsx) and the Access grant view (src/ui/access.tsx). DESIGN §6 canvas
+   look, mockup design/mockups/app-governance.html (.topo, .n, .av, .region, .w-*). Tokens only (check-system src), so
+   light and dark follow the shell. The picture is SVG: fills and strokes instead of backgrounds and rings. */
+
+.topo-graph { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--tb-s3); min-width: 0; }
+.topo-canvas { border-radius: var(--tb-radius-brick); background: var(--tb-film); box-shadow: var(--tb-ring); overflow: auto; max-height: 720px; }
+.topo-svg { display: block; font-family: var(--tb-font); }
+.topo-more { max-width: 62ch; }
+
+.g-region-box { fill: var(--tb-paper); stroke: var(--tb-line); stroke-width: 1; }
+.g-region-name { fill: var(--tb-ink-soft); font-size: 13px; font-weight: 800; }
+.g-region-empty { fill: var(--tb-muted); font-size: 13px; font-weight: 700; }
+.g-region.is-outside .g-region-box { fill: none; stroke: var(--tb-line-strong); stroke-width: 2; stroke-dasharray: 8 6; }
+.g-region.is-team { cursor: pointer; outline: none; }
+.g-region.is-team:hover .g-region-box, .g-region.is-team[aria-pressed="true"] .g-region-box { stroke: var(--tb-ink); stroke-width: 2; }
+.g-region.is-team:focus-visible .g-region-box { stroke: var(--tb-focus); stroke-width: 3; }
+
+.g-node { cursor: pointer; outline: none; }
+.g-box { fill: var(--tb-tile); stroke: var(--tb-line-strong); stroke-width: 1.5; }
+.g-node:hover .g-box, .g-node[aria-pressed="true"] .g-box { stroke: var(--tb-ink); stroke-width: 2.5; }
+.g-node:focus-visible .g-box { stroke: var(--tb-focus); stroke-width: 3; }
+.g-name { fill: var(--tb-ink); font-size: 15px; font-weight: 800; }
+.g-meta { fill: var(--tb-muted); font-size: 12px; font-weight: 700; }
+.g-av-t { font-size: 14px; font-weight: 800; }
+/* agent: filled initial avatar; person: outlined; outside contact: plate; app: teal wash */
+.g-node.is-agent .g-av { fill: var(--tb-primary-fill); }
+.g-node.is-agent .g-av-t { fill: var(--tb-primary-on); }
+.g-node.is-person .g-av { fill: var(--tb-tile); stroke: var(--tb-ink); stroke-width: 2; }
+.g-node.is-person .g-av-t { fill: var(--tb-ink); }
+.g-node.is-outside_agent .g-av { fill: var(--tb-plate); stroke: var(--tb-line-strong); stroke-width: 2; }
+.g-node.is-outside_agent .g-av-t { fill: var(--tb-ink); }
+.g-node.is-app .g-av { fill: var(--tb-teal-wash); stroke: var(--tb-teal-wash-line); stroke-width: 2; }
+.g-node.is-app .g-av-t { fill: var(--tb-teal-ink); }
+.g-due { fill: var(--tb-brick); }
+
+/* wires: ink owns/member, teal live, brick dashed "waits", dotted off (line) and blocked (brick) */
+.g-w { fill: none; stroke-linecap: round; }
+.w-own { stroke: var(--tb-ink); stroke-width: 1.5; }
+.w-live { stroke: var(--tb-wire-live); stroke-width: 2.5; }
+.w-held { stroke: var(--tb-brick); stroke-width: 2; stroke-dasharray: 6 6; }
+.w-off { stroke: var(--tb-line-strong); stroke-width: 2; stroke-dasharray: 2 6; }
+.w-blocked { stroke: var(--tb-brick); stroke-width: 2; stroke-dasharray: 2 6; }
+.g-label rect { fill: var(--tb-tile); stroke: var(--tb-line-strong); stroke-width: 1; }
+.g-label text { fill: var(--tb-ink); font-size: 12px; font-weight: 700; }
+
+.topo-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin: 0; padding: 0; list-style: none; font-size: var(--tb-text-hint); line-height: 16px; font-weight: var(--tb-weight-nav); color: var(--tb-ink-soft); }
+.topo-legend > li { display: inline-flex; align-items: center; gap: 6px; }
+.topo-legend svg { cursor: default; }
+
+/* Access (grant view) */
+.access-cards { display: grid; gap: var(--tb-s4); }
+.access-card { min-width: 0; }
+.access-card h3 { font-size: 1.0625rem; font-weight: var(--tb-weight-head); line-height: 22px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.access-sub { font-size: var(--tb-text-label); font-weight: var(--tb-weight-label); line-height: 22px; }
+.access-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.access-list .handle, .access-list .mono { overflow-wrap: anywhere; }
+
+@media print { .topo-canvas { max-height: none; overflow: visible; box-shadow: none; } }
