@@ -5,8 +5,9 @@
 import { callOp } from "@opt2-tealbrick/miniapp-sdk/client";
 import { Button, Card, Choices, EmptyState, Field, Notice, Select, StepFlow, Swatch, Switch, Table, Tag, Textarea, TextInput } from "@opt2-tealbrick/ui";
 import { useCallback, useEffect, useState } from "react";
-import type { OverviewGetOutput, ReviewGetOutput, ReviewsListOutput } from "#kit";
+import type { OverviewGetOutput, ProposalSendOutput, ReviewGetOutput, ReviewsListOutput } from "#kit";
 import { changeError, EditDialog, LoadFailed, Loading, PageHead, useLoad } from "./common.tsx";
+import { NOTHING_APPLIES, proposalError, TEMPLATE_INFO, type Template, templatesFor } from "./rule-text.ts";
 import { sameShown } from "./shown.ts";
 
 type List = ReviewsListOutput;
@@ -89,6 +90,10 @@ function ReviewFlow({ subject: given, requests, dir, policy, onClose, onDone }: 
   const [reason, setReason] = useState("");
   const [name, setName] = useState<string | null>(null);
   const [recordError, setRecordError] = useState<string | null>(null);
+  // step 3: the contact rule (optional, sent only on Confirm) and the id of the recorded review once the verdict is in
+  const [template, setTemplate] = useState<Template | null>(null);
+  const [handleChoice, setHandleChoice] = useState<string | null>(null);
+  const [recorded, setRecorded] = useState<string | null>(null);
   const defaultDays = subject?.kind === "agent" ? policy.agentDays : policy.contactDays;
   const [days, setDays] = useState<string>("");
   const nextDays = Number(days || defaultDays);
@@ -125,23 +130,45 @@ function ReviewFlow({ subject: given, requests, dir, policy, onClose, onDone }: 
   const changedSince = last?.snapshot && cur && !sameShown(last.snapshot, cur) ? `Changed since the last review on ${day(last.decidedAt)}: name, owner, teams or handles are not the same.` : null;
   const shownName = pending ? (name ?? cur?.name ?? "") : (cur?.name ?? "");
 
+  // the contact rule that fits the subject: an agent gets the outward templates, a person or outside agent the sender ones (needs a handle)
+  const kind = subject?.kind ?? cur?.kind ?? null;
+  const fitting = kind ? templatesFor(kind) : [];
+  const handles = cur?.handles ?? [];
+  const handle = handleChoice && handles.includes(handleChoice) ? handleChoice : (handles[0] ?? null);
+  const ruleParams: Record<string, string> | null = !template ? null : template.endsWith("_for_agent") ? (subject?.id ? { agent: subject.id } : null) : handle ? { handle } : null;
+  const noRuleReason = kind === "agent" ? (subject?.id ? null : "Choose who to review first.") : handles.length === 0 ? "This contact has no channel handle, so a rule cannot name it. Add a handle on the People page first." : null;
+
   const record = async (): Promise<boolean> => {
     if (!subject || !cur || !verdict) return false;
     setRecordError(null);
-    try {
-      await callOp("review_record", {
-        subject: pending ? { kind: subject.kind, handle: subject.handle ?? cur.handles[0] ?? "", ...(shownName.trim() ? { name: shownName.trim() } : {}) } : { kind: subject.kind, id: subject.id ?? "" },
-        verdict,
-        reason: reason.trim(),
-        snapshotDigest: cur.digest,
-        nextReviewDays: nextDays,
-        ...(request ? { request: request.id } : {}),
-      });
-      return true;
-    } catch (e) {
-      setRecordError(changeError(e));
-      return false;
+    let reviewId = recorded;
+    if (!reviewId) {
+      try {
+        const out = await callOp<{ review: { id: string } }>("review_record", {
+          subject: pending ? { kind: subject.kind, handle: subject.handle ?? cur.handles[0] ?? "", ...(shownName.trim() ? { name: shownName.trim() } : {}) } : { kind: subject.kind, id: subject.id ?? "" },
+          verdict,
+          reason: reason.trim(),
+          snapshotDigest: cur.digest,
+          nextReviewDays: nextDays,
+          ...(request ? { request: request.id } : {}),
+        });
+        reviewId = out.review.id;
+        setRecorded(reviewId);
+      } catch (e) {
+        setRecordError(changeError(e));
+        return false;
+      }
     }
+    if (!template || !ruleParams) return true;
+    // The verdict is in and cannot be undone: a rule that is not sent says so and can be sent again (same proposal, no second draft).
+    try {
+      const out = await callOp<ProposalSendOutput>("proposal_send", { template, params: ruleParams, review: reviewId });
+      if (out.proposal.status === "sent") return true;
+      setRecordError(`Your verdict is recorded. The rule was not sent. ${proposalError(out.proposal.error)}`);
+    } catch (e) {
+      setRecordError(`Your verdict is recorded. The rule was not sent. ${changeError(e)}`);
+    }
+    return false;
   };
 
   return (
@@ -150,7 +177,7 @@ function ReviewFlow({ subject: given, requests, dir, policy, onClose, onDone }: 
       size="lg"
       kicker="Governance"
       title={cur ? `Review ${cur.name}` : "Review"}
-      onClose={onClose}
+      onClose={() => (recorded ? void onDone() : onClose())}
       onFinish={() => void onDone()}
       steps={[
         {
@@ -166,6 +193,11 @@ function ReviewFlow({ subject: given, requests, dir, policy, onClose, onDone }: 
                     onValueChange={(v) => {
                       const at = v.indexOf(":");
                       setSubject(v ? { kind: v.slice(0, at) as Kind, id: v.slice(at + 1) } : null);
+                      // a new subject records its own verdict and is offered only its own templates (step 3 starts over)
+                      setTemplate(null);
+                      setHandleChoice(null);
+                      setRecorded(null);
+                      setRecordError(null);
                     }}
                   />
                 </Field>
@@ -250,18 +282,35 @@ function ReviewFlow({ subject: given, requests, dir, policy, onClose, onDone }: 
         },
         {
           name: "Contact rule",
-          optional: "Skip, no rule",
+          optional: template ? false : "Skip, no rule",
           render: () => (
             <div className="tb-stack">
               <Notice tone="live">
-                <span>Contact rules are not part of this release. Governance will draft them for Rules &amp; Approvals later; you will approve every draft in Rules. Skip this step.</span>
+                <span>{NOTHING_APPLIES}</span>
               </Notice>
+              {noRuleReason ? (
+                <p className="tb-soft">{noRuleReason}</p>
+              ) : (
+                <>
+                  <Choices
+                    label="Contact rule"
+                    options={[{ value: "none", title: "No rule", body: "Record the verdict only." }, ...fitting.map((t) => ({ value: t, title: TEMPLATE_INFO[t].title, body: TEMPLATE_INFO[t].body }))]}
+                    value={template ?? "none"}
+                    onChange={(v) => setTemplate(v === "none" ? null : (v as Template))}
+                  />
+                  {template && !template.endsWith("_for_agent") && handles.length > 1 ? (
+                    <Field label="Which handle">
+                      <Select options={handles.map((h) => ({ value: h, label: h }))} value={handle ?? ""} onValueChange={setHandleChoice} />
+                    </Field>
+                  ) : null}
+                </>
+              )}
             </div>
           ),
         },
         {
           name: "Confirm",
-          nextLabel: pending ? "Add and record verdict" : "Record verdict",
+          nextLabel: recorded ? "Send the rule again" : template ? (pending ? "Add, record and send rule" : "Record verdict and send rule") : pending ? "Add and record verdict" : "Record verdict",
           onNext: record,
           render: () => (
             <div className="tb-stack">
@@ -274,7 +323,10 @@ function ReviewFlow({ subject: given, requests, dir, policy, onClose, onDone }: 
                 <dd>{reason.trim()}</dd>
                 <dt>Next review</dt>
                 <dd>{`In ${nextDays} days`}</dd>
+                <dt>Contact rule</dt>
+                <dd>{template && ruleParams ? `${TEMPLATE_INFO[template].title}${ruleParams.handle ? ` (${ruleParams.handle})` : ""}` : "None"}</dd>
               </dl>
+              {template && ruleParams ? <p className="tb-soft">{NOTHING_APPLIES}</p> : null}
               <p className="tb-soft">Governance records the verdict now and sets the trust state. Apps that read the directory see it with their next read. The record cannot be edited later.</p>
               {recordError ? (
                 <Notice tone="needs-you" role="alert">

@@ -35,6 +35,15 @@ export interface FeedAgent {
   status: "active" | "paused" | "removed";
   trust: Trust;
   owner: string | null;
+  /** only with `accept: ["agent_handles"]` (C373 §3): canonical handles Connect issued to the agent, sorted, <= 16 */
+  handles?: string[];
+}
+
+/** The one `accept` value this version knows (C373 §3). Unknown values are ignored. */
+export const ACCEPT_AGENT_HANDLES = "agent_handles";
+export interface FeedInput {
+  sinceRevision?: number;
+  accept?: string[];
 }
 export type DirectoryFeed =
   | { v: 1; revision: number; unchanged: false; teams: FeedTeam[]; contacts: FeedContact[]; agents: FeedAgent[] }
@@ -52,6 +61,18 @@ export const ID_MAX = 64;
 export const TEAM_NAME_MAX = 80;
 const validId = (id: string): boolean => id.length >= 1 && id.length <= ID_MAX;
 
+/** The cached Connect handles per agent (table fleet_agent_handles, written only by the timer in agent-handles.ts). */
+export function cachedAgentHandles(db: Db): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const r of db.prepare("SELECT agent_id, handle FROM fleet_agent_handles ORDER BY agent_id, handle").all()) {
+    const id = String(r.agent_id);
+    const list = out.get(id) ?? [];
+    list.push(String(r.handle));
+    out.set(id, list);
+  }
+  return out;
+}
+
 /** Warn once per skipped id (bounded memory): one bad legacy row must not flood the log on every pull. */
 const warned = new Set<string>();
 export type Warn = (msg: string, fields: Record<string, string>) => void;
@@ -63,26 +84,34 @@ function skip(warn: Warn | undefined, what: string, id: string): void {
   warn?.(`directory_feed leaves out ${what} that does not fit the contract fleet.directory_feed/1`, { what, id: id.slice(0, 80) });
 }
 
-/** The one product allowed to read the feed (C243): Rules, whose read model it is. */
-export const FEED_PRODUCT = "rules";
+/**
+ * The VERIFIED products allowed to read the feed: Rules (its read model, C243, C373 §2) and Knowledge (C373e, a second
+ * reader). Exact product ids only; never a manifest name.
+ */
+export const FEED_READERS: readonly string[] = Object.freeze(["rules", "knowledge"]);
+
+/** Refusal text for an app caller the SDK could not verify (same words as the SDK's own `caller_unverified`). */
+export const FEED_UNVERIFIED_MESSAGE = "the calling app is not verified for this workspace yet: update the bridge, or retry after the workspace config refreshes";
 
 /**
- * Only app callers (companions such as Rules) read the feed. An agent, a person or anything else gets `no_access`.
- *
- * Interim allowlist (C243, until SDK 0.1.34 / C261 refuses unverified app callers centrally): an app caller that has a
- * VERIFIED product (`Caller.product`, from the signed grant `prd` or the signed companionCallers entry; SDK 0.1.27+; the
- * type of the pinned SDK 0.1.25 does not declare it yet, so it is read structurally) must be `rules`. Any other verified
- * product gets `no_access` 403, and the error carries no feed data. Never a manifest name or any self-claimed string.
- * An app caller WITHOUT a product keeps today's behaviour for now: Rules on qa1 has no signed product yet and must keep
- * reading the feed. The full `caller_unverified` guard (an app caller with no product is refused) comes with SDK 0.1.34
- * (C261/C243); the test "only the verified product rules reads the feed" pins the interim so that change is visible.
+ * Only the reader apps in FEED_READERS read the feed (C243, C373 RULES-INTERFACE §2, C373e). The check uses ONLY the
+ * verified caller fields the SDK sets (SDK-CALLER-PRODUCT, spec `Caller`):
+ *  - `caller.type` must be `app`; an agent, a person or anything else gets `no_access` 403;
+ *  - `caller.product` is the VERIFIED product (the signed grant `prd`, else the signed slice `companionCallers` entry);
+ *    it must be exactly one of FEED_READERS. Never the display `name` or any self-claimed string;
+ *  - `caller.listed` must be `true`: the caller instance is in the CURRENT signed slice `companionCallers` under that
+ *    product (the spec asks apps that share data with a calling app to re-check it at use time; false when the slice is
+ *    expired or the companion edge was removed after the grant was minted).
+ * An app caller with no verified product, or one that is not listed, gets `caller_unverified` 403 (retryable: a newer
+ * slice or bridge fixes it), like the SDK's central guard (SDK 0.1.35, C261) when the slice flag `appCallers: "verified"`
+ * is set. A verified app of another product gets `no_access` 403. No refusal carries feed data.
  */
-export function assertFeedCaller(caller: { type: string; product?: unknown }): void {
+export function assertFeedCaller(caller: { type: string; product?: unknown; listed?: unknown }): void {
   if (caller.type !== "app") throw new TbError("no_access", "directory_feed is for apps only", 403);
   const product = caller.product;
-  if (product !== undefined && product !== null && product !== "" && product !== FEED_PRODUCT) {
-    throw new TbError("no_access", "directory_feed is for the Rules app only", 403);
-  }
+  if (product === undefined || product === null || product === "") throw new TbError("caller_unverified", FEED_UNVERIFIED_MESSAGE, 403, { retryable: true });
+  if (typeof product !== "string" || !FEED_READERS.includes(product)) throw new TbError("no_access", "directory_feed is for the reader apps only (Rules, Knowledge)", 403);
+  if (caller.listed !== true) throw new TbError("caller_unverified", FEED_UNVERIFIED_MESSAGE, 403, { retryable: true });
 }
 
 /**
@@ -93,10 +122,16 @@ export function assertFeedCaller(caller: { type: string; product?: unknown }): v
  * canonical (`normalizeHandle(h) !== h` or off the schema pattern), an agent id that is not `agt_<26 Crockford>`, an
  * id of 0 or over 64 characters. A member or owner that names a left-out row is left out too. Removed agents are
  * listed only while a team still names them (so a reader can drop the member); they do not count against the cap.
+ *
+ * `accept: ["agent_handles"]` (C373 §3, additive): every agents[] entry also carries `handles` (the cached Connect
+ * handles, canonical, sorted, <= 16; [] when none). One more indexed read; nothing is called. Without it (or with only
+ * unknown values) the answer is byte-for-byte the fleet.directory_feed/1 shape of 0.2.x.
  */
-export function directoryFeed(db: Db, input: { sinceRevision?: number }, warn?: Warn): DirectoryFeed {
+export function directoryFeed(db: Db, input: FeedInput, warn?: Warn): DirectoryFeed {
   const rev = revision(db);
   if (input.sinceRevision !== undefined && input.sinceRevision === rev) return { v: 1, revision: rev, unchanged: true };
+  // C373 §3: agent handles only when the reader asks for them; without `accept` the answer is exactly the old shape
+  const agentHandles = Array.isArray(input.accept) && input.accept.includes(ACCEPT_AGENT_HANDLES) ? cachedAgentHandles(db) : null;
 
   const handles = new Map<string, string[]>();
   for (const r of db.prepare("SELECT person_id, handle FROM fleet_handles ORDER BY person_id, handle").all()) {
@@ -135,7 +170,19 @@ export function directoryFeed(db: Db, input: { sinceRevision?: number }, warn?: 
     }
     agentIds.add(id);
     const owner = a.owner_id === null ? null : String(a.owner_id);
-    agents.push({ id, status: a.status as FeedAgent["status"], trust: a.trust as Trust, owner: owner !== null && contactIds.has(owner) ? owner : null });
+    const agent: FeedAgent = { id, status: a.status as FeedAgent["status"], trust: a.trust as Trust, owner: owner !== null && contactIds.has(owner) ? owner : null };
+    if (agentHandles) {
+      const list: string[] = [];
+      for (const h of agentHandles.get(id) ?? []) {
+        if (normalizeHandle(h) !== h || !HANDLE_PATTERN.test(h)) {
+          skip(warn, "an agent handle", h);
+          continue;
+        }
+        if (list.length < FEED_CAPS.handlesPerContact) list.push(h);
+      }
+      agent.handles = list;
+    }
+    agents.push(agent);
   }
   if (agents.length > FEED_CAPS.agents) tooLarge("agents", FEED_CAPS.agents);
 

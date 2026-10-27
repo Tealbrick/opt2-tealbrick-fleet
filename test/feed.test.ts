@@ -10,7 +10,7 @@ import { ulid, validateAgainstSchema } from "@opt2-tealbrick/manifest";
 import { type Db, type Json, type OpContext, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { handlers, manifest } from "../src/app.ts";
 import { factsAnswer, factsFor } from "../src/facts.ts";
-import { AGENT_ID_PATTERN, assertFeedCaller, directoryFeed, FEED_CAPS, HANDLE_PATTERN, ID_MAX, TEAM_NAME_MAX } from "../src/feed.ts";
+import { AGENT_ID_PATTERN, assertFeedCaller, directoryFeed, FEED_CAPS, FEED_READERS, HANDLE_PATTERN, ID_MAX, TEAM_NAME_MAX } from "../src/feed.ts";
 import * as store from "../src/store.ts";
 import { defaultTrust } from "../src/trust.ts";
 import { bigDirectory } from "./big.ts";
@@ -19,7 +19,8 @@ import { AGENT_A, AGENT_B, dbOver, migratedDb, migrationFiles, NOSTR } from "./h
 import { SECRETS, seed } from "./seed.ts";
 
 const sha256 = (b: Buffer | string) => createHash("sha256").update(b).digest("hex");
-const APP = { type: "app", id: "ins_01J0000000000000000000000R", name: "Rules & Approvals", mode: null };
+// Rules as the SDK names it: an app caller with its VERIFIED product and listed in the current slice companionCallers
+const APP = { type: "app", id: "ins_01J0000000000000000000000R", name: "Rules & Approvals", mode: null, product: "rules", listed: true };
 const AGENT = { type: "agent", id: AGENT_A.id, name: AGENT_A.name, mode: "free" };
 const PERSON = { type: "person", id: "per_01J0000000000000000000000P", name: "owner", mode: null };
 const log = { debug() {}, info() {}, warn() {}, error() {} };
@@ -81,49 +82,63 @@ test("directory_feed: an agent caller gets no_access 403; a person caller too; a
   assert.equal(feed.teams.length, 2);
   // the guard function itself: fires for anything but an app
   assert.throws(() => assertFeedCaller({ type: "agent" }), (e) => e instanceof TbError && e.code === "no_access" && e.httpStatus === 403);
-  assert.doesNotThrow(() => assertFeedCaller({ type: "app" }));
+  assert.doesNotThrow(() => assertFeedCaller({ type: "app", product: "rules", listed: true }));
 });
 
-test("directory_feed: only the verified product `rules` reads the feed (C243 interim allowlist)", async () => {
+test("directory_feed: only a listed app whose VERIFIED product is in FEED_READERS (rules, knowledge) reads the feed (C373 §2, C373e)", async () => {
   const db = migratedDb();
   seed(db);
-  // quiet on good: Rules with a verified product
-  const rules = (await feedOp(db, { ...APP, product: "rules" })) as { teams: unknown[] };
+  const { product: _p, listed: _l, ...bare } = APP;
+  assert.deepEqual([...FEED_READERS], ["rules", "knowledge"]);
+  assert.ok(Object.isFrozen(FEED_READERS), "the list cannot be changed at run time");
+  // quiet on good: Rules and Knowledge with a verified product, listed in the current slice; the same feed for both
+  const rules = (await feedOp(db, APP)) as { teams: unknown[] };
   assert.equal(rules.teams.length, 2);
-  // INTERIM (until SDK 0.1.34 / C261): an app caller without a verified product still reads the feed. When the
-  // caller_unverified guard lands this assertion must flip to a refusal.
-  const noProduct = (await feedOp(db, APP)) as { teams: unknown[] };
-  assert.equal(noProduct.teams.length, 2);
-  const nullProduct = (await feedOp(db, { ...APP, product: null })) as { teams: unknown[] };
-  assert.equal(nullProduct.teams.length, 2);
-  // fire on bad: any other verified product gets no_access 403 and nothing from the feed
-  for (const product of ["observer", "inbox", "Rules", "rules2"]) {
-    for (const input of [{}, { sinceRevision: store.revision(db) }]) {
-      let caught: unknown;
-      try {
-        await feedOp(db, { ...APP, product }, input);
-      } catch (e) {
-        caught = e;
-      }
-      assert.ok(caught instanceof TbError, `product ${product} is refused`);
-      assert.equal((caught as TbError).code, "no_access");
-      assert.equal((caught as TbError).httpStatus, 403);
-      const shown = JSON.stringify({ code: (caught as TbError).code, message: (caught as Error).message });
-      assert.doesNotMatch(shown, /agt_|teams|contacts|handles|slack:|buzz:/, "the error carries no feed data");
+  const knowledge = (await feedOp(db, { ...APP, id: "ins_01J0000000000000000000000K", name: "Knowledge", product: "knowledge" })) as { teams: unknown[] };
+  assert.deepEqual(knowledge, rules);
+  for (const product of FEED_READERS) assert.doesNotThrow(() => assertFeedCaller({ type: "app", product, listed: true }));
+  const noFeedData = (e: unknown) => assert.doesNotMatch(JSON.stringify({ code: (e as TbError).code, message: (e as Error).message, details: (e as TbError).details }), /agt_|teams|contacts|handles|slack:|buzz:/, "the error carries no feed data");
+  const refused = async (caller: object, code: string, input: object = {}) => {
+    let caught: unknown;
+    try {
+      await feedOp(db, caller, input);
+    } catch (e) {
+      caught = e;
     }
-  }
-  // a self-claimed name never counts: the display name "rules" with product "observer" is refused
-  assert.deepEqual(await refusal(() => feedOp(db, { ...APP, name: "rules", product: "observer" })), { code: "no_access", status: 403 });
-  // agent and person stay refused, whatever product field they carry
-  assert.deepEqual(await refusal(() => feedOp(db, { ...AGENT, product: "rules" })), { code: "no_access", status: 403 });
-  assert.deepEqual(await refusal(() => feedOp(db, { ...PERSON, product: "rules" })), { code: "no_access", status: 403 });
-  // the guard function itself
-  assert.doesNotThrow(() => assertFeedCaller({ type: "app", product: "rules" }));
-  assert.doesNotThrow(() => assertFeedCaller({ type: "app" }));
-  assert.throws(() => assertFeedCaller({ type: "app", product: "observer" }), (e) => e instanceof TbError && e.code === "no_access" && e.httpStatus === 403);
-  // a product that is present but not a string fails closed too (never read as "no product")
-  for (const odd of [42, {}, ["rules"], true]) {
-    assert.throws(() => assertFeedCaller({ type: "app", product: odd }), (e) => e instanceof TbError && e.code === "no_access" && e.httpStatus === 403);
+    assert.ok(caught instanceof TbError, `${JSON.stringify(caller)} is refused`);
+    assert.equal((caught as TbError).code, code, JSON.stringify(caller));
+    assert.equal((caught as TbError).httpStatus, 403);
+    noFeedData(caught);
+    return caught as TbError;
+  };
+  for (const input of [{}, { sinceRevision: store.revision(db) }]) {
+    // fire on bad: an UNVERIFIED app (no product: the old interim let it read; now refused, retryable)
+    const e = await refused(bare, "caller_unverified", input);
+    assert.equal(e.details?.retryable, true, "a newer slice or bridge fixes it");
+    await refused({ ...bare, product: null }, "caller_unverified", input);
+    await refused({ ...bare, product: "" }, "caller_unverified", input);
+    await refused({ ...bare, listed: true }, "caller_unverified", input);
+    // Rules, verified, but no longer listed in the CURRENT slice (edge removed, slice expired) or listed unknown
+    await refused({ ...APP, listed: false }, "caller_unverified", input);
+    await refused({ ...APP, product: "knowledge", listed: false }, "caller_unverified", input);
+    await refused({ ...bare, name: "Knowledge" }, "caller_unverified", input);
+    await refused({ ...bare, product: "rules" }, "caller_unverified", input);
+    await refused({ ...APP, listed: "true" }, "caller_unverified", input);
+    // fire on bad: any other verified product gets no_access, listed or not
+    for (const product of ["observer", "inbox", "Rules", "rules2", " rules", "Knowledge", "knowledge2", "connect", "fleet"]) {
+      await refused({ ...APP, product }, "no_access", input);
+      await refused({ ...APP, product, listed: false }, "no_access", input);
+    }
+    // a product that is present but not a string fails closed too (never read as "no product", never as rules)
+    for (const odd of [42, {}, ["rules"], true]) await refused({ ...APP, product: odd }, "no_access", input);
+    // a self-claimed name never counts: the display name "rules" without a verified product, or with another product
+    await refused({ ...bare, name: "rules" }, "caller_unverified", input);
+    await refused({ ...APP, name: "rules", product: "observer" }, "no_access", input);
+    // agents (and persons) stay refused no_access, whatever product/listed fields they carry
+    await refused(AGENT, "no_access", input);
+    await refused({ ...AGENT, product: "rules", listed: true }, "no_access", input);
+    await refused({ ...AGENT, product: "knowledge", listed: true }, "no_access", input);
+    await refused({ ...PERSON, product: "rules", listed: true }, "no_access", input);
   }
 });
 

@@ -24,6 +24,10 @@ import {
   type PersonDeleteOutput,
   type PersonSetInput,
   type PersonSetOutput,
+  type ProposalSendInput,
+  type ProposalSendOutput,
+  type ProposalsListInput,
+  type ProposalsListOutput,
   type ResolveSenderInput,
   type ResolveSenderOutput,
   type ReviewDismissInput,
@@ -49,10 +53,12 @@ import {
   type TopologyGetInput,
   type TopologyGetOutput,
 } from "#kit";
+import { startAgentHandlesTimer } from "./agent-handles.ts";
 import { factsAnswer } from "./facts.ts";
 import { assertFeedCaller, directoryFeed } from "./feed.ts";
 import { identitiesView } from "./identities.ts";
 import { leanDirectory, leanTeamGet, leanTeamsList } from "./lean.ts";
+import { assertOwner, LIST_POLL, listProposals, pollStatuses, sendProposal, startProposalTimer } from "./proposals.ts";
 import * as reviews from "./reviews.ts";
 import * as store from "./store.ts";
 import { assertTopologyCaller, topologyGet } from "./topology.ts";
@@ -85,7 +91,7 @@ export const handlers = {
     },
   }),
   [OP.directoryFeed]: op<DirectoryFeedInput, DirectoryFeedOutput>({
-    // Contract fleet.directory_feed/1, for apps (Rules' read model). Agents get no_access until the manifest has an `app` audience (G-1).
+    // Contract fleet.directory_feed/1, for the reader apps (FEED_READERS: Rules, Knowledge). Agents get no_access until the manifest has an `app` audience (G-1).
     async run(input, ctx) {
       assertFeedCaller(ctx.caller);
       return directoryFeed(ctx.db, input, (msg, fields) => ctx.log.warn(msg, fields));
@@ -149,6 +155,25 @@ export const handlers = {
       return topologyGet(ctx.db, input, (msg, fields) => ctx.log.warn(msg, fields));
     },
   }),
+  [OP.proposalsList]: op<ProposalsListInput, ProposalsListOutput>({
+    // Owner only. Asking also refreshes the status of sent drafts (draft_status, read); a failure there leaves them `unknown`.
+    async run(input, ctx) {
+      assertOwner(ctx.caller);
+      try {
+        await pollStatuses(ctx.db, ctx.callApp.bind(ctx), Date.now(), undefined, LIST_POLL);
+      } catch (e) {
+        ctx.log.warn("proposal status poll failed", { error: e instanceof Error ? e.message : "unknown" });
+      }
+      return listProposals(ctx.db, input);
+    },
+  }),
+  [OP.proposalSend]: op<ProposalSendInput, ProposalSendOutput>({
+    // Owner only. Creates a DRAFT in Rules (the only call Governance makes there); the id of the proposal is the idempotency key of that call.
+    async run(input, ctx) {
+      assertOwner(ctx.caller);
+      return sendProposal(ctx.db, ctx.callApp.bind(ctx), ctx.caller.id, input);
+    },
+  }),
   [OP.reviewsList]: op<ReviewsListInput, ReviewsListOutput>({
     async run(input, ctx) {
       return reviews.listReviews(ctx.db, input);
@@ -189,10 +214,25 @@ export const hooks: Record<string, HookHandler> = {
   },
 };
 
+let stopTimer: (() => void) | null = null;
+let stopHandlesTimer: (() => void) | null = null;
+
 export const definition: SdkAppDefinition = {
   manifest,
   handlers,
   hooks,
+  // Every 60 s (C85): the status of drafts sent to Rules. draft_status only; the timer never submits a draft.
+  // Every 60 s (C373 §3): the agent handles cache from Connect identities_list, outside every call (read only).
+  async onStart(ctx) {
+    stopTimer = startProposalTimer(ctx.db, ctx.callApp, ctx.log);
+    stopHandlesTimer = startAgentHandlesTimer(ctx.db, ctx.callApp, ctx.log);
+  },
+  async onStop() {
+    stopTimer?.();
+    stopTimer = null;
+    stopHandlesTimer?.();
+    stopHandlesTimer = null;
+  },
   migrations: migrationsDir,
   events: {
     // needsAgentDirectory: the slice lists every workspace agent; the full list arrives on every change (SDK 0.1.13).

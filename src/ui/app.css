@@ -35,3 +35,7 @@
 }
 
 .id { color: var(--tb-muted); white-space: nowrap; }
+
+/* Contact rules: one row per team with its Hold button (C373 §5) */
+.team-rules { list-style: none; margin: 0; padding: 0; }
+.team-rules > li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 12px 0; overflow-wrap: anywhere; }

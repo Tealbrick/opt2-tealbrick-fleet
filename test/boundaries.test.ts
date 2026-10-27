@@ -27,6 +27,21 @@ export function uiImports(file: string, code: string): string[] {
   return importSpecifiers(code).filter((s) => (s.startsWith("./") || s.startsWith("../")) && resolve(dirname(file), s).startsWith(ui + sep));
 }
 
+/** Browser modules: every .ts/.tsx under src/ui. */
+function uiModules(dir = ui): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) return uiModules(p);
+    return /\.tsx?$/.test(e.name) ? [p] : [];
+  });
+}
+
+/** Relative imports of `code` (a file under src/ui) that land OUTSIDE src/ui (the UI build moves dist/ui/* into a hashed
+ *  assets directory, so such an import 404s in the browser: QA fleet 0.3.0 S2, the same class as QA-GOV022-1). */
+export function serverImportsFromUi(file: string, code: string): string[] {
+  return importSpecifiers(code).filter((s) => (s.startsWith("./") || s.startsWith("../")) && !resolve(dirname(file), s).startsWith(ui + sep));
+}
+
 /** The code below the leading comment header. */
 const body = (text: string) => text.replace(/^(?:\/\/[^\n]*\n)+/, "");
 
@@ -43,6 +58,19 @@ describe("build boundaries (QA-GOV022-1)", () => {
     assert.deepEqual(uiImports(f, 'import { type Shown, sameShown } from "./ui/shown.ts";\n'), ["./ui/shown.ts"]);
     assert.deepEqual(uiImports(f, 'import { sameShown } from "./shown.ts";\n// from "./ui/x.ts"\n'), []);
     assert.deepEqual(uiImports(join(src, "x", "y.ts"), 'export * from "../ui/common.tsx";\n'), ["../ui/common.tsx"]);
+  });
+
+  it("no src/ui module imports from outside src/ui", () => {
+    const files = uiModules();
+    assert.ok(files.length >= 5, `found only ${files.length} ui modules`);
+    const bad = files.flatMap((f) => serverImportsFromUi(f, readFileSync(f, "utf8")).map((s) => `${relative(root, f)} -> ${s}`));
+    assert.deepEqual(bad, []);
+  });
+
+  it("the check fires on a ui import from a server module (QA fleet 0.3.0 S2)", () => {
+    const f = join(ui, "graph.tsx");
+    assert.deepEqual(serverImportsFromUi(f, 'import { layoutGraph } from "../graph-layout.ts";\n'), ["../graph-layout.ts"]);
+    assert.deepEqual(serverImportsFromUi(f, 'import { layoutGraph } from "./graph-layout.ts";\n'), []);
   });
 
   it("src/ui/shown.ts is the same code as src/shown.ts", () => {

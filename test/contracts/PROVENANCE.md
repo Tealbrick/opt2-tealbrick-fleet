@@ -18,3 +18,29 @@ How the tests use them: every `directory_feed` answer is validated with the JSON
 `@opt2-tealbrick/manifest` exports (`validateAgainstSchema`, ajv 8, formats as annotations) and with the extra reader rule
 `normalizeHandle(h) === h` for every handle. The fixtures `valid`, `invalid` and `invalidByNormalizeHandle` run through
 the same wrapper (`test/feed-contract.ts`).
+
+## Rules & Approvals 0.4.1 manifest (companion target, contact-rule proposals)
+
+`rules.0.4.1.manifest.json` is a byte copy. Do not edit it. It is the source of the rule shape (`RuleSpec` in
+`$defs` of `rule_draft_submit.input`) and of the two Rules operations Governance calls (`rule_draft_submit`,
+`draft_status`). `test/proposals.test.ts` fails when the file no longer matches the sha256 below. It replaces the
+0.3.0 copy (Governance 0.3.0, C373 §5: `match.callerTeams` for the template `hold_outward_for_team`).
+
+- Source repo: `Tealbrick/opt2-tealbrick-rules`, branch `main`, commit `5842ae42bf8fb193ad23894465b68e3bab505471` ("rules 0.4.1: writer checks tools entries with the catalog-name rule (#21)"), file `tealbrick.manifest.json` (version 0.4.1)
+- sha256: `3e334f4715efed335e9736c50577445776f9d6b5d131746b894b0227ec0d1f41`
+- Fetched with `git -C <rules> show 5842ae4:tealbrick.manifest.json`.
+
+Use: every generated rule is validated against `RuleSpec`; the M-CP-2 check (`validateCompanions`) runs against this manifest.
+Rules also refuses a draft by checks a JSON schema cannot state (`specProblem` in its `src/engine.ts` at that commit:
+narrowing only on allow rules, `operations`/`tools` need `products`, catalog tool names); `test/proposals.test.ts` mirrors
+the ones a template could hit.
+
+## fleet.directory_feed/1 with agent handles (C373, RULES-INTERFACE §3) — DERIVED, not a byte copy
+
+`fleet.directory_feed.1.agent_handles.schema.json` is the spec-v0.1.42 schema above plus ONE optional property,
+`$defs.full.properties.agents.items.properties.handles` (array of `#/$defs/handle`, maxItems 16, uniqueItems). Nothing else
+differs; `test/agent-handles.test.ts` rebuilds it from the byte copy and fails on any other difference. Rules keeps a
+copy of this file for its contract test (Rules lead, 2026-10-27). It replaces nothing: an answer without
+`accept: ["agent_handles"]` still validates against the byte copy above.
+
+- sha256: `9a11657d8ac88580aa76af647118ed57e19798c56498e804b03b4fcd49515823`

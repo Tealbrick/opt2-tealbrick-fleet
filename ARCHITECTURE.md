@@ -18,21 +18,21 @@ State: verified against the repo on 2026-10-17. Claims cite paths in this repo. 
 
 ## Governance: what it does
 
-Governance (0.2.3; formerly Organization Plane) is the workspace directory and its trust record. Rules reads the directory feed `directory_feed` (contract `fleet.directory_feed/1`, apps only) since Rules 0.3.0; `directory_get` is the lean agent view. A context hook adds facts about the requester (with its trust) and the agent owner to every call. Handle format is `<channel>:<value>` (`buzz:npub1...`, `slack:U...`, `telegram:123...`), canonicalized by `normalizeHandle` from `@opt2-tealbrick/manifest` (no local parser). Trust reviews: an agent asks, the owner decides. Design: `coordination/leads/fleet/DESIGN.md` (private).
+Governance (0.3.0; formerly Organization Plane) is the workspace directory and its trust record. Rules (since Rules 0.3.0) and Knowledge read the directory feed `directory_feed` (contract `fleet.directory_feed/1`, reader apps only: `FEED_READERS` in `src/feed.ts`); `directory_get` is the lean agent view. A context hook adds facts about the requester (with its trust) and the agent owner to every call. Handle format is `<channel>:<value>` (`buzz:npub1...`, `slack:U...`, `telegram:123...`), canonicalized by `normalizeHandle` from `@opt2-tealbrick/manifest` (no local parser). Trust reviews: an agent asks, the owner decides. Design: `coordination/leads/fleet/DESIGN.md` (private).
 
 ## Operations (from `tealbrick.manifest.json`)
 
-20 operations.
+22 operations.
 - Agent: `teams_list`, `team_get`, `directory_get` (lean: names, titles, trust, teams, owner; `sinceRevision` returns `unchanged:true`), `resolve_sender` (channel handle to contact, trust and teams; the 0.1.10 `person` field is kept but deprecated, null for outside agents), and `review_request` (write, receipt, idempotency required; asks the owner for a review; dedup per requester and subject; 20 open per agent; an unknown handle creates no entry).
-- App read: `directory_feed` (audience `agent` in the manifest for now; the handler refuses every caller that is not an app with `no_access` 403; sinceRevision gives `{v, revision, unchanged:true}`).
-- Person read: `overview_get`, `identities_view`, `topology_get` (nodes and edges from the own tables; `contacts` and `access` layers answer `unavailable`; agents and apps get `no_access` 403; beyond 3000 nodes or 10000 edges `topology_too_large` 503), `reviews_list`, `review_get`. Person write: `team_set`, `person_set`, `members_set`, `agent_set`, `review_record` (idempotency required; `snapshot_stale` 409), `review_dismiss`, `review_policy_set`. Person destructive (held): `team_delete`, `person_delete`.
+- App read: `directory_feed` (audience `agent` in the manifest for now; the handler answers only an app caller whose VERIFIED `Caller.product` is in `FEED_READERS` (`rules`, `knowledge`) and whose `Caller.listed` is true; an app with no verified product or not listed gets `caller_unverified` 403, another product and every agent or person `no_access` 403; sinceRevision gives `{v, revision, unchanged:true}`; `accept: ["agent_handles"]` adds `agents[].handles` from the Connect cache, C373 §3).
+- Person read: `overview_get`, `identities_view`, `proposals_list` and `proposal_send` (contact rules, below), `topology_get` (nodes and edges from the own tables; `contacts` and `access` layers answer `unavailable`; agents and apps get `no_access` 403; beyond 3000 nodes or 10000 edges `topology_too_large` 503), `reviews_list`, `review_get`. Person write: `team_set`, `person_set`, `members_set`, `agent_set`, `review_record` (idempotency required; `snapshot_stale` 409), `review_dismiss`, `review_policy_set`. Person destructive (held): `team_delete`, `person_delete`.
 - **Privacy (since 0.2.1):** the agent reads never return email, handles, tags or agent mode (lean views in `src/lean.ts`; each query selects its columns). `directory_feed` (apps only) carries handles and no email, title or tag.
 
 ## Scopes, hooks and companions
 
 - **Scopes:** None. `needsAgentDirectory: true`; `events.agentsChanged` keeps `fleet_agents` in sync.
 - **Hooks:** `fleet_facts`, phase `context`, order -100, match all products, timeout 1000 ms. Adds `fleet.requester` (with `trust`), `fleet.requester.trust`, `fleet.requester.verified` (the claim's flag; false without a requester), `fleet.requesterTeams` (from the bridge-copied, unverified `tb.onBehalfOf` claim; narrow only), `fleet.agentOwner`, `fleet.agentTeams` (at most 50).
-- **Companion grants it asks for:** `connect.identities_list` (read), used only by the person op `identities_view`. It is never exposed to agents or hooks (C88). Missing Connect gives an `unavailable` note, not an error.
+- **Companion grants it asks for:** `rules.rule_draft_submit` (create) and `rules.draft_status` (read), used only by the person ops `proposal_send` and `proposals_list` and by a 60 s timer that calls `draft_status` only; Governance calls no other Rules operation (`callRules` refuses any other name). The call creates a DRAFT; the owner approves it in Rules, and Governance has no approve path. Payload `{text, rules}` only; the key is the proposal id. If Rules is not deployed or the grant is missing the proposal is `failed` with the code (`no_grant`). Deploy check M-CP-2: Core validates the companion against the deployed Rules manifest; a Rules without `draft_status` (before 0.3.0) fails it (`companion_op_invalid`), so Rules 0.3.0 comes first. Also `connect.identities_list` (read), used by the person op `identities_view` and by the 60 s agent-handles timer (outside calls; the cache goes only to the feed readers with `accept: ["agent_handles"]`). It is never exposed to agents or hooks (C88). Missing Connect gives an `unavailable` note, not an error.
 
 ## Settings, keys and environment
 
@@ -40,33 +40,33 @@ None. No keys and no environment variables.
 
 ## Data
 
-- **Stored:** Migration 0003: `fleet_reviews` (id `rvw_`, subject kind/id and a name snapshot, status requested/done/dismissed, verdict, reason, who asked and why, reviewer, snapshot json (at most 8 KB) and digest, dates) with triggers that refuse any change to a closed review and any delete (`review_append_only`), and `fleet_review_flags`. Migration 0002 adds `kind` (`person` | `outside_agent`), `trust` and `source` (`owner` | `agent`) to `fleet_people`, `trust` to `fleet_agents`, and `fleet_review_policy` (`agent_days` 90, `contact_days` 180). Existing rows become `trusted` / `owner`; the column defaults are the fail-closed values (`unreviewed`, `agent`). Migration 0001: `fleet_teams`, `fleet_people` (name, email, title, status, tags), `fleet_handles`, `fleet_agents` (owner, role, tags, status), `fleet_members`, `fleet_meta` (revision counter bumped on every change). Channel identities from Connect are read live and not stored.
-- **Never stored:** Connect identities.
+- **Stored:** Migration 0006 rebuilds `fleet_proposals` to allow the template `hold_outward_for_team` (rows kept). Migration 0005: `fleet_agent_handles` (agent id, canonical handle; the Connect cache for the feed) and `fleet_meta.agent_handles_at`. Migration 0004: `fleet_proposals` (id `prp_`, template, `params_json` (one agent id, one canonical handle or one team id), the generated `text` and `rules_json`, `rules_draft_id`, status sent/held/failed with CHECKs that tie `sent` to a draft id and `failed` to an error code, `error`, `rules_status` pending/approved/rejected/gone/unknown, review id, dates). Migration 0003: `fleet_reviews` (id `rvw_`, subject kind/id and a name snapshot, status requested/done/dismissed, verdict, reason, who asked and why, reviewer, snapshot json (at most 8 KB) and digest, dates) with triggers that refuse any change to a closed review and any delete (`review_append_only`), and `fleet_review_flags`. Migration 0002 adds `kind` (`person` | `outside_agent`), `trust` and `source` (`owner` | `agent`) to `fleet_people`, `trust` to `fleet_agents`, and `fleet_review_policy` (`agent_days` 90, `contact_days` 180). Existing rows become `trusted` / `owner`; the column defaults are the fail-closed values (`unreviewed`, `agent`). Migration 0001: `fleet_teams`, `fleet_people` (name, email, title, status, tags), `fleet_handles`, `fleet_agents` (owner, role, tags, status), `fleet_members`, `fleet_meta` (revision counter bumped on every change). Channel identities from Connect are read live for the Identities page; only the agents' canonical handles are cached (0005) for the feed.
+- **Never stored:** Connect identities other than those handles (no channel account data, no messages).
 
 ## External calls and background work
 
 - **External:** None.
-- **Background:** None.
+- **Background:** a 60 s timer (`onStart`, stopped in `onStop`) asks Rules for the status of sent drafts that are not decided (`draft_status`, read). It never submits a draft. A second 60 s timer (first run 5 s after start) reads Connect `identities_list` (all pages) and replaces the agent-handles cache only with a complete answer; a change bumps the feed revision; Connect down, a hold or a partial read keeps the last cache.
 
 ## Person UI
 
-Teams, Topology, Trust reviews, People, Agents, Identities, Holds (`src/ui/App.tsx`, `src/ui/reviews.tsx`, `src/ui/topology.tsx`, shared pieces in `src/ui/common.tsx`). The tab badge counts open requests and what is due. Teams stays the launch page (`ui.launchPath` `/`); Topology becomes the launch page when it has its network picture (G-10). `ui.configurePath` is `/` here and `/configure` in the other apps.
+Teams, Topology, Trust reviews, Contact rules (`src/ui/contact-rules.tsx`), People, Agents, Identities, Holds (`src/ui/App.tsx`, `src/ui/reviews.tsx`, `src/ui/topology.tsx`, shared pieces in `src/ui/common.tsx`). The tab badge counts open requests and what is due. Teams stays the launch page (`ui.launchPath` `/`); Topology becomes the launch page when it has its network picture (G-10). `ui.configurePath` is `/` here and `/configure` in the other apps.
 
 ## Requirements and runtime hints
 
-Connect is optional (Identities page only). Rules reads a versioned directory feed; release order on qa1 matters (Rules first).
+Connect is optional (Identities page and the agent handles in the feed). Rules and Knowledge read a versioned directory feed; release order on qa1 matters (Rules first). Updates from 0.2.3 and every 0.2.x (`upgradeFrom` default `*`); migrations 0005 and 0006 are forward-only.
 
 Port 8080. 0.25 cpu, 256 MB. Data 1 GB plus backup 2 GB. Backup cron `30 2 * * *`, retain 7. Publisher name "Teal Brick opt2" (inconsistent; fix).
 
 ## Pinned packages
 
-miniapp-sdk 0.1.25, manifest 0.1.19, conformance 0.1.18, ui 0.3.0.
+miniapp-sdk 0.1.40, manifest 0.1.31, conformance 0.1.30, ui 0.3.0.
 
-All `@opt2-tealbrick/*` pins use dist-host tarball URLs. Upgrade safety (SDK 0.1.25: pre-update snapshot, migration lock, failed mode) is in this app since 0.2.0, which migrates with migration 0002.
+All `@opt2-tealbrick/*` pins use dist-host tarball URLs. Upgrade safety (SDK 0.1.25+: pre-update snapshot, migration lock, failed mode) is in this app since 0.2.0, which migrates with migration 0002.
 
 ## Known gaps
 
-- Governance is built in sprints (DESIGN §8). 0.2.0 (S1) added the name, trust state and the feed; 0.2.1 (S2) the reviews and the lean agent views. 0.2.2 (S3a) added the topology from the own data (it shipped as 0.2.3: 0.2.2 did not start, QA-GOV022-1); its contacts and access layers are `unavailable` and the page has no network picture until the ui kit has `TopologyGraph` (G-10). Contact rules (S4a, now planned as 0.2.4) are not built; step 3 of the review ("Contact rule") says so. The snapshot has no access data (G-2) and no Connect contacts (G-5).
+- Governance is built in sprints (DESIGN §8). 0.2.0 (S1) added the name, trust state and the feed; 0.2.1 (S2) the reviews and the lean agent views. 0.2.2 (S3a) added the topology from the own data (it shipped as 0.2.3: 0.2.2 did not start, QA-GOV022-1); its contacts and access layers are `unavailable` and the page has no network picture until the ui kit has `TopologyGraph` (G-10). 0.2.4 (S4a, never released alone) added the contact-rule proposals (four templates, a draft in Rules); 0.3.0 (C373) ships it with the team template, the verified-caller feed guard, agent handles in the feed and person-only owners. Recipient rules wait for G-6; `hold_outward_for_trust` waits for Rules 0.5.0 `callerTrust`. Proposals are not pruned yet (the design says after 2 years). The snapshot has no access data (G-2) and no Connect contacts (G-5).
 - Review requests: 20 open per agent, one open per (requester, subject), 100 open system requests. A request about an unknown handle keeps the handle in the row and creates no entry; the entry is created when the owner records a verdict. Reviews are append-only and have no retention (evidence); at the design size that is about 10,000 rows (under 100 MB) a year.
 - Rollback of a failed 0.2.0 update is by the SDK pre-update snapshot (E3, restores the data), not by a down migration; migration 0002 is forward-only.
 - Revision after a restore: a restore from a backup brings back an older `revision`. A reader that holds a higher one must re-pull the full feed after a restore (Rules treats an unequal revision as changed; `sinceRevision` only answers `unchanged` on equality).

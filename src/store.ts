@@ -333,6 +333,9 @@ export function setPerson(db: Db, input: PersonInput, now = Date.now()): Person 
     let id = input.id;
     if (id) {
       const old = db.prepare("SELECT * FROM fleet_people WHERE id = ?").get(id) ?? fail("person_not_found", "no person with this id", 404);
+      // C373e: a person who owns workspace agents cannot become an outside agent (the owner_not_person rule of agent_set)
+      if (input.kind && input.kind !== "person" && String(old.kind) === "person" && db.prepare("SELECT 1 FROM fleet_agents WHERE owner_id = ? AND status <> 'removed'").get(id))
+        fail("person_owns_agents", "this person owns workspace agents; give the agents another owner first", 409);
       db.prepare("UPDATE fleet_people SET name = ?, email = ?, title = ?, status = ?, kind = ?, tags = ?, updated_at = ? WHERE id = ?").run(
         name,
         input.email === undefined ? old.email : input.email,
@@ -408,7 +411,13 @@ export function setMembers(
 export function setAgent(db: Db, input: { agent: string; owner?: string | null; role?: string; tags?: string[] }, now = Date.now()): Agent {
   return db.transaction(() => {
     const old = db.prepare("SELECT * FROM fleet_agents WHERE id = ?").get(input.agent) ?? fail("agent_not_found", "no workspace agent with this id", 404);
-    if (input.owner && !db.prepare("SELECT 1 FROM fleet_people WHERE id = ?").get(input.owner)) fail("person_not_found", "the owner is not in the directory", 404);
+    // only a NEW owner is checked: an unchanged legacy owner (set before 0.3.0) does not block a role or tag edit
+    if (input.owner && input.owner !== old.owner_id) {
+      const who = db.prepare("SELECT kind FROM fleet_people WHERE id = ?").get(input.owner) ?? fail("person_not_found", "the owner is not in the directory", 404);
+      // C373e: an agent's owner is a person; an outside agent cannot own a workspace agent. Rows set before 0.3.0 stay as
+      // they are (the feed still carries their owner id; readers check contacts[].kind).
+      if (who.kind !== "person") fail("owner_not_person", "the owner must be a person, not an outside agent", 400);
+    }
     db.prepare("UPDATE fleet_agents SET owner_id = ?, role = ?, tags = ?, updated_at = ? WHERE id = ?").run(
       input.owner === undefined ? old.owner_id : input.owner,
       input.role ?? String(old.role),
