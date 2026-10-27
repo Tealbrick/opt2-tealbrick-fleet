@@ -165,7 +165,7 @@ test("contract: every template, with every directory subject, is a draft Rules 0
   ];
   assert.deepEqual([...new Set(subjects.map((x) => x[0]))].sort(), [...p.TEMPLATES].sort(), "every template is covered");
   // a team with the longest name and control characters still fits Rules' limits (title <= 120, reason <= 280, text <= 2000)
-  const long = store.setTeam(db, { name: `Team‮\u0007 ${"y".repeat(300)}`.slice(0, 200) });
+  const long = store.setTeam(db, { name: `Team\u202e\u0007 ${"y".repeat(300)}`.slice(0, 200) });
   subjects.push(["hold_outward_for_team", { team: long.id }]);
   for (const [template, params] of subjects) {
     const payload = p.buildPayload(template, p.parseParams(db, template, params).subject);
