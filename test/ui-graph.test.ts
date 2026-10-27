@@ -314,8 +314,8 @@ describe("AccessView", () => {
     assert.deepEqual(
       [...front.querySelectorAll("tbody tr")].map((tr) => [...tr.querySelectorAll("td")].map((td) => text(td))),
       [
-        ["Connect", "CRU", "free", "first_contact, money", "1", "Active"],
-        ["Knowledge", "CR", "free", "None", "0", "Active"],
+        ["Connect", "CRU", "free", "first contact, money", "1", "Active"],
+        ["Knowledge", "CR", "free", "None", "All", "Active"],
       ],
     );
     assert.equal(front.querySelector("abbr")?.getAttribute("title"), "Create, read, update");
@@ -323,7 +323,7 @@ describe("AccessView", () => {
     assert.match(words(scout), /con_01J0000000000000000000PAIR · Pairing Revoked/);
     assert.deepEqual(
       [...(scout?.querySelectorAll("tbody tr td") ?? [])].map((td) => text(td)),
-      ["Knowledge", "R", "bound", "None", "0", "Paused"],
+      ["Knowledge", "R", "bound", "None", "All", "Paused"],
     );
     // fire-on-bad: one agent's card never shows another agent's handle; an unknown agent is not shown at all
     assert.doesNotMatch(words(scout), /npub1frontdesk/);
@@ -343,7 +343,7 @@ describe("AccessView", () => {
     assert.equal(byApp.getAttribute("aria-pressed"), "true");
     const conn = m.host.querySelector('[aria-label="App Connect"]');
     assert.ok(conn);
-    assert.match(words(conn), /Agents that can use it.*Front desk …00000A CRU free first_contact, money 1 Active/);
+    assert.match(words(conn), /Agents that can use it.*Front desk …00000A CRU free first contact, money 1 Active/);
     assert.match(words(conn), /Apps that can call it.*Knowledge R 2/);
     const kn = m.host.querySelector('[aria-label="App Knowledge"]');
     assert.match(words(kn), /No other app can call it\./);
@@ -371,6 +371,25 @@ describe("AccessView", () => {
       ["Agent Front desk"],
     );
     await m.unmount();
+  });
+
+  it("held actions are words, never ids; an unknown family still shows; a shortened copy and a note are said", async () => {
+    const slice: SliceTopology = {
+      ...SLICE(),
+      edges: [{ agent: FRONT, ins: "ins_cn", product: "connect", crud: ["read"], mode: "free", held: ["first_contact", "profile_change", "live_call", "destructive", "money", "outward", "identity", "public_link", "brand_new_family"] }],
+      companions: [],
+      connections: [],
+      truncated: true,
+    };
+    const m = await mount(h(access.AccessView, { slice, agents: AGENTS, identities: [] }));
+    assert.match(words(m.host.querySelector('[aria-label="Agent Front desk"]')), /brand new family, destructive, first contact, identity, live call, money, outward, profile change, public link/);
+    assert.doesNotMatch(text(m.host), /first_contact|profile_change|live_call|public_link|brand_new_family/);
+    assert.ok([...m.host.querySelectorAll('[role="status"]')].some((n) => text(n) === "The workspace sent a shortened copy of access: some access is not shown."));
+    await m.unmount();
+    // the note of access_get replaces the default sentence when there is no picture
+    const none = await mount(h(access.AccessView, { slice: null, agents: [], identities: [], note: "Turn on 'See who has access' for Governance in the Portal (app settings) to show this." }));
+    assert.equal(text(none.host.querySelector('[role="status"]')), "App access is not shown. Turn on 'See who has access' for Governance in the Portal (app settings) to show this.");
+    await none.unmount();
   });
 
   it("names and handles are text, never markup", async () => {

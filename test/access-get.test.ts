@@ -252,13 +252,12 @@ test("the agent list has not arrived yet: unavailable, never a guess of whose gr
   assert.equal(empty.status, "available");
 });
 
-test("a truncated picture and a Connect that cannot answer are said in the note; the picture still shows", async () => {
+test("a truncated picture is flagged on the picture; a Connect that cannot answer is said in the note; the picture still shows", async () => {
   const db = migratedDb();
   rememberSliceAgents(AGENTS);
   const out = await get(ctxOf(db, { topology: compact({ edges: [[0, 0, "r", "f", 0, 0, 0], [9, 0, "r", "f", 0, 0, 0]] }), connectDown: true }));
   assert.equal(out.status, "available");
   assert.equal(out.topology?.truncated, true);
-  assert.match(out.note, /shortened copy/);
   assert.match(out.note, /Channel identities are not shown\. Deploy Connect/);
   assert.deepEqual(out.identities, []);
   assert.equal(validateAgainstSchema(op.output, out as unknown as Json).ok, true);

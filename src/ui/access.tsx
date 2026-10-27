@@ -8,6 +8,7 @@ import { Card, EmptyState, Field, NativeSelect, Notice, Segmented, Table, Tag, T
 import { useMemo, useState } from "react";
 import { type AccessView as AccessRows, type AgentAccess, type AppAccess, accessView, filterAccess } from "./access-rows.ts";
 import type { AccessAgent, ChannelIdentity, SliceTopology } from "./access-types.ts";
+import { holdWords } from "./hold-words.ts";
 
 export type { AccessAgent, ChannelIdentity, SliceTopology } from "./access-types.ts";
 
@@ -20,6 +21,8 @@ export interface AccessProps {
   identities: readonly ChannelIdentity[];
   /** where "Change access in Portal" goes; no link when absent */
   portalHref?: string;
+  /** why there is no picture (the access_get note), shown instead of the default sentence; ignored when there is a picture */
+  note?: string;
 }
 
 type Mode = "agent" | "app";
@@ -33,7 +36,9 @@ const Id = ({ id }: { id: string }) => (
   </span>
 );
 const METHOD = { key: "Key", pairing: "Pairing" } as const;
-const held = (families: readonly string[]) => (families.length === 0 ? "None" : families.join(", "));
+const held = holdWords;
+/** How many workflow ops a grant lists: none listed means all of the app's ops. */
+const ops = (n: number) => (n === 0 ? "All" : String(n));
 const State = ({ paused }: { paused: boolean }) => (paused ? <Tag status="idle">Paused</Tag> : <Tag status="live">Active</Tag>);
 const Letters = ({ letters, words }: { letters: string; words: string }) => (
   <abbr className="mono" title={words}>
@@ -119,7 +124,7 @@ function AgentCard({ a }: { a: AgentAccess }) {
                 </td>
                 <td>{r.mode}</td>
                 <td>{held(r.held)}</td>
-                <td className="num">{r.workflowOps}</td>
+                <td className="num">{ops(r.workflowOps)}</td>
                 <td>
                   <State paused={r.paused} />
                 </td>
@@ -169,7 +174,7 @@ function AppCard({ a }: { a: AppAccess }) {
                 </td>
                 <td>{r.mode}</td>
                 <td>{held(r.held)}</td>
-                <td className="num">{r.workflowOps}</td>
+                <td className="num">{ops(r.workflowOps)}</td>
                 <td>
                   <State paused={r.paused} />
                 </td>
@@ -199,7 +204,7 @@ function AppCard({ a }: { a: AppAccess }) {
                 <td>
                   <Letters letters={c.letters} words={c.words} />
                 </td>
-                <td className="num">{c.ops}</td>
+                <td className="num">{ops(c.ops)}</td>
               </tr>
             ))}
           </tbody>
@@ -210,7 +215,7 @@ function AppCard({ a }: { a: AppAccess }) {
 }
 
 /** The grant view. */
-export function AccessView({ slice, agents, identities, portalHref }: AccessProps) {
+export function AccessView({ slice, agents, identities, portalHref, note }: AccessProps) {
   const [mode, setMode] = useState<Mode>("agent");
   const [agent, setAgent] = useState(ALL);
   const [app, setApp] = useState(ALL);
@@ -220,8 +225,9 @@ export function AccessView({ slice, agents, identities, portalHref }: AccessProp
     return (
       <section className="tb-stack" aria-label="Access">
         <Notice tone="needs-you" role="status">
-          App access is not shown. The copy of access from Portal is not available to apps yet. Change access in Portal.
+          {note ? `App access is not shown. ${note}` : "App access is not shown. The copy of access from Portal is not available to apps yet. Change access in Portal."}
         </Notice>
+        <PortalLine href={portalHref} />
       </section>
     );
   if (view.agents.length === 0 && view.apps.length === 0)
@@ -256,6 +262,11 @@ export function AccessView({ slice, agents, identities, portalHref }: AccessProp
           <NativeSelect value={appF} onChange={(e) => setApp(e.currentTarget.value)} options={[{ value: ALL, label: "All apps" }, ...view.apps.map((a) => ({ value: a.ins, label: a.name }))]} />
         </Field>
       </div>
+      {slice?.truncated ? (
+        <Notice tone="needs-you" role="status">
+          The workspace sent a shortened copy of access: some access is not shown.
+        </Notice>
+      ) : null}
       {view.leftOut > 0 ? (
         <Notice tone="neutral" role="status">
           {`${view.leftOut} ${view.leftOut === 1 ? "entry is" : "entries are"} left out: ${view.leftOut === 1 ? "it names" : "they name"} an agent or app this page does not know.`}

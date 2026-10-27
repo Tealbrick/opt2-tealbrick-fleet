@@ -44,7 +44,6 @@ export async function accessGet(db: Db, ctx: OpContext, now = Date.now()): Promi
     .map((i) => ({ agent: i.agent.id, channel: i.channel, handle: i.identity }))
     .slice(0, ACCESS_CAPS.identities);
   const notes: string[] = [];
-  if (decoded.truncated) notes.push("The workspace sent a shortened copy: some access is not shown.");
   if (ident.connect.status === "unavailable") notes.push(`Channel identities are not shown. ${ident.connect.note}`);
   else if (ident.connect.note) notes.push(ident.connect.note);
   return { status: "available", note: notes.join(" "), topology: decoded, agents: agents.slice(0, ACCESS_CAPS.agents).map((a) => ({ id: a.id, name: a.name })), identities, generatedAt };
