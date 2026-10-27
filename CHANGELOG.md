@@ -2,7 +2,49 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
-## 0.2.4 - Unreleased
+## 0.3.0 - Unreleased
+
+Governance ↔ Rules interface (C373, agreed with the Rules lead 2026-10-27: `RULES-INTERFACE.md`), C373e. This release also
+carries everything in 0.2.4 below (S4a contact-rule proposals), which was never released on its own. Updates from 0.2.3
+(stable) and every 0.2.x: migrations 0005 and 0006 are forward-only and keep all data.
+
+### Added
+- `directory_feed` input `accept: string[]` (optional, at most 8, unknown values ignored). With `"agent_handles"` every
+  `agents[]` entry carries `handles`: the canonical handles Connect issued to the agent (`normalizeHandle` forms that pass
+  the feed handle pattern), sorted, at most 16, `[]` when none. Without it the answer is byte-for-byte the 0.2.x shape.
+  The derived schema `test/contracts/fleet.directory_feed.1.agent_handles.schema.json` (v1 plus that one optional field)
+  is the copy Rules keeps.
+- Agent-handles cache (migration 0005 `fleet_agent_handles`): a 60 s timer outside every call (first run 5 s after
+  start) reads Connect `identities_list` (all pages, at most 200) with the existing companion grant and replaces the
+  cache only with a complete answer. A change moves the feed revision. Connect down, no grant, a hold, a malformed page
+  or paging that does not finish keeps the last cache (never cleared on an error); one warning per reason. Neither the
+  feed nor the `fleet_facts` hook calls Connect.
+- Contact-rule template `hold_outward_for_team` (params `{team}`: a team id in the directory, 1-64 characters):
+  Rules match `{callerTeams: [team], effects: ["outward"]}`, outcome hold (hold only). Migration 0006 rebuilds
+  `fleet_proposals` with the widened template CHECK (rows and indexes kept). The Contact rules page lists the teams with
+  one "Hold outward actions" button each; nothing is sent without that click.
+- Contract test against Rules 0.4.1: the byte copy `test/contracts/rules.0.4.1.manifest.json` (Rules `5842ae4`) replaces
+  the 0.3.0 copy. Every template, with every kind of directory subject, validates against its `rule_draft_submit` input
+  schema and a mirror of its `specProblem` writer checks; mutated team drafts are refused (fire on bad).
+
+### Changed
+- `directory_feed` guard (C243 / fleet#11 interim allow-list replaced, C373 §2, C373e): only an app caller whose VERIFIED
+  `Caller.product` (signed grant `prd`, else the signed slice `companionCallers`) is in `FEED_READERS` = `rules`,
+  `knowledge`, and whose `Caller.listed` is true, reads the feed. An app with no verified product, or one that is not
+  listed in the current slice, gets `caller_unverified` 403 (retryable). Before, an app with no product could read the
+  feed. Another product gets `no_access` 403; agents and persons stay `no_access`.
+- `agent_set` refuses an owner whose directory entry is not a person (an outside agent) with 400 `owner_not_person`.
+  Rows set before keep their owner; the feed still carries the owner id (readers check `contacts[].kind`). The owner
+  picker lists persons only (plus the current owner).
+- Pins: miniapp-sdk 0.1.25 → 0.1.40, manifest 0.1.19 → 0.1.31, conformance 0.1.18 → 0.1.30 (ui 0.3.0 unchanged); no code
+  change was needed for the SDK changes in between. CI template ci-v9.20, Node 24.22.1 base image, strict gates (main).
+- Companion `connect` purpose names the feed use. Version 0.3.0 in `package.json` and the manifest.
+
+### Not in this release
+- `hold_outward_for_trust` (needs Rules 0.5.0 `match.callerTrust`, C373 §4).
+- miniapp-sdk 0.1.41 / manifest 0.1.32: merged in the SDK repo but not released on the dist host when this was built.
+
+## 0.2.4 - Not released (shipped in 0.3.0)
 
 Governance, sprint S4a (contact-rule proposals, "now" templates). Decision C166; refs C230, C88.
 
@@ -37,7 +79,7 @@ Governance, sprint S4a (contact-rule proposals, "now" templates). Decision C166;
 - Deviations from the draft manifest: `proposal_send` takes `params: {agent | handle}` (not `agents[]`, `handles[]`, `team`); `template` has four values (no `hold_outward_for_team`); the output adds `duplicate`; a proposal adds `params`, `rulesStatus` and `decidedAt`; `error` is the error code (at most 80 characters). `status` keeps `sent`, `held`, `failed` and describes Governance's own call; what Rules decided is `rulesStatus`.
 - The launch page is still Teams.
 
-## 0.2.3 - Unreleased
+## 0.2.3 - 2026-10-19
 
 Fix release for 0.2.2, which never started (QA-GOV022-1, S2: qa1 rolled back to 0.2.1 by itself). No new function; 0.2.2's Topology (S3a) and the directory_feed allow-list (fleet#11) ship here.
 
