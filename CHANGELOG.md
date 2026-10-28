@@ -2,6 +2,13 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
+## 0.3.2 - 2026-10-28
+
+- `requires.bridge` 0.2.12 (new). The bridge validates each app manifest; bridge 0.2.11 (manifest 0.1.32) refuses
+  `needsTopology`, so 0.3.1 was rolled back on a 0.2.11 bridge (`schema_invalid`, DEV qa1 2026-10-28). Bridge 0.2.12
+  (manifest 0.1.35) accepts it, and Core now says "Update the bridge to 0.2.12 or later first" instead of trying.
+  Same code as 0.3.1; 0.3.1 must not go to stable.
+
 ## 0.3.1 - 2026-10-28
 - QA-C373-GV-1 (X-10): owner-typed text (team name, description and tags; person name, title, org, relationship and tags; agent role and tags) is cleaned like agent text: control, bidi and format characters are removed on write. A name that is only invisible characters is refused (`input_invalid`). Rows stored before 0.3.1 stay as they are.
 
