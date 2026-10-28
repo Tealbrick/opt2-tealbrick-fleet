@@ -31,6 +31,8 @@ into the app. Updates from 0.3.0 and every 0.2.x: migration 0007 is forward-only
   `review_get` and `review_record`).
 
 ### Changed
+- Handles: manifest 0.1.34+ `normalizeHandle` also knows `email:` handles (C373 recipients). Governance keeps to buzz, slack
+  and telegram (`fleetHandle`): `person_set`, the context hook, reviews and proposals refuse an email handle as before.
 - An OUTSIDE AGENT the owner adds starts `unreviewed` (Coordinator rule, C373 Q13; `defaultTrust(source, kind)`); a person the
   owner adds still starts `trusted`.
 - Graph: wire labels sit on their own wire and move ALONG it near a node with several wires (no overlap with cards or
