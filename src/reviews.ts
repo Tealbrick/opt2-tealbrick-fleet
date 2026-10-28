@@ -12,10 +12,10 @@
 // 0 and `source` says `directory_only` (L18: no invented data). The digest covers exactly that, plus the email, the id
 // of the last verdict and the subject id: a second verdict made from an older picture is `snapshot_stale`.
 import { createHash } from "node:crypto";
-import { canonicalize, normalizeHandle, ulid } from "@opt2-tealbrick/manifest";
+import { canonicalize, ulid } from "@opt2-tealbrick/manifest";
 import type { Db, Json } from "@opt2-tealbrick/miniapp-sdk";
 import { type Shown, sameShown } from "./shown.ts";
-import { bump, fail, MAX_TEAMS_PER_ANSWER, setPerson } from "./store.ts";
+import { bump, fail, fleetHandle, MAX_TEAMS_PER_ANSWER, setPerson } from "./store.ts";
 import { cleanText } from "./text.ts";
 import { REVIEW_DAYS_DEFAULT, type Trust } from "./trust.ts";
 
@@ -186,7 +186,7 @@ function contactByHandle(db: Db, handle: string): Subject | null {
 function resolveSubject(db: Db, q: { kind: SubjectKind; id?: string; handle?: string }): Subject | null {
   if (q.id) return subjectOf(db, q.kind, q.id);
   if (q.handle === undefined || q.kind === "agent") return null;
-  const h = normalizeHandle(q.handle);
+  const h = fleetHandle(q.handle);
   return h ? (contactByHandle(db, h) ?? pendingSubject(db, h)) : null;
 }
 
@@ -285,7 +285,7 @@ export function requestReview(db: Db, by: Requester & { id: string }, input: Req
       subject = subjectOf(db, kind, id);
       if (!subject) return fail("subject_not_found", "no such entry in the directory", 404);
     } else if (handle !== undefined) {
-      const h = normalizeHandle(handle);
+      const h = fleetHandle(handle);
       if (!h) return fail("handle_invalid", "not a buzz, slack or telegram handle", 400);
       // a known handle and an unknown one answer the same way (no way to find out which handles are in the directory)
       subject = contactByHandle(db, h) ?? {

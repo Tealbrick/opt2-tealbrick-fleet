@@ -6,6 +6,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { type AppDefinition, defineApp, type HandlerSpec, type HookHandler, type SdkAppDefinition } from "@opt2-tealbrick/miniapp-sdk";
 import {
+  type AccessGetInput,
+  type AccessGetOutput,
   type AgentSetInput,
   type AgentSetOutput,
   type DirectoryFeedInput,
@@ -53,7 +55,9 @@ import {
   type TopologyGetInput,
   type TopologyGetOutput,
 } from "#kit";
+import { accessGet, assertAccessCaller } from "./access.ts";
 import { startAgentHandlesTimer } from "./agent-handles.ts";
+import { readContacts } from "./contacts.ts";
 import { factsAnswer } from "./facts.ts";
 import { assertFeedCaller, directoryFeed } from "./feed.ts";
 import { identitiesView } from "./identities.ts";
@@ -152,7 +156,17 @@ export const handlers = {
     // Owner only (person op): the bridge never offers it to agents, and the handler refuses every caller that is not a person.
     async run(input, ctx) {
       assertTopologyCaller(ctx.caller);
-      return topologyGet(ctx.db, input, (msg, fields) => ctx.log.warn(msg, fields));
+      // the contacts layer is read from Connect on demand (companion `contacts_list`), only when it was asked for; nothing is cached
+      const asked = input.layers ?? ["org", "contacts", "access"];
+      const contacts = asked.includes("contacts") ? await readContacts(ctx.callApp?.bind(ctx)) : undefined;
+      return topologyGet(ctx.db, input, (msg, fields) => ctx.log.warn(msg, fields), contacts);
+    },
+  }),
+  [OP.accessGet]: op<AccessGetInput, AccessGetOutput>({
+    // Owner only (person op), read only, display only (G-2). C88: never exposed to agents. Reads the slice's grant picture on every call.
+    async run(_input, ctx) {
+      assertAccessCaller(ctx.caller);
+      return accessGet(ctx.db, ctx);
     },
   }),
   [OP.proposalsList]: op<ProposalsListInput, ProposalsListOutput>({

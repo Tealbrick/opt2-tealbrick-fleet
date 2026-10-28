@@ -6,8 +6,10 @@ import { callOp, useSession } from "@opt2-tealbrick/miniapp-sdk/client";
 import { AppShell, appArt, appColour, Button, Card, EmptyState, Field, Notice, Select, Swatch, Tag, Textarea, TextInput } from "@opt2-tealbrick/ui";
 import { useCallback, useState } from "react";
 import type { IdentitiesViewOutput, MembersSetInput, OverviewGetOutput, PersonSetInput, TeamSetInput } from "#kit";
+import { AccessPage } from "./access-page.tsx";
 import { changeError, EditDialog, LoadFailed, Loading, PageHead, useLoad } from "./common.tsx";
 import { ContactRulesPage } from "./contact-rules.tsx";
+import { OutsideAgentDialog } from "./outside-agent.tsx";
 import { loadReviews, ReviewsPage, reviewBadge, TrustTag } from "./reviews.tsx";
 import { HoldsPage, portalHref, useHoldList, useNav } from "./standard.tsx";
 import { TopologyPage } from "./topology.tsx";
@@ -24,10 +26,11 @@ type Role = "member" | "lead";
 type Reload = () => Promise<void>;
 
 /** Shell page id → path under the base `/a/fleet/`. Teams is the launch page and the configure page (manifest `ui.launchPath` = `ui.configurePath` = "/"). */
-const ROUTES = { teams: "", topology: "topology", reviews: "reviews", rules: "contact-rules", people: "people", agents: "agents", identities: "identities", holds: "holds" } as const;
+const ROUTES = { teams: "", topology: "topology", access: "access", reviews: "reviews", rules: "contact-rules", people: "people", agents: "agents", identities: "identities", holds: "holds" } as const;
 const PAGES = [
   { id: "teams", label: "Teams" },
   { id: "topology", label: "Topology" },
+  { id: "access", label: "Access" },
   { id: "reviews", label: "Trust reviews" },
   { id: "rules", label: "Contact rules" },
   { id: "people", label: "People" },
@@ -234,8 +237,15 @@ function PersonDialog({ person, onClose, reload }: { person: Person | "new"; onC
   const [status, setStatus] = useState<"active" | "departed">(p?.status ?? "active");
   const [tags, setTags] = useState(p?.tags.join(", ") ?? "");
   const [handles, setHandles] = useState(p?.handles.join("\n") ?? "");
+  const [org, setOrg] = useState(p?.org ?? "");
+  const [relationship, setRelationship] = useState(p?.relationship ?? "");
+  const outside = p?.kind === "outside_agent";
   const save = async () => {
     const input: PersonSetInput = { name, email: email.trim() || null, title, status, tags: csv(tags), handles: csv(handles) };
+    if (outside) {
+      input.org = org;
+      input.relationship = relationship;
+    }
     if (p) input.id = p.id;
     await callOp("person_set", input);
     await reload();
@@ -251,6 +261,16 @@ function PersonDialog({ person, onClose, reload }: { person: Person | "new"; onC
       <Field label="Title" hint="Optional, for example Support lead.">
         <TextInput value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} />
       </Field>
+      {outside ? (
+        <>
+          <Field label="Organisation" hint="Optional, for example Acme Ltd.">
+            <TextInput value={org} maxLength={120} onChange={(e) => setOrg(e.target.value)} />
+          </Field>
+          <Field label="Relationship" hint="Optional, for example Supplier or Partner.">
+            <TextInput value={relationship} maxLength={120} onChange={(e) => setRelationship(e.target.value)} />
+          </Field>
+        </>
+      ) : null}
       <Field label="Status" hint="A departed person keeps the entry but gives no team facts.">
         <Select
           options={[
@@ -273,6 +293,7 @@ function PersonDialog({ person, onClose, reload }: { person: Person | "new"; onC
 
 function People({ dir, reload }: { dir: Dir; reload: Reload }) {
   const [edit, setEdit] = useState<Person | "new" | null>(null);
+  const [addOutside, setAddOutside] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const remove = (p: Person) => async () => {
     await callOp("person_delete", { id: p.id });
@@ -284,9 +305,12 @@ function People({ dir, reload }: { dir: Dir; reload: Reload }) {
         title="People"
         lede="People are directory entries, not sign-ins. Their channel handles turn a message sender into a known person."
         action={
-          <Button variant="primary" onClick={() => setEdit("new")}>
-            New person
-          </Button>
+          <span className="tb-row">
+            <Button onClick={() => setAddOutside(true)}>Add outside agent</Button>
+            <Button variant="primary" onClick={() => setEdit("new")}>
+              New person
+            </Button>
+          </span>
         }
       />
       {failure ? (
@@ -315,6 +339,7 @@ function People({ dir, reload }: { dir: Dir; reload: Reload }) {
                   ))}
                 </p>
               ) : null}
+              {p.org || p.relationship ? <p>{[p.org, p.relationship].filter(Boolean).join(" · ")}</p> : null}
               {p.handles.length ? (
                 <span className="meta mono handles">
                   {p.handles.map((h, i) => (
@@ -340,6 +365,7 @@ function People({ dir, reload }: { dir: Dir; reload: Reload }) {
         </div>
       )}
       {edit ? <PersonDialog person={edit} onClose={() => setEdit(null)} reload={reload} /> : null}
+      {addOutside ? <OutsideAgentDialog onClose={() => setAddOutside(false)} reload={reload} /> : null}
     </section>
   );
 }
@@ -485,6 +511,8 @@ export function App() {
   const badge = useLoad(loadBadge);
   const [notice, setNotice] = useState<string | null>(null);
   const [portal] = useState(portalHref);
+  // "./" = the Portal origin is not known (no trusted referrer): then there is no link to show
+  const portalLink = portal === "./" ? undefined : portal;
   const pages = PAGES.map((p) => (p.id === "holds" ? { ...p, badge: holds.holds?.length || null } : p.id === "reviews" ? { ...p, badge: reviewBadge(badge.data) } : p));
   return (
     <AppShell
@@ -526,7 +554,9 @@ export function App() {
       {!signedIn ? null : nav.page === "holds" ? (
         <HoldsPage list={holds} only={nav.hold} empty="No calls wait for your approval." />
       ) : nav.page === "topology" ? (
-        <TopologyPage />
+        <TopologyPage portalHref={portalLink} />
+      ) : nav.page === "access" ? (
+        <AccessPage portalHref={portalLink} />
       ) : nav.page === "rules" ? (
         <ContactRulesPage />
       ) : nav.page === "reviews" ? (

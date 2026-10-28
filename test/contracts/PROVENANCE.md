@@ -44,3 +44,11 @@ copy of this file for its contract test (Rules lead, 2026-10-27). It replaces no
 `accept: ["agent_handles"]` still validates against the byte copy above.
 
 - sha256: `9a11657d8ac88580aa76af647118ed57e19798c56498e804b03b4fcd49515823`
+
+## Connect 0.7.11 manifest (companion target: `identities_list`, `contacts_list`)
+
+`connect.0.7.11.manifest.json` is a BYTE COPY of the released Connect manifest. `test/contacts.test.ts` runs
+`validateCompanions` against it and validates the answers it builds against the `contacts_list` output schema.
+
+- Source repo: `Tealbrick/opt2-tealbrick-connect`, tag `v0.7.11` (connect#34 squash), commit `4b064bdcd6f4a57fdef3957f77eb520bd038ce01`, file `tealbrick.manifest.json` (version 0.7.11)
+- sha256: `6579ec25290da62cbd81f85a30388ee888d9f6afe44bbefa44277cc37ad651b1`

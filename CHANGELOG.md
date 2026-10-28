@@ -2,7 +2,48 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
-## 0.3.0 - Unreleased
+## 0.3.1 - 2026-10-28
+- QA-C373-GV-1 (X-10): owner-typed text (team name, description and tags; person name, title, org, relationship and tags; agent role and tags) is cleaned like agent text: control, bidi and format characters are removed on write. A name that is only invisible characters is refused (`input_invalid`). Rows stored before 0.3.1 stay as they are.
+
+Governance sprint C373 WP-D part 2: the grant view, the graph, the contacts layer and the "Add outside agent" form are wired
+into the app. Updates from 0.3.0 and every 0.2.x: migration 0007 is forward-only and keeps all data.
+
+### Added
+- Person op `access_get` (read, owner only, never an agent tool): the grant picture for the Access page and the graph's
+  "App access" layer. Output `{status: available|unavailable|not_consented, note, topology|null, agents[{id,name}],
+  identities[{agent,channel,handle}], generatedAt}`. It reads the COMPACT `SliceTopology` (spec 0.1.87: tuple rows,
+  `held` as a bitmask over the hold families in `HOLD_FAMILIES` order, pinned by a test) with the SDK `ctx.topology()`
+  (SDK 0.1.43), which hands the agent ids of the SAME slice (`agentIds`); agent names come from the directory. Without the
+  owner's consent the answer is `not_consented` with "Turn on 'See who has access' for Governance in the Portal (app
+  settings) to show this." Rows with an index out of range or a wrong shape are dropped and the picture is marked
+  `truncated` (`src/topology-slice.ts`, second line of defence). Decoded on the server into the object form the UI uses.
+- Manifest `needsTopology: true` (with `needsAgentDirectory`, M-TP-1): Core asks the owner for the consent `topology` on
+  update or install.
+- Topology `contacts` layer from Connect `contacts_list` (connect#34; companion `connect` now lists `identities_list` and
+  `contacts_list`, read). Read on demand by `topology_get` only (at most 20 pages of 200, nothing cached or stored): an edge
+  from the agent to the directory entry that owns the handle, or to an outside node named by the handle. Any failure makes
+  the layer `unavailable` with a plain sentence ("Connect does not offer contacts yet; update Connect." for an older Connect).
+- `person_set` input `kind` (`person` | `outside_agent`), `org`, `relationship`; migration 0007 (`fleet_people.org`,
+  `relationship`, owner-side text only: in `overview_get` and `person_set`, in no agent op, hook fact or feed).
+- UI: the Topology page draws the read-only graph with the layers "People and contacts" / "App access", an inspector, and
+  keeps the Relationships table and print view; new Access page after Topology (`access_get`, "Change access in Portal");
+  People > "Add outside agent" (starts unreviewed; its second step offers "Trust", which records a real review verdict through
+  `review_get` and `review_record`).
+
+### Changed
+- Handles: manifest 0.1.34+ `normalizeHandle` also knows `email:` handles (C373 recipients). Governance keeps to buzz, slack
+  and telegram (`fleetHandle`): `person_set`, the context hook, reviews and proposals refuse an email handle as before.
+- An OUTSIDE AGENT the owner adds starts `unreviewed` (Coordinator rule, C373 Q13; `defaultTrust(source, kind)`); a person the
+  owner adds still starts `trusted`.
+- Graph: wire labels sit on their own wire and move ALONG it near a node with several wires (no overlap with cards or
+  each other); column gap 96 to 120 px. Access view: held actions are words ("first contact", "money", "public link"), workflow
+  ops show "All" when the grant lists none, a shortened copy is said.
+- `topology_get` notes: the access layer says it is on the Access page. `access` is still `unavailable` there.
+- Version 0.3.1 in `package.json` and the manifest. Pins: miniapp-sdk 0.1.43, manifest 0.1.35. The Connect contract is a
+  byte copy of the released Connect 0.7.11 manifest (`test/contracts/connect.0.7.11.manifest.json`). A pnpm override
+  gives the conformance suite (0.1.30) manifest 0.1.35 too, so it validates `needsTopology`. Template ci-v9.23.
+
+## 0.3.0 - Released (dev, `08a711a`)
 
 Governance ↔ Rules interface (C373, agreed with the Rules lead 2026-10-27: `RULES-INTERFACE.md`), C373e. This release also
 carries everything in 0.2.4 below (S4a contact-rule proposals), which was never released on its own. Updates from 0.2.3

@@ -2,14 +2,19 @@
 // team, drawn from Governance's OWN data. Person audience only: the answer carries names, kinds, trust, status, roles and
 // owner links, and nothing else. No email, no handle, no tag, no review reason (they stay in `overview_get` and `review_get`).
 //
-// Layers: `org` is built here. `contacts` (the Connect contact book, G-5) and `access` (the Core slice, G-2) do not reach apps
-// yet, so a requested layer answers `unavailable` with a plain note and NO edges; a layer that was not asked for answers
-// `not_requested`. Nothing is invented (L18), nothing is silent (L3). When G-5 or G-2 ships, the layer fills in here.
+// Layers: `org` is built here from Governance's own data. `contacts` (the Connect contact book, G-5, src/contacts.ts) is read
+// ON DEMAND from Connect's `contacts_list` by the handler and passed in; when Connect cannot answer, the layer is `unavailable`
+// with a plain note and NO edges. `access` (the Core slice, G-2) is not part of this answer: it is the person op `access_get`
+// (src/access.ts), so a requested `access` layer answers `unavailable` and a layer not asked for answers `not_requested`.
+// Nothing is invented (L18), nothing is silent (L3). A contact edge runs from an agent to the directory entry that owns the
+// handle, or to an "outside" node named by the handle (only here, only for the owner; C88: never in an agent op, hook or feed).
 //
 // Caps (the draft manifest's maxItems): beyond them the answer is refused with `topology_too_large` (503, transient, like
 // `feed_too_large`), never cut. The caps apply to the answer that would be returned, so `focus` still works on a big directory.
+import { createHash } from "node:crypto";
 import { type Db, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import type { TopologyGetInput, TopologyGetOutput } from "#kit";
+import type { ContactRow, ContactsRead } from "./contacts.ts";
 import { changedSinceReview, reviewDueDates } from "./reviews.ts";
 import { fail } from "./store.ts";
 
@@ -48,17 +53,22 @@ function skip(warn: Warn | undefined, what: string, id: string): void {
 const idFits = (id: string): boolean => id.length >= 1 && id.length <= ID_MAX;
 
 /** The plain sentence that says what the two layers are, for every combination (at most 280 characters). */
-export function sourceNote(contacts: Source, access: Source, leftOut = 0): string {
+export function sourceNote(contacts: Source, access: Source, leftOut = 0, contactsNote = ""): string {
   const parts: string[] = [];
-  if (contacts === "unavailable") parts.push("Channel contacts are not shown: the Connect contact book is not available to apps yet.");
-  if (access === "unavailable") parts.push("App access is not shown: the copy of access from Portal is not available to apps yet. Change access in Portal.");
-  if (parts.length === 0) parts.push(contacts === "not_requested" && access === "not_requested" ? "Only people, agents and teams were asked for." : "Contacts and access are shown.");
+  if (contacts === "unavailable") parts.push(contactsNote ? `Channel contacts are not shown. ${contactsNote}` : "Channel contacts are not shown: the Connect contact book is not available to apps yet.");
+  if (contacts === "available" && contactsNote) parts.push(`Channel contacts are shown. ${contactsNote}`);
+  if (access === "unavailable") parts.push("App access is not part of this answer: see the Access page. Change access in Portal.");
+  if (parts.length === 0) parts.push(contacts === "not_requested" && access === "not_requested" ? "Only people, agents and teams were asked for." : contacts === "available" && access !== "available" ? "Channel contacts are shown." : "Contacts and access are shown.");
   // L3: an entry that cannot be carried is counted, not dropped without a word
   if (leftOut > 0) parts.push(`${leftOut} ${leftOut === 1 ? "entry" : "entries"} left out: id too long.`);
   return parts.join(" ");
 }
 
-export function topologyGet(db: Db, input: TopologyGetInput, warn?: Warn): TopologyGetOutput {
+/**
+ * `contacts` = what the handler read from Connect (`readContacts`); absent = not read, so a requested contacts layer is
+ * `unavailable`. The function itself does no I/O besides the database.
+ */
+export function topologyGet(db: Db, input: TopologyGetInput, warn?: Warn, contacts?: ContactsRead): TopologyGetOutput {
   const asked = new Set<Layer>(input.layers ?? LAYERS);
   const sourceOf = (layer: Layer): Source => (asked.has(layer) ? "unavailable" : "not_requested");
   const sources: TopologyGetOutput["sources"] = { contacts: sourceOf("contacts"), access: sourceOf("access"), note: "" };
@@ -66,8 +76,24 @@ export function topologyGet(db: Db, input: TopologyGetInput, warn?: Warn): Topol
   let nodes: Node[] = [];
   let edges: Edge[] = [];
   let leftOut = 0;
-  if (asked.has("org")) ({ nodes, edges, leftOut } = orgLayer(db, warn));
-  sources.note = sourceNote(sources.contacts, sources.access, leftOut);
+  let contactsNote = contacts?.status === "unavailable" ? contacts.note : "";
+  const outside = new Set<string>(); // ids of the outside nodes made from handles (no review to compute)
+  if (asked.has("org") || asked.has("contacts")) ({ nodes, edges, leftOut } = orgLayer(db, warn));
+  if (asked.has("contacts") && contacts?.status === "available") {
+    const made = contactsLayer(db, nodes, edges, contacts.rows, outside);
+    sources.contacts = "available";
+    contactsNote = [contacts.note, made.skipped > 0 ? `${made.skipped} ${made.skipped === 1 ? "contact" : "contacts"} left out: not a workspace agent.` : ""].filter(Boolean).join(" ");
+    if (!asked.has("org")) {
+      // only the contacts layer was asked: keep the agents and the entries the contacts name, and the contact edges
+      const keep = new Set(edges.filter((e) => e.kind === "contact").flatMap((e) => [e.from, e.to]));
+      edges = edges.filter((e) => e.kind === "contact");
+      nodes = nodes.filter((n) => keep.has(n.id));
+    }
+  } else if (!asked.has("org")) {
+    nodes = [];
+    edges = [];
+  }
+  sources.note = sourceNote(sources.contacts, sources.access, leftOut, contactsNote);
 
   if (input.focus !== undefined) {
     const focus = input.focus;
@@ -87,9 +113,9 @@ export function topologyGet(db: Db, input: TopologyGetInput, warn?: Warn): Topol
   // trust, due date and "changed since review" come from the review logic (src/reviews.ts); computed only for an answer that fits,
   // and the changed flags only for the nodes in it (a focused answer stays cheap)
   const due = reviewDueDates(db);
-  const changed = changedSinceReview(db, new Set(nodes.filter((n) => n.kind !== "team").map((n) => `${n.kind}:${n.id}`)));
+  const changed = changedSinceReview(db, new Set(nodes.filter((n) => n.kind !== "team" && !outside.has(n.id)).map((n) => `${n.kind}:${n.id}`)));
   for (const n of nodes) {
-    if (n.kind === "team") continue;
+    if (n.kind === "team" || outside.has(n.id)) continue;
     const key = `${n.kind}:${n.id}`;
     n.reviewDueAt = due.get(key) ?? null;
     n.changedSinceReview = changed.has(key);
@@ -145,4 +171,51 @@ function orgLayer(db: Db, warn?: Warn): { nodes: Node[]; edges: Edge[]; leftOut:
   }
   edges.sort((x, y) => (x.kind === y.kind ? 0 : x.kind === "owner" ? -1 : 1));
   return { nodes, edges, leftOut };
+}
+
+const short = (s: string, max: number): string => (Array.from(s).length > max ? `${Array.from(s).slice(0, max - 1).join("")}…` : s);
+/** The id of the outside node for a handle: stable, 28 characters, and never a directory id. */
+export const outsideId = (handle: string): string => `ext_${createHash("sha256").update(handle).digest("hex").slice(0, 24)}`;
+
+/**
+ * Contact edges: agent → the directory entry that owns the handle (fleet_handles), else agent → an outside node named by the
+ * handle. One edge per (agent, target); its label lists the channels; `since` = the earliest first contact. A contact whose agent
+ * is not a node of this answer (removed, unknown) is skipped and counted. Mutates `nodes` and `edges`.
+ */
+function contactsLayer(db: Db, nodes: Node[], edges: Edge[], rows: readonly ContactRow[], outside: Set<string>): { skipped: number } {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const owner = new Map<string, string>();
+  for (const r of db.prepare("SELECT handle, person_id FROM fleet_handles").all() as Row[]) owner.set(String(r.handle), String(r.person_id));
+  const wires = new Map<string, { from: string; to: string; channels: Set<string>; since: number }>();
+  let skipped = 0;
+  for (const c of rows) {
+    const agent = byId.get(c.agent);
+    if (agent?.kind !== "agent") {
+      skipped++;
+      continue;
+    }
+    let target = owner.get(c.handle);
+    if (!target || !byId.has(target)) {
+      target = outsideId(c.handle);
+      if (!byId.has(target)) {
+        const n: Node = { id: target, kind: "outside_agent", name: short(c.handle, NAME_MAX), trust: null, status: "active", reviewDueAt: null, changedSinceReview: false };
+        nodes.push(n);
+        byId.set(target, n);
+        outside.add(target);
+      }
+    }
+    const id = `contact:${c.agent}:${target}`;
+    const w = wires.get(id) ?? { from: c.agent, to: target, channels: new Set<string>(), since: c.firstContactAt };
+    w.channels.add(c.channel);
+    w.since = Math.min(w.since, c.firstContactAt);
+    wires.set(id, w);
+  }
+  for (const [id, w] of [...wires].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    const a = byId.get(w.from) as Node;
+    const b = byId.get(w.to) as Node;
+    const state: Edge["state"] = a.trust === "blocked" || b.trust === "blocked" ? "blocked" : a.status !== "active" || b.status !== "active" ? "off" : "live";
+    edges.push({ id, kind: "contact", from: w.from, to: w.to, label: short([...w.channels].sort().join(", "), 80), state, since: w.since > 0 ? iso(w.since) : null });
+  }
+  nodes.sort((x, y) => KIND_ORDER[x.kind] - KIND_ORDER[y.kind]);
+  return { skipped };
 }

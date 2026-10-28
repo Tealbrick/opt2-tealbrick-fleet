@@ -29,7 +29,7 @@ export const GEOMETRY = {
   nodeW: 200,
   nodeH: 60,
   rowGap: 14,
-  colGap: 96,
+  colGap: 120,
   pad: 14,
   regionHead: 30,
   bandGap: 22,
@@ -311,6 +311,7 @@ export function layoutGraph(input: GraphInput, caps: Partial<Caps> = {}): GraphL
   // wires
   const regionAt = new Map(regions.map((r) => [r.id, r]));
   const wires: Wire[] = [];
+  const curves = new Map<string, Curve>();
   let contained = 0;
   for (const e of edges) {
     const a = at.get(e.from);
@@ -328,12 +329,13 @@ export function layoutGraph(input: GraphInput, caps: Partial<Caps> = {}): GraphL
     const same = bend !== 0;
     const mx = same ? Math.max(x1, x2) + bend : (x1 + x2) / 2;
     const d = `M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}`;
+    curves.set(e.id, { x1, y1, mx, y2, x2 });
     const lx = same ? (x1 + x2) / 2 + bend * 0.75 : mx;
     const label = fit(relationLabel(e), G.labelChars);
     wires.push({ id: e.id, kind: e.kind, from: e.from, to: e.to, state: e.state, cls: wireClass(e), d, label, lx: round(lx), ly: round((y1 + y2) / 2), lw: round(Array.from(label).length * G.labelCharW + 20) });
   }
   if (wires.length > G.labelMax) for (const w of wires) w.label = null;
-  else placeLabels(wires, placed);
+  else placeLabels(wires, placed, curves);
 
   // the picture's size: the furthest card, region or bend, plus the margin (0 × 0 when there is nothing to draw)
   const boxes = [...placed, ...regions];
@@ -346,20 +348,46 @@ export function layoutGraph(input: GraphInput, caps: Partial<Caps> = {}): GraphL
 
 const round = (v: number): number => Math.round(v * 10) / 10;
 
-/** Move each label up or down (in steps of a label height, nearest first) until it covers no card and no label placed
- * before it; a label with no free place within four steps is dropped (the wire stays, the table has the words). */
-function placeLabels(wires: Wire[], cards: readonly PlacedNode[]): void {
+/** The control data of a wire's curve `M x1 y1 C mx y1 mx y2 x2 y2`. */
+interface Curve {
+  x1: number;
+  y1: number;
+  mx: number;
+  y2: number;
+  x2: number;
+}
+/** A point on the curve at t in [0, 1]. */
+function pointAt(c: Curve, t: number): [number, number] {
+  const u = 1 - t;
+  const x = u * u * u * c.x1 + 3 * u * u * t * c.mx + 3 * u * t * t * c.mx + t * t * t * c.x2;
+  const y = u * u * u * c.y1 + 3 * u * u * t * c.y1 + 3 * u * t * t * c.y2 + t * t * t * c.y2;
+  return [x, y];
+}
+/** Where on the wire a label may sit, best first: the middle, then further out on both sides (an offset ALONG the wire). */
+const LABEL_T = [0.5, 0.42, 0.58, 0.34, 0.66, 0.26, 0.74, 0.18, 0.82] as const;
+
+/** Place each label ON its own wire, at the middle if that is free, else at the nearest free point along the wire (so several
+ * wires into one node do not stack their labels). A label may not cover a card or a label placed before it. If no point
+ * along the wire is free, the old rule applies (move up or down in steps of a label height, at most four); a label with no
+ * free place at all is dropped (the wire stays, the table has the words). */
+function placeLabels(wires: Wire[], cards: readonly PlacedNode[], curves: ReadonlyMap<string, Curve>): void {
   const G = GEOMETRY;
+  const gap = 3;
   const taken: { x: number; y: number; w: number; h: number }[] = cards.map((c) => ({ x: c.x - 4, y: c.y - 4, w: c.w + 8, h: c.h + 8 }));
   const hits = (b: { x: number; y: number; w: number; h: number }) => taken.some((t) => b.x < t.x + t.w && t.x < b.x + b.w && b.y < t.y + t.h && t.y < b.y + b.h);
   const step = G.labelH + 4;
   for (const w of wires) {
     if (w.label === null) continue;
+    const curve = curves.get(w.id);
+    const candidates: [number, number][] = [];
+    if (curve) for (const t of LABEL_T) candidates.push(pointAt(curve, t));
+    for (const dy of [0, step, -step, 2 * step, -2 * step, 3 * step, -3 * step, 4 * step, -4 * step]) candidates.push([w.lx, w.ly + dy]);
     let done = false;
-    for (const dy of [0, step, -step, 2 * step, -2 * step, 3 * step, -3 * step, 4 * step, -4 * step]) {
-      const box = { x: w.lx - w.lw / 2, y: w.ly + dy - G.labelH / 2, w: w.lw, h: G.labelH };
-      if (box.y < 0 || hits(box)) continue;
-      w.ly = round(w.ly + dy);
+    for (const [cx, cy] of candidates) {
+      const box = { x: cx - w.lw / 2 - gap, y: cy - G.labelH / 2 - gap, w: w.lw + 2 * gap, h: G.labelH + 2 * gap };
+      if (box.y < 0 || box.x < 0 || hits(box)) continue;
+      w.lx = round(cx);
+      w.ly = round(cy);
       taken.push(box);
       done = true;
       break;

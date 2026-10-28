@@ -14,9 +14,9 @@
 // - The proposal row is written first, as `failed` / `interrupted` (the truth if the process dies in the call), and its id
 //   is the idempotency key of the Rules call: a retry never makes a second draft. `sent` means Rules answered a draft id,
 //   and only that. A refusal, a hold or a timeout is stored with the exact error code.
-import { normalizeHandle, ulid } from "@opt2-tealbrick/manifest";
+import { ulid } from "@opt2-tealbrick/manifest";
 import { type Db, type Json, type OpContext, TbError } from "@opt2-tealbrick/miniapp-sdk";
-import { fail } from "./store.ts";
+import { fail, fleetHandle } from "./store.ts";
 import { cleanText } from "./text.ts";
 
 export const TEMPLATES = ["hold_outward_for_agent", "deny_outward_for_agent", "hold_on_behalf_of_sender", "deny_on_behalf_of_sender", "hold_outward_for_team"] as const;
@@ -144,7 +144,7 @@ export function parseParams(db: Db, template: Template, params: Record<string, u
     if (!t) fail("team_not_found", "no team with this id", 404);
     return { params: { team: id }, subject: { team: id, name: String(t?.name) } };
   }
-  const handle = normalizeHandle(String(raw)) ?? fail("handle_invalid", "not a buzz, slack or telegram handle", 400);
+  const handle = fleetHandle(String(raw)) ?? fail("handle_invalid", "not a buzz, slack or telegram handle", 400);
   return { params: { handle }, subject: { handle } };
 }
 

@@ -6,6 +6,8 @@
 .topo-canvas { border-radius: var(--tb-radius-brick); background: var(--tb-film); box-shadow: var(--tb-ring); overflow: auto; max-height: 720px; }
 .topo-svg { display: block; font-family: var(--tb-font); }
 .topo-more { max-width: 62ch; }
+.nowrap { white-space: nowrap; }
+.topo-inspector .access-list { margin: 0; }
 
 .g-region-box { fill: var(--tb-paper); stroke: var(--tb-line); stroke-width: 1; }
 .g-region-name { fill: var(--tb-ink-soft); font-size: 13px; font-weight: 800; }

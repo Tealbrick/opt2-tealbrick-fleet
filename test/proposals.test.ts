@@ -634,7 +634,12 @@ test("C88 a/b: no agent op, hook, event, review verdict or timer tick calls rule
   await run("review_record", { subject: { kind: "person", id: cy.id }, verdict: "blocked", reason: "no", snapshotDigest: digest }, owner(db, rules));
   await run("topology_get", {}, owner(db, rules));
   await run("overview_get", {}, owner(db, rules));
-  assert.deepEqual(rules.calls, [], "none of them called Rules at all");
+  // topology_get reads Connect's contact book on demand (companion contacts_list, 0.3.1): that is the only call, and none goes to Rules
+  assert.deepEqual(
+    rules.calls.filter((c) => c.product === "rules"),
+    [],
+    "none of them called Rules at all",
+  );
   // the 60 s timer
   const timerRules = fakeRules();
   timerRules.drafts.set("drf_1", { status: "pending", decidedAt: null });

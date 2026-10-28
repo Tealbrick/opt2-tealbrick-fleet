@@ -329,6 +329,9 @@ test("fleet_facts hook stays under 5 ms per call at 500 teams and 2000 people (q
 test("trust defaults: the owner's entries start trusted, an agent's entries start unreviewed (one function)", () => {
   assert.equal(defaultTrust("owner"), "trusted");
   assert.equal(defaultTrust("agent"), "unreviewed");
+  assert.equal(defaultTrust("owner", "person"), "trusted");
+  assert.equal(defaultTrust("owner", "outside_agent"), "unreviewed", "Coordinator rule C373 Q13: trust for an outside agent is an explicit act");
+  assert.equal(defaultTrust("agent", "outside_agent"), "unreviewed");
   const db = migratedDb();
   const trustOf = (id: string) => String(db.prepare("SELECT trust FROM fleet_people WHERE id = ?").get(id)?.trust);
   const sourceOf = (id: string) => String(db.prepare("SELECT source FROM fleet_people WHERE id = ?").get(id)?.source);
@@ -336,7 +339,7 @@ test("trust defaults: the owner's entries start trusted, an agent's entries star
   const viaOp = store.setPerson(db, { name: "Added by the owner (person_set)" });
   assert.deepEqual([trustOf(viaOp.id), sourceOf(viaOp.id), kindOf(viaOp.id)], ["trusted", "owner", "person"]);
   const outside = store.setPerson(db, { name: "Outside bot", kind: "outside_agent", source: "owner" });
-  assert.deepEqual([trustOf(outside.id), kindOf(outside.id)], ["trusted", "outside_agent"], "owner-added outside agents start trusted");
+  assert.deepEqual([trustOf(outside.id), kindOf(outside.id)], ["unreviewed", "outside_agent"], "owner-added outside agents start unreviewed (a review verdict makes them trusted)");
   const byAgent = store.setPerson(db, { name: "Added by an agent", source: "agent" });
   assert.deepEqual([trustOf(byAgent.id), sourceOf(byAgent.id)], ["unreviewed", "agent"]);
   // an edit by the owner never changes trust or source

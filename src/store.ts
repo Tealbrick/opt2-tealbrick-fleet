@@ -3,8 +3,9 @@
 // Harvested from v1 (labs/organization-plane store/types: person + membership subjects "person" | "agent";
 // portal Team / Membership / AgentGrant / ExternalIdentity), trimmed to one workspace = one tenant: no companies,
 // tenants, roles-per-tenant or license; people are directory entries, never sign-ins (C84).
-import { type HandleChannel, handleChannel, normalizeHandle, ulid } from "@opt2-tealbrick/manifest";
+import { handleChannel, normalizeHandle, ulid } from "@opt2-tealbrick/manifest";
 import { type Db, type SliceAgent, TbError } from "@opt2-tealbrick/miniapp-sdk";
+import { cleanText } from "./text.ts";
 import { type ContactKind, defaultTrust, NEW_AGENT_TRUST, type Source, type Trust } from "./trust.ts";
 
 export type Role = "member" | "lead";
@@ -45,6 +46,9 @@ export interface Person {
   trust: Trust;
   email: string | null;
   title: string;
+  /** owner-side text for an outside agent (the organisation and how you know it); '' when not given */
+  org: string;
+  relationship: string;
   status: PersonStatus;
   tags: string[];
   handles: string[];
@@ -150,6 +154,8 @@ function toPerson(db: Db, r: Row): Person {
     trust: r.trust as Trust,
     email: r.email === null ? null : String(r.email),
     title: String(r.title),
+    org: r.org === undefined ? "" : String(r.org),
+    relationship: r.relationship === undefined ? "" : String(r.relationship),
     status: r.status as PersonStatus,
     tags: tags(r.tags),
     handles: handlesOf(db, id),
@@ -236,7 +242,7 @@ export const hasTeamFacts = (c: Pick<Contact, "status" | "trust">): boolean => c
 
 /** Handle → contact (a person or an outside agent) with its trust + teams. A departed or blocked contact is found but has no teams. */
 export function resolveSender(db: Db, handle: string): Resolved {
-  const h = normalizeHandle(handle);
+  const h = fleetHandle(handle);
   const r = h
     ? db.prepare("SELECT p.id, p.name, p.status, p.kind, p.trust FROM fleet_handles h JOIN fleet_people p ON p.id = h.person_id WHERE h.handle = ?").get(h)
     : undefined;
@@ -247,24 +253,39 @@ export function resolveSender(db: Db, handle: string): Resolved {
   return { found: true, person, contact, teams: hasTeamFacts(contact) ? teamsOf(db, "person", contact.id).slice(0, MAX_TEAMS_PER_ANSWER) : [] };
 }
 
+/** The channels a Governance contact handle may use (the feed schema's handle pattern). manifest 0.1.34+ also knows `email`
+ *  (C373 recipients); Governance does not store email handles yet, so person_set refuses them like any other channel. */
+export const FLEET_CHANNELS = ["buzz", "slack", "telegram"] as const;
+export type FleetChannel = (typeof FLEET_CHANNELS)[number];
+/** normalizeHandle limited to FLEET_CHANNELS: the one canonicalizer for every handle Governance stores, matches or accepts. */
+export const fleetHandle = (raw: string): string | null => {
+  const h = normalizeHandle(raw);
+  const c = h === null ? null : handleChannel(h);
+  return h !== null && c !== null && (FLEET_CHANNELS as readonly string[]).includes(c) ? h : null;
+};
+
 export interface Identities {
-  people: { handle: string; channel: HandleChannel; person: Ref }[];
+  people: { handle: string; channel: FleetChannel; person: Ref }[];
 }
 
 export function peopleHandles(db: Db): Identities["people"] {
   return db
     .prepare("SELECT h.handle, p.id, p.name FROM fleet_handles h JOIN fleet_people p ON p.id = h.person_id ORDER BY p.name COLLATE NOCASE, h.handle")
     .all()
-    .map((r) => ({ handle: String(r.handle), channel: handleChannel(String(r.handle)) as HandleChannel, person: { id: String(r.id), name: String(r.name) } }));
+    .map((r) => ({ handle: String(r.handle), channel: handleChannel(String(r.handle)) as FleetChannel, person: { id: String(r.id), name: String(r.name) } }));
 }
 
 // ── writes (owner, person ops) ─────────────────────────────────────────────────────────────────────────────────
 
-const cleanTags = (t: readonly string[] | undefined) => (t ? [...new Set(t)].sort() : undefined);
+// QA-C373-GV-1 (X-10): owner-typed text is cleaned like agent text (control, bidi and format characters removed), so a
+// name can never reorder or hide what the owner, Rules or an agent reads. Cleaned on write; old rows stay as stored.
+const own = (s: string): string => cleanText(s);
+const ownOpt = (s: string | undefined): string | undefined => (s === undefined ? undefined : cleanText(s));
+const cleanTags = (t: readonly string[] | undefined) => (t ? [...new Set(t.map(own).filter((x) => x !== ""))].sort() : undefined);
 
 export function setTeam(db: Db, input: { id?: string; name: string; description?: string; tags?: string[] }, now = Date.now()): Team {
   return db.transaction(() => {
-    const name = input.name.trim();
+    const name = own(input.name);
     if (!name) fail("input_invalid", "name is empty", 400);
     const clash = db.prepare("SELECT id FROM fleet_teams WHERE name = ? COLLATE NOCASE AND id <> ?").get(name, input.id ?? "");
     if (clash) fail("team_name_taken", "another team has this name", 409);
@@ -273,7 +294,7 @@ export function setTeam(db: Db, input: { id?: string; name: string; description?
       const old = db.prepare("SELECT * FROM fleet_teams WHERE id = ?").get(id) ?? fail("team_not_found", "no team with this id", 404);
       db.prepare("UPDATE fleet_teams SET name = ?, description = ?, tags = ?, updated_at = ? WHERE id = ?").run(
         name,
-        input.description ?? String(old.description),
+        ownOpt(input.description) ?? String(old.description),
         JSON.stringify(cleanTags(input.tags) ?? tags(old.tags)),
         now,
         id,
@@ -285,7 +306,7 @@ export function setTeam(db: Db, input: { id?: string; name: string; description?
       db.prepare("INSERT INTO fleet_teams (id, name, description, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run(
         id,
         name,
-        input.description ?? "",
+        ownOpt(input.description) ?? "",
         JSON.stringify(cleanTags(input.tags) ?? []),
         now,
         now,
@@ -307,8 +328,10 @@ export function deleteTeam(db: Db, id: string): boolean {
 
 export interface PersonInput {
   id?: string;
-  /** Not an operation input yet (person_set stays as released); the store is ready for outside agents. */
+  /** person_set input since 0.3.1 (the owner form "Add outside agent"). An outside agent the owner adds starts `unreviewed`. */
   kind?: ContactKind;
+  org?: string;
+  relationship?: string;
   /** Who creates the entry (default owner). Decides the start trust (`defaultTrust`); ignored on update. */
   source?: Source;
   name: string;
@@ -321,12 +344,12 @@ export interface PersonInput {
 
 export function setPerson(db: Db, input: PersonInput, now = Date.now()): Person {
   return db.transaction(() => {
-    const name = input.name.trim();
+    const name = own(input.name);
     if (!name) fail("input_invalid", "name is empty", 400);
     let handles: string[] | undefined;
     if (input.handles) {
       handles = [];
-      for (const raw of input.handles) handles.push(normalizeHandle(raw) ?? fail("handle_invalid", `not a buzz, slack or telegram handle: ${raw.slice(0, 60)}`, 400));
+      for (const raw of input.handles) handles.push(fleetHandle(raw) ?? fail("handle_invalid", `not a buzz, slack or telegram handle: ${raw.slice(0, 60)}`, 400));
       handles = [...new Set(handles)];
       if (handles.length > LIMITS.handlesPerPerson) fail("input_invalid", `at most ${LIMITS.handlesPerPerson} handles per person`, 400);
     }
@@ -336,33 +359,42 @@ export function setPerson(db: Db, input: PersonInput, now = Date.now()): Person 
       // C373e: a person who owns workspace agents cannot become an outside agent (the owner_not_person rule of agent_set)
       if (input.kind && input.kind !== "person" && String(old.kind) === "person" && db.prepare("SELECT 1 FROM fleet_agents WHERE owner_id = ? AND status <> 'removed'").get(id))
         fail("person_owns_agents", "this person owns workspace agents; give the agents another owner first", 409);
-      db.prepare("UPDATE fleet_people SET name = ?, email = ?, title = ?, status = ?, kind = ?, tags = ?, updated_at = ? WHERE id = ?").run(
-        name,
-        input.email === undefined ? old.email : input.email,
-        input.title ?? String(old.title),
-        input.status ?? String(old.status),
-        input.kind ?? String(old.kind),
-        JSON.stringify(cleanTags(input.tags) ?? tags(old.tags)),
-        now,
-        id,
+      // org and relationship are written only when given (a write without them leaves the stored text alone)
+      const extra = input.org !== undefined || input.relationship !== undefined;
+      db.prepare(`UPDATE fleet_people SET name = ?, email = ?, title = ?, ${extra ? "org = ?, relationship = ?, " : ""}status = ?, kind = ?, tags = ?, updated_at = ? WHERE id = ?`).run(
+        ...([
+          name,
+          input.email === undefined ? old.email : input.email,
+          ownOpt(input.title) ?? String(old.title),
+          ...(extra ? [input.org === undefined ? String(old.org) : own(input.org), input.relationship === undefined ? String(old.relationship) : own(input.relationship)] : []),
+          input.status ?? String(old.status),
+          input.kind ?? String(old.kind),
+          JSON.stringify(cleanTags(input.tags) ?? tags(old.tags)),
+          now,
+          id,
+        ] as never[]),
       );
     } else {
       const count = Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_people").get()?.n);
       if (count >= LIMITS.people) fail("limit_reached", `a workspace has at most ${LIMITS.people} people`, 409);
       id = `psn_${ulid(now)}`;
       const source = input.source ?? "owner";
-      db.prepare("INSERT INTO fleet_people (id, name, email, title, status, kind, trust, source, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
-        id,
-        name,
-        input.email ?? null,
-        input.title ?? "",
-        input.status ?? "active",
-        input.kind ?? "person",
-        defaultTrust(source),
-        source,
-        JSON.stringify(cleanTags(input.tags) ?? []),
-        now,
-        now,
+      const extra = input.org !== undefined || input.relationship !== undefined;
+      db.prepare(`INSERT INTO fleet_people (id, name, email, title, ${extra ? "org, relationship, " : ""}status, kind, trust, source, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ${extra ? "?, ?, " : ""}?, ?, ?, ?, ?, ?, ?)`).run(
+        ...([
+          id,
+          name,
+          input.email ?? null,
+          ownOpt(input.title) ?? "",
+          ...(extra ? [own(input.org ?? ""), own(input.relationship ?? "")] : []),
+          input.status ?? "active",
+          input.kind ?? "person",
+          defaultTrust(source, input.kind ?? "person"),
+          source,
+          JSON.stringify(cleanTags(input.tags) ?? []),
+          now,
+          now,
+        ] as never[]),
       );
     }
     if (handles) {
@@ -420,7 +452,7 @@ export function setAgent(db: Db, input: { agent: string; owner?: string | null; 
     }
     db.prepare("UPDATE fleet_agents SET owner_id = ?, role = ?, tags = ?, updated_at = ? WHERE id = ?").run(
       input.owner === undefined ? old.owner_id : input.owner,
-      input.role ?? String(old.role),
+      ownOpt(input.role) ?? String(old.role),
       JSON.stringify(cleanTags(input.tags) ?? tags(old.tags)),
       now,
       input.agent,

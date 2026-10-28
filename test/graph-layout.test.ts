@@ -205,6 +205,42 @@ describe("layoutGraph", () => {
     assert.ok(ok.wires.every((w) => w.label === "owns"));
   });
 
+  it("labels near a node with several wires: no two overlap, none covers a card, and each sits ON its own wire (offset along the wire)", () => {
+    // one agent with an owner, a team, three contacts and two apps: seven wires meet at it
+    const nodes = [
+      node("agt_hub", "agent", "Hub"),
+      node("psn_o", "person", "Owner"),
+      node("psn_a", "person", "Contact A"),
+      node("psn_b", "person", "Contact B"),
+      node("psn_c", "person", "Contact C"),
+      node("ins_1", "app", "App one"),
+      node("ins_2", "app", "App two"),
+      node("ins_3", "app", "App three"),
+    ];
+    const edges = [edge("owner", "psn_o", "agt_hub", "owns"), edge("contact", "agt_hub", "psn_a", "slack"), edge("contact", "agt_hub", "psn_b", "buzz"), edge("contact", "agt_hub", "psn_c", "tool"), edge("access", "agt_hub", "ins_1", "CRU"), edge("access", "agt_hub", "ins_2", "R"), edge("access", "agt_hub", "ins_3", "CRUD")];
+    const l = layoutGraph({ nodes, edges });
+    const labelled = l.wires.filter((w) => w.label !== null);
+    assert.ok(labelled.length >= 5, `most labels are kept (${labelled.length} of ${l.wires.length})`);
+    const box = (w: (typeof labelled)[number]) => ({ x: w.lx - w.lw / 2, y: w.ly - GEOMETRY.labelH / 2, w: w.lw, h: GEOMETRY.labelH });
+    for (const [i, a] of labelled.entries()) {
+      for (const c of l.nodes) assert.equal(overlap(box(a), c), false, `label ${a.id} covers card ${c.id}`);
+      for (const b of labelled.slice(i + 1)) assert.equal(overlap(box(a), box(b)), false, `labels ${a.id} and ${b.id} overlap`);
+      // on its own wire: the label's centre is within 1.5 px of a sample of the wire's curve
+      const m = /^M([\d.-]+) ([\d.-]+) C([\d.-]+) ([\d.-]+) ([\d.-]+) ([\d.-]+) ([\d.-]+) ([\d.-]+)$/.exec(a.d);
+      assert.ok(m, a.d);
+      const [x1, y1, mx, , , y2, x2] = (m as RegExpExecArray).slice(1).map(Number) as [number, number, number, number, number, number, number];
+      let best = Number.POSITIVE_INFINITY;
+      for (let k = 0; k <= 400; k++) {
+        const t = k / 400;
+        const u = 1 - t;
+        const px = u * u * u * x1 + 3 * u * u * t * mx + 3 * u * t * t * mx + t * t * t * x2;
+        const py = u * u * u * y1 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y2;
+        best = Math.min(best, Math.hypot(px - a.lx, py - a.ly));
+      }
+      assert.ok(best <= 1.5, `${a.id}: label is ${best.toFixed(1)} px off its wire`);
+    }
+  });
+
   it("long names are cut on the card with … and kept whole for the title; emoji are not split", () => {
     const long = "A very long agent name that never ends at all";
     const l = layoutGraph({ nodes: [node("agt_l", "agent", long)], edges: [] });
