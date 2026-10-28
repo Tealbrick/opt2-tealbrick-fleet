@@ -45,13 +45,10 @@ copy of this file for its contract test (Rules lead, 2026-10-27). It replaces no
 
 - sha256: `9a11657d8ac88580aa76af647118ed57e19798c56498e804b03b4fcd49515823`
 
-## Connect 0.7.5 `contacts_list` (companion target, Topology contacts layer)
+## Connect 0.7.11 manifest (companion target: `identities_list`, `contacts_list`)
 
-`connect.0.7.5-pr34.excerpt.json` is an EXCERPT, not a byte copy: the two operations Governance calls
-(`identities_list`, `contacts_list`) with id, audience, crud, listing and the input/output schemas, cut from the full
-manifest. `test/contacts.test.ts` runs `validateCompanions` against it and validates the answers it builds against the
-`contacts_list` output schema.
+`connect.0.7.11.manifest.json` is a BYTE COPY of the released Connect manifest. `test/contacts.test.ts` runs
+`validateCompanions` against it and validates the answers it builds against the `contacts_list` output schema.
 
-- Source repo: `Tealbrick/opt2-tealbrick-connect`, PR #34 (open when this was copied), commit `bdea54a880c613e15808e58530dbf25ed99c6506`, file `tealbrick.manifest.json` (version 0.7.5)
-- sha256 of the full source file: `19d06eb1b48c9a456f19c9a1ac4a47d50dd3a59cb8002d4348fde48e4ddb607d`
-- Replace it with the released Connect manifest when connect#34 ships (then it can be a byte copy again).
+- Source repo: `Tealbrick/opt2-tealbrick-connect`, tag `v0.7.11` (connect#34 squash), commit `4b064bdcd6f4a57fdef3957f77eb520bd038ce01`, file `tealbrick.manifest.json` (version 0.7.11)
+- sha256: `6579ec25290da62cbd81f85a30388ee888d9f6afe44bbefa44277cc37ad651b1`

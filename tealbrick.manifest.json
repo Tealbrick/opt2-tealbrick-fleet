@@ -5371,6 +5371,7 @@
     }
   ],
   "needsAgentDirectory": true,
+  "needsTopology": true,
   "skills": [
     {
       "id": "use-fleet",

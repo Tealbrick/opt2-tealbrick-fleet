@@ -16,7 +16,7 @@ import { seed } from "./seed.ts";
 type Out = TopologyGetOutput;
 const log = { debug() {}, info() {}, warn() {}, error() {} };
 const OWNER = { type: "person", id: "per_01J0000000000000000000000P", name: "owner", mode: null };
-const connect = JSON.parse(readFileSync(new URL("./contracts/connect.0.7.5-pr34.excerpt.json", import.meta.url), "utf8")) as { operations: { id: string; audience: string; crud: string[]; output: Json }[] };
+const connect = JSON.parse(readFileSync(new URL("./contracts/connect.0.7.11.manifest.json", import.meta.url), "utf8")) as { operations: { id: string; audience: string; crud: string[]; output: Json }[] };
 const contactsOut = connect.operations.find((o) => o.id === "contacts_list")?.output as Json;
 const topoOp = manifest.operations.find((o) => o.id === "topology_get") as unknown as { output: Parameters<typeof validateAgainstSchema>[0] };
 const validOut = (o: unknown) => validateAgainstSchema(topoOp.output, o as Json).ok;

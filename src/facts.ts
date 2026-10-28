@@ -7,9 +7,8 @@
 // departed requester has no team facts; a departed one still reports its trust value. Trust of an UNVERIFIED claim is
 // for narrowing only (a forged claim must never widen anything): consumers act on it only to deny or hold, and check
 // `fleet.requester.verified` before they relax anything.
-import { normalizeHandle } from "@opt2-tealbrick/manifest";
 import type { Db, HookRequest, Json } from "@opt2-tealbrick/miniapp-sdk";
-import { agentFacts, agentTrust, MAX_TEAMS_PER_ANSWER, personFacts, type Ref, resolveSender, type TeamRef } from "./store.ts";
+import { agentFacts, agentTrust, fleetHandle, MAX_TEAMS_PER_ANSWER, personFacts, type Ref, resolveSender, type TeamRef } from "./store.ts";
 import type { Trust } from "./trust.ts";
 
 /** At most this many teams per fact list (context stays small). */
@@ -45,7 +44,7 @@ export function requesterOf(db: Db, context: Record<string, unknown>): { request
   if (typeof id !== "string" || id.length === 0 || id.length > 200) return null;
   const verified = obo.verified === true;
   if (kind === "channel_sender") {
-    const handle = normalizeHandle(id);
+    const handle = fleetHandle(id);
     const found = handle ? resolveSender(db, handle) : null;
     const c = found?.contact;
     if (!found || !c) return null;

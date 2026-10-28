@@ -3,7 +3,7 @@
 // Harvested from v1 (labs/organization-plane store/types: person + membership subjects "person" | "agent";
 // portal Team / Membership / AgentGrant / ExternalIdentity), trimmed to one workspace = one tenant: no companies,
 // tenants, roles-per-tenant or license; people are directory entries, never sign-ins (C84).
-import { type HandleChannel, handleChannel, normalizeHandle, ulid } from "@opt2-tealbrick/manifest";
+import { handleChannel, normalizeHandle, ulid } from "@opt2-tealbrick/manifest";
 import { type Db, type SliceAgent, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { cleanText } from "./text.ts";
 import { type ContactKind, defaultTrust, NEW_AGENT_TRUST, type Source, type Trust } from "./trust.ts";
@@ -242,7 +242,7 @@ export const hasTeamFacts = (c: Pick<Contact, "status" | "trust">): boolean => c
 
 /** Handle → contact (a person or an outside agent) with its trust + teams. A departed or blocked contact is found but has no teams. */
 export function resolveSender(db: Db, handle: string): Resolved {
-  const h = normalizeHandle(handle);
+  const h = fleetHandle(handle);
   const r = h
     ? db.prepare("SELECT p.id, p.name, p.status, p.kind, p.trust FROM fleet_handles h JOIN fleet_people p ON p.id = h.person_id WHERE h.handle = ?").get(h)
     : undefined;
@@ -253,15 +253,26 @@ export function resolveSender(db: Db, handle: string): Resolved {
   return { found: true, person, contact, teams: hasTeamFacts(contact) ? teamsOf(db, "person", contact.id).slice(0, MAX_TEAMS_PER_ANSWER) : [] };
 }
 
+/** The channels a Governance contact handle may use (the feed schema's handle pattern). manifest 0.1.34+ also knows `email`
+ *  (C373 recipients); Governance does not store email handles yet, so person_set refuses them like any other channel. */
+export const FLEET_CHANNELS = ["buzz", "slack", "telegram"] as const;
+export type FleetChannel = (typeof FLEET_CHANNELS)[number];
+/** normalizeHandle limited to FLEET_CHANNELS: the one canonicalizer for every handle Governance stores, matches or accepts. */
+export const fleetHandle = (raw: string): string | null => {
+  const h = normalizeHandle(raw);
+  const c = h === null ? null : handleChannel(h);
+  return h !== null && c !== null && (FLEET_CHANNELS as readonly string[]).includes(c) ? h : null;
+};
+
 export interface Identities {
-  people: { handle: string; channel: HandleChannel; person: Ref }[];
+  people: { handle: string; channel: FleetChannel; person: Ref }[];
 }
 
 export function peopleHandles(db: Db): Identities["people"] {
   return db
     .prepare("SELECT h.handle, p.id, p.name FROM fleet_handles h JOIN fleet_people p ON p.id = h.person_id ORDER BY p.name COLLATE NOCASE, h.handle")
     .all()
-    .map((r) => ({ handle: String(r.handle), channel: handleChannel(String(r.handle)) as HandleChannel, person: { id: String(r.id), name: String(r.name) } }));
+    .map((r) => ({ handle: String(r.handle), channel: handleChannel(String(r.handle)) as FleetChannel, person: { id: String(r.id), name: String(r.name) } }));
 }
 
 // ── writes (owner, person ops) ─────────────────────────────────────────────────────────────────────────────────
@@ -338,7 +349,7 @@ export function setPerson(db: Db, input: PersonInput, now = Date.now()): Person 
     let handles: string[] | undefined;
     if (input.handles) {
       handles = [];
-      for (const raw of input.handles) handles.push(normalizeHandle(raw) ?? fail("handle_invalid", `not a buzz, slack or telegram handle: ${raw.slice(0, 60)}`, 400));
+      for (const raw of input.handles) handles.push(fleetHandle(raw) ?? fail("handle_invalid", `not a buzz, slack or telegram handle: ${raw.slice(0, 60)}`, 400));
       handles = [...new Set(handles)];
       if (handles.length > LIMITS.handlesPerPerson) fail("input_invalid", `at most ${LIMITS.handlesPerPerson} handles per person`, 400);
     }

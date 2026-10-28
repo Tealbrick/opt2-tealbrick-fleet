@@ -1,8 +1,7 @@
 // The grant picture from the verified slice (C373 WP-D, G-2), server side. Core copies "who may use which app" into the
 // slice of an app that declares `needsTopology` and that the owner allowed to see it (consent `topology`). The SDK reads
-// it with `ctx.topology()` (sdk#60, spec#61: NOT released when this was written). Until the pinned SDK has it, this module
-// defines the compact type locally and reads `ctx.topology` defensively: a missing reader, a missing field or a bad shape
-// is "no picture", never an error.
+// it with `ctx.topology()` (SDK 0.1.43, spec 0.1.87), which validates it and hands the agent ids of the same slice. This module
+// cleans it once more (second line of defence: a bad row is dropped and flagged, never an error) and decodes it.
 //
 // DISPLAY ONLY. Nothing here authorizes anything; the bridge and the SDK decide every call from the signed grant.
 //
@@ -13,20 +12,20 @@
 //     companions:  [fromIdx, toIdx, crud, opsCount][],
 //     connections: [con, agentIdx, "k"|"p", "a"|"r"][],
 //     truncated?: true }
-// `agentIdx` indexes the SAME slice's `agents[]` (see slice-agents.ts); the other indexes point into `instances`.
+// `agentIdx` indexes the SAME slice's `agents[]` (`ctx.topology().agentIds`); the other indexes point into `instances`.
 // The decoded (object) form below is what the Access page and the graph read (src/ui/access-types.ts is the same shape).
 import { HOLD_FAMILIES } from "@opt2-tealbrick/manifest";
 
-/** Bounds of each list (spec 0.1.80 `TOPOLOGY_MAX`, the slice schema's maxItems). A longer list is cut and the picture is marked truncated. */
+/** Bounds of each list (spec 0.1.87 `TOPOLOGY_MAX`, the slice schema's maxItems). A longer list is cut and the picture is marked truncated. */
 export const TOPOLOGY_MAX = { instances: 40, edges: 600, companions: 100, connections: 300 } as const;
-/** `held` is a 31-bit mask (spec 0.1.80 `TOPOLOGY_HELD_MASK_MAX`). */
+/** `held` is a 31-bit mask (spec 0.1.87 `TOPOLOGY_HELD_MASK_MAX`). */
 export const HELD_MASK_MAX = 0x7fff_ffff;
 export const OPS_COUNT_MAX = 128;
 const CRUD_PATTERN = /^c?r?u?d?$/;
 
 /**
  * The bit order of `held`: bit i = HOLD_FAMILIES[i]. Append-only in the spec. The pinned manifest package exports the list
- * as `HOLD_FAMILIES`; `MANIFEST_HOLD_FAMILIES` (the spec 0.1.80 name) is the same array. `test/access-get.test.ts` pins today's order.
+ * as `HOLD_FAMILIES`; `MANIFEST_HOLD_FAMILIES` (the spec 0.1.87 name) is the same array. `test/access-get.test.ts` pins today's order.
  */
 export const HELD_BITS: readonly string[] = HOLD_FAMILIES;
 
@@ -196,24 +195,4 @@ export function decodeTopology(t: CompactTopology, agents: readonly string[]): D
   }
   if (truncated) out.truncated = true;
   return out;
-}
-
-/**
- * What the slice says about the grant picture, read from an op context without trusting its type:
- *  - `no_reader`: this SDK has no `ctx.topology` (older than sdk#60);
- *  - `none`: the reader answered nothing (the slice has no `topology`: older Core, the manifest lacks `needsTopology`, or the owner did not allow it);
- *  - `read`: a picture, cleaned against `agentCount`.
- */
-export type SliceRead = { state: "no_reader" } | { state: "none" } | { state: "read"; read: ReadTopology };
-export function readSliceTopology(ctx: object, agentCount: number): SliceRead {
-  const reader = (ctx as { topology?: unknown }).topology;
-  if (typeof reader !== "function") return { state: "no_reader" };
-  let raw: unknown;
-  try {
-    raw = (reader as () => unknown).call(ctx);
-  } catch {
-    return { state: "none" };
-  }
-  const read = cleanTopology(raw, agentCount);
-  return read ? { state: "read", read } : { state: "none" };
 }

@@ -64,7 +64,6 @@ import { identitiesView } from "./identities.ts";
 import { leanDirectory, leanTeamGet, leanTeamsList } from "./lean.ts";
 import { assertOwner, LIST_POLL, listProposals, pollStatuses, sendProposal, startProposalTimer } from "./proposals.ts";
 import * as reviews from "./reviews.ts";
-import { rememberSliceAgents } from "./slice-agents.ts";
 import * as store from "./store.ts";
 import { assertTopologyCaller, topologyGet } from "./topology.ts";
 
@@ -252,7 +251,6 @@ export const definition: SdkAppDefinition = {
   events: {
     // needsAgentDirectory: the slice lists every workspace agent; the full list arrives on every change (SDK 0.1.13).
     async agentsChanged(agents, ctx) {
-      rememberSliceAgents(agents); // slice order = the index base of the grant picture (src/slice-agents.ts)
       // one transaction: the agents are stored and a new agent gets its review request (when the policy says so)
       ctx.db.transaction(() => reviews.requestForNewAgents(ctx.db, store.syncAgents(ctx.db, agents)));
     },

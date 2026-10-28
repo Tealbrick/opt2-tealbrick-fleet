@@ -2,7 +2,7 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
-## 0.3.1 - Unreleased
+## 0.3.1 - 2026-10-28
 - QA-C373-GV-1 (X-10): owner-typed text (team name, description and tags; person name, title, org, relationship and tags; agent role and tags) is cleaned like agent text: control, bidi and format characters are removed on write. A name that is only invisible characters is refused (`input_invalid`). Rows stored before 0.3.1 stay as they are.
 
 Governance sprint C373 WP-D part 2: the grant view, the graph, the contacts layer and the "Add outside agent" form are wired
@@ -11,12 +11,14 @@ into the app. Updates from 0.3.0 and every 0.2.x: migration 0007 is forward-only
 ### Added
 - Person op `access_get` (read, owner only, never an agent tool): the grant picture for the Access page and the graph's
   "App access" layer. Output `{status: available|unavailable|not_consented, note, topology|null, agents[{id,name}],
-  identities[{agent,channel,handle}], generatedAt}`. It reads the COMPACT `SliceTopology` (spec 0.1.80: tuple rows,
-  `held` as a bitmask over the hold families in `HOLD_FAMILIES` order, pinned by a test) with the SDK `ctx.topology()`,
-  defensively (`src/topology-slice.ts`; the pinned SDK 0.1.40 has no such function, so today the answer is
-  `unavailable` with "Turn on 'See who has access' for Governance in the Portal (app settings) to show this."). Rows with an
-  index out of range or a wrong shape are dropped and the picture is marked `truncated`. Decoded on the server into the
-  object form the UI uses. The agent list the indexes point into comes from `agentsChanged` (`src/slice-agents.ts`).
+  identities[{agent,channel,handle}], generatedAt}`. It reads the COMPACT `SliceTopology` (spec 0.1.87: tuple rows,
+  `held` as a bitmask over the hold families in `HOLD_FAMILIES` order, pinned by a test) with the SDK `ctx.topology()`
+  (SDK 0.1.43), which hands the agent ids of the SAME slice (`agentIds`); agent names come from the directory. Without the
+  owner's consent the answer is `not_consented` with "Turn on 'See who has access' for Governance in the Portal (app
+  settings) to show this." Rows with an index out of range or a wrong shape are dropped and the picture is marked
+  `truncated` (`src/topology-slice.ts`, second line of defence). Decoded on the server into the object form the UI uses.
+- Manifest `needsTopology: true` (with `needsAgentDirectory`, M-TP-1): Core asks the owner for the consent `topology` on
+  update or install.
 - Topology `contacts` layer from Connect `contacts_list` (connect#34; companion `connect` now lists `identities_list` and
   `contacts_list`, read). Read on demand by `topology_get` only (at most 20 pages of 200, nothing cached or stored): an edge
   from the agent to the directory entry that owns the handle, or to an outside node named by the handle. Any failure makes
@@ -35,15 +37,8 @@ into the app. Updates from 0.3.0 and every 0.2.x: migration 0007 is forward-only
   each other); column gap 96 to 120 px. Access view: held actions are words ("first contact", "money", "public link"), workflow
   ops show "All" when the grant lists none, a shortened copy is said.
 - `topology_get` notes: the access layer says it is on the Access page. `access` is still `unavailable` there.
-- Version 0.3.1 in `package.json` and the manifest. Pins unchanged.
-
-### TODO when sdk#60 / spec#61 / connect#34 are released
-- needsTopology flag + re-pin when sdk#60 is released: declare `needsTopology: true` in the manifest (needs the manifest package
-  that validates it; Governance already has `needsAgentDirectory`), re-pin the SDK/spec for `ctx.topology()` and
-  `SliceTopology`, and shrink `src/topology-slice.ts` to the decoder. The Access page then shows data once the owner turns on
-  "See who has access".
-- Replace `test/contracts/connect.0.7.5-pr34.excerpt.json` with the released Connect manifest (byte copy).
-- If the SDK offers `ctx.agents()` or topology rows carry agent ids, delete `src/slice-agents.ts`.
+- Version 0.3.1 in `package.json` and the manifest. Pins: miniapp-sdk 0.1.43, manifest 0.1.35. The Connect contract is a
+  byte copy of the released Connect 0.7.11 manifest (`test/contracts/connect.0.7.11.manifest.json`).
 
 ## 0.3.0 - Released (dev, `08a711a`)
 

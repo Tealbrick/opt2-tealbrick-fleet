@@ -29,7 +29,13 @@ test("handles: shared channel_sender split, Buzz npub checksum, hex → npub, Sl
   assert.equal(normalizeHandle("slack:u01abcd2ef"), "slack:U01ABCD2EF");
   assert.equal(normalizeHandle("telegram:123456789"), "telegram:123456789");
   assert.equal(normalizeHandle("telegram:-1001234"), "telegram:-1001234");
-  for (const bad of ["", "buzz:npub1xyz", "slack:not an id", "telegram:12a", "email:a@b.c", "U01ABCD2EF", NOSTR.hex, "BUZZ:x"]) assert.equal(normalizeHandle(bad), null, bad);
+  for (const bad of ["", "buzz:npub1xyz", "slack:not an id", "telegram:12a", "U01ABCD2EF", NOSTR.hex, "BUZZ:x"]) assert.equal(normalizeHandle(bad), null, bad);
+});
+
+test("Governance handles: buzz, slack and telegram only; an email handle (manifest 0.1.34+) is refused (fire on bad)", () => {
+  assert.equal(store.fleetHandle("slack:u01abcd2ef"), "slack:U01ABCD2EF");
+  assert.equal(normalizeHandle("email:a@b.c") === null ? null : "email-known", "email-known", "the manifest knows email handles");
+  assert.equal(store.fleetHandle("email:a@b.c"), null);
 });
 
 test("teams: create, rename, unique names, tag filter, cursor paging, delete", () => {

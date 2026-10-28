@@ -1,14 +1,14 @@
 // access_get (C373 WP-D, G-2): the grant picture from the verified slice, person op only. The compact form Core sends is
 // cleaned and decoded on the server (src/topology-slice.ts). Each guard has a quiet-on-good and a fire-on-bad case with the
-// exact outcome (L34, L27). Until sdk#60 is released the pinned SDK has no `ctx.topology`; the op reads it defensively.
+// exact outcome (L34, L27). `ctx.topology()` (SDK 0.1.43) hands the picture and the agent ids of the SAME slice (`agentIds`).
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { HOLD_FAMILIES, validateAgainstSchema } from "@opt2-tealbrick/manifest";
 import { type Db, type Json, type OpContext, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import type { AccessGetOutput } from "#kit";
 import { handlers, manifest } from "../src/app.ts";
-import { forgetSliceAgents, rememberSliceAgents } from "../src/slice-agents.ts";
-import { type CompactTopology, cleanTopology, crudFromCode, decodeTopology, HELD_BITS, heldFromMask, readSliceTopology, TOPOLOGY_MAX } from "../src/topology-slice.ts";
+import { syncAgents } from "../src/store.ts";
+import { type CompactTopology, cleanTopology, crudFromCode, decodeTopology, HELD_BITS, heldFromMask, TOPOLOGY_MAX } from "../src/topology-slice.ts";
 import type { SliceTopology } from "../src/ui/access-types.ts";
 import { AGENT_A, AGENT_B, migratedDb } from "./helpers.ts";
 
@@ -36,8 +36,8 @@ const compact = (over: Partial<CompactTopology> = {}): CompactTopology => ({
   ],
   ...over,
 });
-/** A context like the SDK's, with an optional `topology` reader and a Connect that answers identities_list. */
-function ctxOf(db: Db, opts: { caller?: object; topology?: unknown; reader?: boolean; identities?: Json[]; connectDown?: boolean } = {}): OpContext {
+/** A context like the SDK's: `topology()` answers the picture with the slice's agent ids (`agentIds`), and a Connect that answers identities_list. */
+function ctxOf(db: Db, opts: { caller?: object; topology?: unknown; agentIds?: string[]; throws?: boolean; identities?: Json[]; connectDown?: boolean } = {}): OpContext {
   const ctx: Record<string, unknown> = {
     db,
     caller: opts.caller ?? OWNER,
@@ -47,7 +47,10 @@ function ctxOf(db: Db, opts: { caller?: object; topology?: unknown; reader?: boo
       return { status: "ok", output: { identities: opts.identities ?? [], nextCursor: null } };
     },
   };
-  if (opts.reader !== false) ctx.topology = () => opts.topology ?? null;
+  ctx.topology = () => {
+    if (opts.throws) throw new Error("boom");
+    return opts.topology ? { ...(opts.topology as object), agentIds: opts.agentIds ?? AGENTS.map((a) => a.id) } : null;
+  };
   return ctx as unknown as OpContext;
 }
 const get = (c: OpContext) => handlers.access_get.run({} as never, c) as Promise<AccessGetOutput>;
@@ -71,9 +74,14 @@ test("access_get is a person read: no idempotency, no receipt, never an agent to
   for (const o of manifest.operations.filter((x) => (x as { audience?: string }).audience === "agent")) assert.doesNotMatch(JSON.stringify(o.output), /"connections"|"companions"|"wf"/, `${o.id} carries no grant picture`);
 });
 
+test("the manifest asks for the grant picture: needsTopology with needsAgentDirectory (M-TP-1)", () => {
+  const m = manifest as unknown as { needsTopology?: unknown; needsAgentDirectory?: unknown };
+  assert.deepEqual([m.needsTopology, m.needsAgentDirectory], [true, true]);
+});
+
 test("an agent, an app and a scheduled caller are refused (no_access 403); the owner is served", async () => {
   const db = migratedDb();
-  rememberSliceAgents(AGENTS);
+  syncAgents(db, [AGENT_A, AGENT_B]);
   for (const caller of [{ type: "agent", id: AGENT_A.id, name: "A", mode: "free" }, { type: "app", id: "ins_rules", product: "rules", listed: true }, { type: "system", id: "x" }]) {
     assert.equal(await outcome(() => get(ctxOf(db, { caller, topology: compact() }))), "no_access 403", JSON.stringify(caller));
   }
@@ -123,7 +131,7 @@ test("decode: compact → object form, agents resolved by index in slice order, 
   assert.equal(ui.edges.length, 3);
 });
 
-test("an index out of range drops the row and marks the picture truncated; the other rows stay (spec 0.1.80 rule 2)", () => {
+test("an index out of range drops the row and marks the picture truncated; the other rows stay (spec 0.1.87 rule 2)", () => {
   const read = cleanTopology(
     compact({
       edges: [
@@ -179,29 +187,11 @@ test("malformed rows are dropped and counted; a list over its bound is cut; a ma
   );
 });
 
-test("readSliceTopology: no reader on the SDK, a reader that answers nothing, a reader that throws, a picture", () => {
-  assert.deepEqual(readSliceTopology({}, 2), { state: "no_reader" });
-  assert.deepEqual(readSliceTopology({ topology: () => null }, 2), { state: "none" });
-  assert.deepEqual(
-    readSliceTopology(
-      {
-        topology: () => {
-          throw new Error("boom");
-        },
-      },
-      2,
-    ),
-    { state: "none" },
-  );
-  assert.equal(readSliceTopology({ topology: () => compact() }, 2).state, "read");
-  assert.equal(readSliceTopology({ topology: () => ({ v: 9 }) }, 2).state, "none");
-});
-
 // ── the op ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
 test("available: the picture, the agents and their channel identities (only known agents'), valid against the manifest", async () => {
   const db = migratedDb();
-  rememberSliceAgents(AGENTS);
+  syncAgents(db, [AGENT_A, AGENT_B]);
   const out = await get(
     ctxOf(db, {
       topology: compact(),
@@ -219,20 +209,26 @@ test("available: the picture, the agents and their channel identities (only know
   assert.equal(validateAgainstSchema(op.output, out as unknown as Json).ok, true);
 });
 
-test("unavailable: the SDK has no topology reader (older than sdk#60) → plain words, no picture, no agents (fire on bad)", async () => {
+test("unavailable: a picture this version cannot read (v 9) → plain words, no picture, no agents (fire on bad)", async () => {
   const db = migratedDb();
-  rememberSliceAgents(AGENTS);
-  const out = await get(ctxOf(db, { reader: false }));
+  const out = await get(ctxOf(db, { topology: { v: 9 } }));
   assert.equal(out.status, "unavailable");
   assert.equal(out.topology, null);
   assert.deepEqual([out.agents, out.identities], [[], []]);
-  assert.match(out.note, /Turn on 'See who has access' for Governance in the Portal \(app settings\) to show this\./);
+  assert.match(out.note, /Update Governance\./);
   assert.equal(validateAgainstSchema(op.output, out as unknown as Json).ok, true);
+});
+
+test("a reader that throws is the same as no picture (not_consented), never an error", async () => {
+  const db = migratedDb();
+  const out = await get(ctxOf(db, { throws: true }));
+  assert.equal(out.status, "not_consented");
+  assert.equal(out.topology, null);
 });
 
 test("not_consented: the reader answers nothing (the owner has not allowed it) → the same plain sentence", async () => {
   const db = migratedDb();
-  rememberSliceAgents(AGENTS);
+  syncAgents(db, [AGENT_A, AGENT_B]);
   const out = await get(ctxOf(db, { topology: null }));
   assert.equal(out.status, "not_consented");
   assert.equal(out.topology, null);
@@ -240,21 +236,28 @@ test("not_consented: the reader answers nothing (the owner has not allowed it) �
   assert.equal(validateAgainstSchema(op.output, out as unknown as Json).ok, true);
 });
 
-test("the agent list has not arrived yet: unavailable, never a guess of whose grants these are", async () => {
+test("agents resolve against the SAME slice's agentIds; names come from the directory, an unstored agent shows its id", async () => {
   const db = migratedDb();
-  forgetSliceAgents();
-  const out = await get(ctxOf(db, { topology: compact() }));
-  assert.equal(out.status, "unavailable");
-  assert.equal(out.topology, null);
-  assert.match(out.note, /list of agents has not loaded/);
+  // reordered ids in the slice: edge agentIdx 0 is now AGENT_B (never a second read of the agents)
+  const out = await get(ctxOf(db, { topology: compact(), agentIds: [AGENT_B.id, AGENT_A.id] }));
+  assert.equal(out.status, "available");
+  assert.equal(out.topology?.edges[0]?.agent, AGENT_B.id);
+  assert.deepEqual(out.agents, [
+    { id: AGENT_B.id, name: AGENT_B.id },
+    { id: AGENT_A.id, name: AGENT_A.id },
+  ]);
+  // an index past the slice's agentIds is dropped and flagged (fire on bad)
+  const short = await get(ctxOf(db, { topology: compact(), agentIds: [AGENT_A.id] }));
+  assert.equal(short.topology?.truncated, true);
+  assert.ok(short.topology?.edges.every((e) => e.agent === AGENT_A.id));
   // and quiet on good: an empty picture needs no agents
-  const empty = await get(ctxOf(db, { topology: { v: 1, instances: [], edges: [], companions: [], connections: [] } }));
+  const empty = await get(ctxOf(db, { topology: { v: 1, instances: [], edges: [], companions: [], connections: [] }, agentIds: [] }));
   assert.equal(empty.status, "available");
 });
 
 test("a truncated picture is flagged on the picture; a Connect that cannot answer is said in the note; the picture still shows", async () => {
   const db = migratedDb();
-  rememberSliceAgents(AGENTS);
+  syncAgents(db, [AGENT_A, AGENT_B]);
   const out = await get(ctxOf(db, { topology: compact({ edges: [[0, 0, "r", "f", 0, 0, 0], [9, 0, "r", "f", 0, 0, 0]] }), connectDown: true }));
   assert.equal(out.status, "available");
   assert.equal(out.topology?.truncated, true);
@@ -266,7 +269,6 @@ test("a truncated picture is flagged on the picture; a Connect that cannot answe
 test("the full-size picture (40 apps, 600 edges, 100 companions, 300 connections) is valid against the manifest", async () => {
   const db = migratedDb();
   const agents = Array.from({ length: 50 }, (_, i) => ({ id: `agt_${String(i).padStart(26, "0")}`, name: `Agent ${i}` }));
-  rememberSliceAgents(agents);
   const t: CompactTopology = {
     v: 1,
     instances: Array.from({ length: 40 }, (_, i): [string, string, string, string] => [`ins_${i}`, "knowledge", `App ${i}`, "1.0.0"]),
@@ -274,9 +276,8 @@ test("the full-size picture (40 apps, 600 edges, 100 companions, 300 connections
     companions: Array.from({ length: 100 }, (_, i): [number, number, string, number] => [i % 40, (i + 1) % 40, "crud", 128]),
     connections: Array.from({ length: 300 }, (_, i): [string, number, "k", "a"] => [`con_${i}`, i % 50, "k", "a"]),
   };
-  const out = await get(ctxOf(db, { topology: t }));
+  const out = await get(ctxOf(db, { topology: t, agentIds: agents.map((a) => a.id) }));
   assert.equal(out.status, "available");
   assert.equal(out.topology?.edges.length, 600);
   assert.equal(validateAgainstSchema(op.output, out as unknown as Json).ok, true);
-  forgetSliceAgents();
 });
