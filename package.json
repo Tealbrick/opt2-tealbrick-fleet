@@ -37,5 +37,10 @@
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "typescript": "7.0.2"
+  },
+  "pnpm": {
+    "overrides": {
+      "@opt2-tealbrick/manifest": "https://github.com/Tealbrick/opt2-tealbrick-dist/releases/download/opt2-tealbrick-sdk-manifest-v0.1.35/opt2-tealbrick-manifest-0.1.35.tgz"
+    }
   }
 }

@@ -40,7 +40,8 @@ into the app. Updates from 0.3.0 and every 0.2.x: migration 0007 is forward-only
   ops show "All" when the grant lists none, a shortened copy is said.
 - `topology_get` notes: the access layer says it is on the Access page. `access` is still `unavailable` there.
 - Version 0.3.1 in `package.json` and the manifest. Pins: miniapp-sdk 0.1.43, manifest 0.1.35. The Connect contract is a
-  byte copy of the released Connect 0.7.11 manifest (`test/contracts/connect.0.7.11.manifest.json`).
+  byte copy of the released Connect 0.7.11 manifest (`test/contracts/connect.0.7.11.manifest.json`). A pnpm override
+  gives the conformance suite (0.1.30) manifest 0.1.35 too, so it validates `needsTopology`. Template ci-v9.23.
 
 ## 0.3.0 - Released (dev, `08a711a`)
 
