@@ -741,13 +741,78 @@ test("cadence: every minute for 30 minutes, then every 15", async () => {
   assert.equal((await w.tick(id)).afterMs, 15 * 60_000);
 });
 
-test("a waiting plan lists no store each tick: each list costs a Decisions row", async () => {
+test("§4 re-reads: an open plan reads its stores every 60 s for 30 minutes, then every 15; each read updates the owner's copy; a proved end removes the row", async () => {
   const w = makeWorld();
   account(w);
-  const id = await leavingPlan(w);
-  const lists = w.connect.data.lists;
-  for (let i = 0; i < 5; i++) await w.tick(id);
-  assert.equal(w.connect.data.lists, lists);
+  leave(w);
+  const id = w.makePlan({ kind: "agent", id: HENRY });
+  await runDue(w.pc);
+  const start = w.connect.data.lists;
+  const shadow = () => w.db.prepare("SELECT item_id, state FROM fleet_access_items WHERE item_id = 'account_as_itself:acc1'").get();
+  assert.ok(shadow(), "the first read reached the owner's copy");
+  // 30 minutes: one list a minute
+  for (let i = 0; i < 30; i++) {
+    w.clock.t += 60_000;
+    await runDue(w.pc);
+  }
+  const fast = w.connect.data.lists - start;
+  assert.ok(fast >= 29 && fast <= 31, `about 30 reads in the first 30 minutes, got ${fast}`);
+  // the next hour: one list each 15 minutes
+  const before = w.connect.data.lists;
+  for (let i = 0; i < 60; i++) {
+    w.clock.t += 60_000;
+    await runDue(w.pc);
+  }
+  const slow = w.connect.data.lists - before;
+  assert.ok(slow >= 3 && slow <= 5, `about 4 reads in the next hour, got ${slow}`);
+  // a read sees a change in the store: Differences has it at the next tick
+  w.connect.sees(HENRY, "paused");
+  w.clock.t += 15 * 60_000;
+  await runDue(w.pc);
+  assert.equal(shadow()?.state, "paused");
+  // the end, proved by a fresh list, removes the row at once
+  approveAndDeliver(w, keyOf(w, id), HENRY);
+  w.clock.t += 15 * 60_000;
+  await runDue(w.pc);
+  assert.equal(w.plan(id).state, "done");
+  assert.equal(shadow(), undefined);
+});
+
+test("§4 re-reads: with 3 open plans one sweep serves them all, at the same pace; a tick reads a store only when that decides a step", async () => {
+  const w = makeWorld();
+  account(w);
+  const { agentId } = await import("./plans-world.ts");
+  const ids = [agentId(31), agentId(32)];
+  store.syncAgents(w.db, [...w.db.prepare("SELECT id, name, mode, status FROM fleet_agents").all(), ...ids.map((id) => ({ id, name: id, mode: "free", status: "active" }))] as never, w.clock.t);
+  for (const id of ids) {
+    store.setAgent(w.db, { agent: id, owner: w.ann.id }, w.clock.t);
+    w.core.addAgent(id, 0, 0);
+    set(w.db, "agent", id, "active", {}, w.clock.t);
+    set(w.db, "agent", id, "leaving", {}, w.clock.t);
+    w.makePlan({ kind: "agent", id });
+  }
+  leave(w);
+  w.makePlan({ kind: "agent", id: HENRY });
+  let sweeps = 0;
+  w.pc.startSweep = () => {
+    sweeps++;
+    w.db.prepare("INSERT INTO fleet_sweeps (id, started_by, started_at, finished_at) VALUES (?, 'schedule', ?, ?)").run(`swp_${sweeps}`, w.clock.t, w.clock.t);
+  };
+  await runDue(w.pc); // first read of each store: it decides what the steps are
+  const first = w.connect.data.lists;
+  assert.equal(sweeps, 1);
+  for (let i = 0; i < 5; i++) {
+    w.clock.t += 60_000;
+    await runDue(w.pc);
+  }
+  assert.equal(w.connect.data.lists, first, "no list per plan");
+  assert.equal(sweeps, 6);
+  w.clock.t += 40 * 60_000;
+  await runDue(w.pc);
+  const at = sweeps;
+  w.clock.t += 60_000;
+  await runDue(w.pc);
+  assert.equal(sweeps, at, "past the window, not each minute");
 });
 
 test("system plan alert: once with an Inbox; banner with none; a restart with an unanswered alert asks with the same key", async () => {

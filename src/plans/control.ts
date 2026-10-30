@@ -3,31 +3,45 @@
 import { type Db, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { loadSubject } from "../lifecycle/transitions.ts";
 import { askRail } from "./core-rail.ts";
-import { createPlan, getPlan, movePlan, OPEN_SQL, type Row, stepsOf } from "./plan.ts";
+import { createPlan, getPlan, movePlan, notePlan, OPEN_SQL, type Row, stepsOf } from "./plan.ts";
 import { cancelUnsent, isAppliedHere, type PlanCtx } from "./runner.ts";
 import { ASK_AGAIN_STATES, isOpenPlan, REISSUE_MS } from "./steps.ts";
 
+export interface CloseResult {
+  taken: number;
+  /** parts that still stand in Portal */
+  left: number;
+  /** one of those: the owner approved it first */
+  applied: boolean;
+}
+
 /**
- * Takes open plans of a subject back, draft first (§2 T4, T6). `replaced`: a new plan takes over, and a plan past Core stays, so createPlan refuses.
- * `withdrawn`: the owner undid the stop; `cancelled`: the owner stopped the plan. Throws, changing nothing more, when Portal does not answer: an unknown draft could still be applied.
+ * Takes open plans of a subject back, draft first (§2 T4, T6). `replaced`: a new plan takes over. `withdrawn`: the owner undid the stop. `cancelled`: the owner stopped the plan.
+ * This cannot be one transaction: each part is a call to Portal. So it goes through every part, each ends with its true state, and the answer says how many are still there. The caller decides: a state change does not go on with a draft that can still be applied.
  */
-export async function closeOpenPlans(pc: PlanCtx, plans: readonly Row[], to: "replaced" | "withdrawn" | "cancelled"): Promise<void> {
+export async function closeOpenPlans(pc: PlanCtx, plans: readonly Row[], to: "replaced" | "withdrawn" | "cancelled"): Promise<CloseResult> {
   const rail = pc.rail;
-  // All parts or none, as far as this file can tell before it calls anyone.
+  const out: CloseResult = { taken: 0, left: 0, applied: false };
+  // Nothing is touched when these say no.
   if (plans.some((p) => p.state === "applying" || p.draft_state === "applying")) throw new TbError("plan_applying", "Portal is applying this plan. Try again in a minute.", 409);
   if (to === "replaced" && plans.some(isAppliedHere)) throw new TbError("plan_open", "A plan for this entry is past Portal and still open. Cancel it or wait for it.", 409);
   for (const p of plans) {
     const id = String(p.id);
     if (isAppliedHere(p)) {
       if (movePlan(pc.db, id, String(p.state), "cancelled", { code: "cancelled_after_apply" }, pc.now())) cancelUnsent(pc.db, id, pc.now());
+      out.taken++;
       continue;
     }
     let code: string | null = null;
     // Whatever the mode says: a draft may stand in Portal since before the rail went away.
     if (rail && p.draft_key !== null) {
       const answer = await askRail(() => rail.withdraw(String(p.draft_key)));
-      if (answer.kind === "draft_state") throw new TbError("plan_applied", "You already approved this in Portal. It cannot be taken back here.", 409);
-      if (answer.kind === "wait" || answer.kind === "full") throw new TbError("portal_unavailable", "Portal does not answer, so this request could still be applied. Try again.", 503);
+      if (answer.kind === "draft_state" || answer.kind === "wait" || answer.kind === "full") {
+        out.left++;
+        if (answer.kind === "draft_state") out.applied = true;
+        notePlan(pc.db, id, String(getPlan(pc.db, id)?.state), { code: answer.kind === "draft_state" ? "approved_first" : "not_reached" }, pc.now());
+        continue;
+      }
       // The rail is gone or refused: the plan ends, and its words say the draft may stand. A later apply shows as a difference, never silently.
       if (answer.kind === "off" || answer.kind === "refused") code = "not_taken_back";
     } else if (!rail && p.draft_key !== null) code = "not_taken_back";
@@ -35,7 +49,17 @@ export async function closeOpenPlans(pc: PlanCtx, plans: readonly Row[], to: "re
     const cur = getPlan(pc.db, id) as Row;
     const did = stepsOf(pc.db, id).some((s) => s.phase === "core" && s.output_json !== null);
     if (isOpenPlan(String(cur.state)) && movePlan(pc.db, id, String(cur.state), to, { code: code ?? (did ? "partly_applied" : null) }, now)) cancelUnsent(pc.db, id, now);
+    out.taken++;
   }
+  return out;
+}
+
+/** A state change does not go on while a draft can still be applied. The message says what already happened, so the owner reads the true state. */
+export function assertAllClosed(r: CloseResult): void {
+  if (r.left === 0) return;
+  const before = r.taken > 0 ? ` ${r.taken} of ${r.taken + r.left} parts were taken back already. Nothing else changed.` : "";
+  if (r.applied) throw new TbError("plan_applied", `You already approved this in Portal. It cannot be taken back here.${before}`, 409);
+  throw new TbError("portal_unavailable", `Portal does not answer, so this request could still be applied. Try again.${before}`, 503);
 }
 
 const otherOpen = (db: Db, p: Row): boolean => !!db.prepare(`SELECT 1 FROM fleet_plans WHERE subject_kind = ? AND subject_id = ? AND group_id <> ? AND state IN (${OPEN_SQL}) LIMIT 1`).get(String(p.subject_kind), String(p.subject_id), String(p.group_id));

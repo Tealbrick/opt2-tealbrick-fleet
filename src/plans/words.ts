@@ -122,6 +122,10 @@ export function headlineOf(p: Row, counts: { proved: number; said: number; manua
   }
 }
 
+export const NOTE_NOT_REACHED = "Portal did not answer, so this part could still be applied. Cancel it again.";
+export const NOTE_APPROVED_FIRST = "You approved this part in Portal first. It cannot be taken back here.";
+export const NOTE_MIXED = "The parts of this plan do not all have the same state. Read each part.";
+export const NOTE_STILL_STOPPED = "This entry is still marked as stopped.";
 export const NOTE_NOT_TAKEN_BACK = "Governance could not take this request back. If it is still in Portal, reject it there.";
 export const NOTE_CONSENT = "To let Governance prepare this for you, turn on 'See who has access' for Governance in Portal.";
 export const NOTE_RAIL_OFF = "Portal cannot take a request from Governance here.";

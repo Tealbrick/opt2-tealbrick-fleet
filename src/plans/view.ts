@@ -3,9 +3,29 @@ import type { Db } from "@opt2-tealbrick/miniapp-sdk";
 import { getPlan, type Row, stepsOf } from "./plan.ts";
 import { NOT_CHANGED } from "./portal-link.ts";
 import { ASK_AGAIN_STATES, isFinalStep, isOpenPlan, stuckStep } from "./steps.ts";
-import { coreLabel, coreStepText, headlineOf, itemStepText, NOTE_CONSENT, NOTE_NOT_TAKEN_BACK, NOTE_RAIL_OFF, readText, storeName } from "./words.ts";
+import { coreLabel, coreStepText, headlineOf, itemStepText, NOTE_APPROVED_FIRST, NOTE_CONSENT, NOTE_MIXED, NOTE_NOT_REACHED, NOTE_NOT_TAKEN_BACK, NOTE_RAIL_OFF, NOTE_STILL_STOPPED, readText, storeName } from "./words.ts";
 
 const iso = (ms: unknown): string | null => (ms === null || ms === undefined ? null : new Date(Number(ms)).toISOString());
+
+/** What the headline does not say, each sentence from what was read now. After a failed undo or a part that could not be reached, this is where the owner reads the true state. */
+function noteOf(db: Db, p: Row, mode: string): string | null {
+  const notes: string[] = [];
+  if (p.code === "not_taken_back") notes.push(NOTE_NOT_TAKEN_BACK);
+  if (p.code === "not_reached") notes.push(NOTE_NOT_REACHED);
+  if (p.code === "approved_first") notes.push(NOTE_APPROVED_FIRST);
+  if (p.rail_code === "topology_consent") notes.push(NOTE_CONSENT);
+  else if (mode === "portal_link") notes.push(NOTE_RAIL_OFF);
+  if (Number(p.parts) > 1) {
+    const states = db.prepare("SELECT DISTINCT state FROM fleet_plans WHERE group_id = ?").all(String(p.group_id));
+    if (states.length > 1 && states.some((s) => s.state === "cancelled" || s.state === "withdrawn" || s.state === "replaced")) notes.push(NOTE_MIXED);
+  }
+  if (p.state === "withdrawn" || p.state === "cancelled") {
+    const table = p.subject_kind === "agent" ? "fleet_agents" : "fleet_people";
+    const now = db.prepare(`SELECT lifecycle FROM ${table} WHERE id = ?`).get(String(p.subject_id))?.lifecycle;
+    if (now === "suspended" || now === "leaving") notes.push(NOTE_STILL_STOPPED);
+  }
+  return notes.length > 0 ? notes.join(" ") : null;
+}
 
 export function planView(db: Db, id: string) {
   const p = getPlan(db, id) as Row;
@@ -34,7 +54,7 @@ export function planView(db: Db, id: string) {
     state: String(p.state),
     headline: headlineOf(p, counts),
     mode,
-    note: p.code === "not_taken_back" ? NOTE_NOT_TAKEN_BACK : p.rail_code === "topology_consent" ? NOTE_CONSENT : mode === "portal_link" ? NOTE_RAIL_OFF : null,
+    note: noteOf(db, p, mode),
     reviewUrl: p.review_url === null ? null : String(p.review_url),
     expiresAt: iso(p.expires_at),
     openedAt: iso(p.opened_at) as string,
