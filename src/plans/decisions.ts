@@ -41,7 +41,7 @@ export function applyDecisions(db: Db, s: Subject, decisions: readonly AgentDeci
     }
     if (!d.newOwner) fail("input_invalid", "Name the new owner.", 400);
     if (d.newOwner === a.owner_id) fail("input_invalid", "Name a new owner. This is the owner now.", 400);
-    setAgentMoved(db, { agent: d.agent, owner: d.newOwner as string }, { kind: "owner", id: actor.id }, now);
+    setAgentMoved(db, { agent: d.agent, owner: d.newOwner as string }, { kind: "owner", id: actor.id }, now, { transfer: true });
     moved.push(d.agent);
   }
   return moved;
