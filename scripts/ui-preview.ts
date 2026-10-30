@@ -31,7 +31,7 @@ const THEMES = ["light", "dark"] as const;
 const TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".txt": "text/plain; charset=utf-8" };
 
 /** Replaced words of the §10 table; a strict scene fails when one is visible. */
-const OLD_WORDS = /\b(Colleagues?|Offboard(?:ed|ing)?|Proposed|Rehire|Trust reviews?|Campaigns?|Topology|Holds|Exclusions?|Evidence)\b/;
+const OLD_WORDS = /\b(Colleagues?|Offboard(?:ed|ing)?|Proposed|Rehire|Trust reviews?|Campaigns?|Topology|Holds|Exclusions?|Evidence)\b/i;
 /** A raw id of this platform: prefix, underscore, at least 6 id characters. */
 const RAW_ID = /\b(?:agt|per|pln|ins|lev|rvw|drf|prp|hld|rcp|tm|team|ws|rel)_[0-9A-Za-z]{6,}\b/;
 
@@ -50,11 +50,15 @@ function kitFor(scene: Scene): string {
   const file = assets ? join(ui, assets, "vendor", "opt2-tealbrick-fleet", "dist", "kit", "index.js") : "";
   const source = readFileSync(existsSync(file) ? file : join(root, "dist", "kit", "index.js"), "utf8");
   if (!scene.personOps) return source;
-  return source.replace(/export const PERSON_OPS = \[[^\]]*\]/, `export const PERSON_OPS = ${JSON.stringify(scene.personOps)}`);
+  const PERSON_OPS = /export const PERSON_OPS = \[[^\]]*\]/;
+  if (!PERSON_OPS.test(source)) throw new Error("ui-preview: the kit has no PERSON_OPS list");
+  return source.replace(PERSON_OPS, `export const PERSON_OPS = ${JSON.stringify(scene.personOps)}`);
 }
 
 function indexFor(theme: string): string {
-  const page = readFileSync(join(ui, "index.html"), "utf8").replace('<html lang="en">', theme === "dark" ? '<html lang="en" data-theme="dark">' : '<html lang="en">');
+  const built = readFileSync(join(ui, "index.html"), "utf8");
+  if (!built.includes('<html lang="en">') || !built.includes('<script type="importmap">')) throw new Error("ui-preview: index.html changed shape");
+  const page = built.replace('<html lang="en">', theme === "dark" ? '<html lang="en" data-theme="dark">' : '<html lang="en">');
   return page.replace(/<script type="importmap">(.*?)<\/script>/s, (_m, json: string) => {
     const map = JSON.parse(json) as { imports: Record<string, string> };
     map.imports["#kit"] = "/__preview/kit.js"; // an override, not a change of the build
@@ -76,7 +80,7 @@ const json = (res: ServerResponse, status: number, body: unknown) => {
 };
 
 /** One server per run; `current` is the scene being shot. */
-function startServer(state: { current: Scene; theme: string; unknownOps: Set<string>; calls: { op: string; input: unknown }[] }): Promise<Server> {
+function startServer(state: { current: Scene; theme: string; unknownOps: Set<string>; unexpected: Set<string>; calls: { op: string; input: unknown }[] }): Promise<Server> {
   const answer = (res: ServerResponse, a: Answer) => {
     if (a.kind === "hang") return; // stays open until the run closes all connections
     if (a.kind === "error") return json(res, a.status, { error: { code: a.code, message: a.message ?? a.code } });
@@ -105,25 +109,33 @@ function startServer(state: { current: Scene; theme: string; unknownOps: Set<str
         const body = (await readBody(req)) || "{}";
         const input = (JSON.parse(body) as { input?: unknown }).input ?? {};
         state.calls.push({ op: name, input });
-        const fixture = state.current.ops[name];
+        const fixture = Object.hasOwn(state.current.ops, name) ? state.current.ops[name] : undefined;
         if (!fixture) {
           state.unknownOps.add(name);
           return json(res, 404, { error: { code: "unknown_tool", message: name } });
         }
         return answer(res, fixture(input));
       }
-      if (rest.startsWith("tb/")) return json(res, 404, { error: { code: "not_found", message: rest } });
+      if (rest.startsWith("tb/")) {
+        state.unexpected.add(`route with no answer: ${rest}`);
+        return json(res, 404, { error: { code: "not_found", message: rest } });
+      }
       const file = normalize(join(ui, rest));
       if (file.startsWith(ui + sep) && existsSync(file) && statSync(file).isFile()) {
         res.writeHead(200, { "content-type": TYPES[extname(file)] ?? "application/octet-stream" });
         res.end(readFileSync(file));
         return;
       }
+      if (extname(rest)) {
+        state.unexpected.add(`missing file: ${rest}`);
+        res.writeHead(404).end();
+        return;
+      }
       // every other path under the base is a page of the app (SDK-API §14)
       res.writeHead(200, { "content-type": TYPES[".html"] as string });
       res.end(indexFor(state.theme));
     })().catch((e: unknown) => {
-      console.error(e);
+      state.unexpected.add(`server error: ${e instanceof Error ? e.message : String(e)}`);
       if (!res.headersSent) res.writeHead(500);
       res.end();
     });
@@ -136,10 +148,14 @@ const visibleText = (page: Page) =>
   page.evaluate(() => {
     const copy = document.body.cloneNode(true) as HTMLElement;
     for (const d of copy.querySelectorAll("details, script, style")) d.remove();
-    return copy.textContent ?? "";
+    // one space between text nodes, or two cells would join into one word and the \b of the checks would not fire
+    const parts: string[] = [];
+    const walker = document.createTreeWalker(copy, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) parts.push(walker.currentNode.textContent ?? "");
+    return parts.join(" ");
   });
 
-async function shoot(page: Page, baseUrl: string, scene: Scene, state: { unknownOps: Set<string> }, file: string): Promise<string[]> {
+async function shoot(page: Page, baseUrl: string, scene: Scene, state: { unknownOps: Set<string>; unexpected: Set<string> }, file: string): Promise<string[]> {
   const problems: string[] = [];
   page.on("pageerror", (e) => problems.push(`page error: ${e.message}`));
   page.on("console", (m) => {
@@ -154,6 +170,7 @@ async function shoot(page: Page, baseUrl: string, scene: Scene, state: { unknown
   const width = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, inner: window.innerWidth }));
   if (width.scroll > width.inner) problems.push(`sideways scroll: ${width.scroll} > ${width.inner}`);
   for (const op of state.unknownOps) problems.push(`op with no fixture: ${op}`);
+  problems.push(...state.unexpected);
   if (scene.strict) {
     const text = await visibleText(page);
     const id = RAW_ID.exec(text)?.[0];
@@ -186,7 +203,7 @@ if (chosen.length === 0) {
   console.error(`ui-preview: no scene matches. Scenes: ${scenes.map((s) => s.name).join(", ")}`);
   process.exit(2);
 }
-const state = { current: chosen[0] as Scene, theme: "light", unknownOps: new Set<string>(), calls: [] as { op: string; input: unknown }[] };
+const state = { current: chosen[0] as Scene, theme: "light", unknownOps: new Set<string>(), unexpected: new Set<string>(), calls: [] as { op: string; input: unknown }[] };
 const server = await startServer(state);
 const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}${BASE}`;
 
@@ -203,6 +220,7 @@ if (args.serve) {
           state.current = scene;
           state.theme = theme;
           state.unknownOps = new Set();
+          state.unexpected = new Set();
           state.calls = [];
           scene.reset?.();
           const context = await browser.newContext({ viewport: { width: size.width, height: size.height }, reducedMotion: "reduce", colorScheme: theme });
