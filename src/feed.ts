@@ -7,6 +7,7 @@
 // A team's name is the one exception the contract allows (name?, 1-80 chars).
 import { normalizeHandle } from "@opt2-tealbrick/manifest";
 import { type Db, TbError } from "@opt2-tealbrick/miniapp-sdk";
+import { type Effective, effectiveAgent, effectivePerson, floorOf, type Lifecycle } from "./lifecycle/states.ts";
 import { revision } from "./store.ts";
 import type { ContactKind, Trust } from "./trust.ts";
 
@@ -29,6 +30,10 @@ export interface FeedContact {
   status: "active" | "departed";
   trust: Trust;
   handles: string[];
+  /** only with `accept: ["lifecycle"]` (C380): the effective lifecycle; none for an outside agent, which has only trust */
+  lifecycle?: Effective;
+  /** only with `accept: ["lifecycle"]`: true = Rules refuses by, for and to this entry, before any rule */
+  floor?: boolean;
 }
 export interface FeedAgent {
   id: string;
@@ -37,10 +42,15 @@ export interface FeedAgent {
   owner: string | null;
   /** only with `accept: ["agent_handles"]` (C373 §3): canonical handles Connect issued to the agent, sorted, <= 16 */
   handles?: string[];
+  /** only with `accept: ["lifecycle"]` (C380): the effective lifecycle, with the owner's stop and the dates in it */
+  lifecycle?: Effective;
+  /** only with `accept: ["lifecycle"]`: true = Rules refuses it before any rule */
+  floor?: boolean;
 }
 
-/** The one `accept` value this version knows (C373 §3). Unknown values are ignored. */
+/** The `accept` values this version knows (C373 §3, C380). Unknown values are ignored. */
 export const ACCEPT_AGENT_HANDLES = "agent_handles";
+export const ACCEPT_LIFECYCLE = "lifecycle";
 export interface FeedInput {
   sinceRevision?: number;
   accept?: string[];
@@ -126,16 +136,24 @@ export function assertFeedCaller(caller: { type: string; product?: unknown; list
  * `accept: ["agent_handles"]` (C373 §3, additive): every agents[] entry also carries `handles` (the cached Connect
  * handles, canonical, sorted, <= 16; [] when none). One more indexed read; nothing is called. Without it (or with only
  * unknown values) the answer is byte-for-byte the fleet.directory_feed/1 shape of 0.2.x.
+ *
+ * `accept: ["lifecycle"]` (C380, spec 0.1.89): agents[] and person contacts[] carry the effective lifecycle, and agents[] and contacts[]
+ * carry `floor`. A reader replaces its floor entries from a full read, so a stopped row stays listed. Time changes `not_started` only with a
+ * revision bump (the date timer ends the date), so `unchanged` stays true to its word.
  */
-export function directoryFeed(db: Db, input: FeedInput, warn?: Warn): DirectoryFeed {
+export function directoryFeed(db: Db, input: FeedInput, warn?: Warn, now = Date.now()): DirectoryFeed {
   const rev = revision(db);
   if (input.sinceRevision !== undefined && input.sinceRevision === rev) return { v: 1, revision: rev, unchanged: true };
   // C373 §3: agent handles only when the reader asks for them; without `accept` the answer is exactly the old shape
   const agentHandles = Array.isArray(input.accept) && input.accept.includes(ACCEPT_AGENT_HANDLES) ? cachedAgentHandles(db) : null;
+  // C380: lifecycle and floor only when the reader asks; without `accept` the answer is exactly the old shape
+  const lifecycle = Array.isArray(input.accept) && input.accept.includes(ACCEPT_LIFECYCLE);
 
   const handles = new Map<string, string[]>();
+  const personHandles = new Set<string>();
   for (const r of db.prepare("SELECT person_id, handle FROM fleet_handles ORDER BY person_id, handle").all()) {
     const h = String(r.handle);
+    personHandles.add(h);
     if (normalizeHandle(h) !== h || !HANDLE_PATTERN.test(h)) {
       skip(warn, "a handle", h);
       continue;
@@ -147,21 +165,31 @@ export function directoryFeed(db: Db, input: FeedInput, warn?: Warn): DirectoryF
   }
   const contacts: FeedContact[] = [];
   const contactIds = new Set<string>();
-  for (const c of db.prepare("SELECT id, kind, status, trust FROM fleet_people ORDER BY id").all()) {
+  const ownerLifecycle = new Map<string, string | null>();
+  for (const c of db.prepare(`SELECT id, kind, status, trust${lifecycle ? ", lifecycle, valid_from" : ""} FROM fleet_people ORDER BY id`).all()) {
     const id = String(c.id);
     if (!validId(id)) {
       skip(warn, "a contact id", id);
       continue;
     }
     contactIds.add(id);
-    contacts.push({ id, kind: c.kind as ContactKind, status: c.status as FeedContact["status"], trust: c.trust as Trust, handles: (handles.get(id) ?? []).slice(0, FEED_CAPS.handlesPerContact) });
+    const contact: FeedContact = { id, kind: c.kind as ContactKind, status: c.status as FeedContact["status"], trust: c.trust as Trust, handles: (handles.get(id) ?? []).slice(0, FEED_CAPS.handlesPerContact) };
+    if (lifecycle) {
+      const own = (c.lifecycle ?? null) as Lifecycle | null;
+      ownerLifecycle.set(id, own);
+      const effective = own === null ? null : effectivePerson({ lifecycle: own, validFrom: c.valid_from === null ? null : Number(c.valid_from) }, now);
+      if (effective !== null) contact.lifecycle = effective;
+      contact.floor = floorOf(effective, contact.trust);
+    }
+    contacts.push(contact);
   }
   if (contacts.length > FEED_CAPS.contacts) tooLarge("contacts", FEED_CAPS.contacts);
 
   const agents: FeedAgent[] = [];
   const agentIds = new Set<string>();
   for (const a of db
-    .prepare("SELECT id, status, trust, owner_id FROM fleet_agents WHERE status <> 'removed' OR id IN (SELECT subject_id FROM fleet_members WHERE kind = 'agent') ORDER BY id")
+    // C380: a reader drops a floor entry when its row leaves a full feed, so a stopped or blocked agent stays listed after its card is gone
+    .prepare(`SELECT id, status, trust, owner_id${lifecycle ? ", lifecycle, valid_from, keep_running, migrated_note" : ""} FROM fleet_agents WHERE status <> 'removed' OR id IN (SELECT subject_id FROM fleet_members WHERE kind = 'agent')${lifecycle ? " OR trust = 'blocked' OR (lifecycle IN ('suspended', 'leaving', 'archived') AND migrated_note IS NULL)" : ""} ORDER BY id`)
     .all()) {
     const id = String(a.id);
     if (!AGENT_ID_PATTERN.test(id)) {
@@ -178,9 +206,16 @@ export function directoryFeed(db: Db, input: FeedInput, warn?: Warn): DirectoryF
           skip(warn, "an agent handle", h);
           continue;
         }
+        // S3-15: a handle a person also holds stays the person's. A compromised Connect cannot make the floor refuse that person. Finding agent_handle_conflict.
+        if (personHandles.has(h)) continue;
         if (list.length < FEED_CAPS.handlesPerContact) list.push(h);
       }
       agent.handles = list;
+    }
+    if (lifecycle) {
+      const effective = effectiveAgent({ lifecycle: a.lifecycle as Lifecycle, validFrom: a.valid_from === null ? null : Number(a.valid_from), keepRunning: Number(a.keep_running) === 1 }, a.owner_id === null ? null : (ownerLifecycle.get(String(a.owner_id)) ?? null), now);
+      agent.lifecycle = effective;
+      agent.floor = floorOf(effective, agent.trust, a.migrated_note === "no_card");
     }
     agents.push(agent);
   }

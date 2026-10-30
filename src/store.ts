@@ -4,7 +4,9 @@
 // portal Team / Membership / AgentGrant / ExternalIdentity), trimmed to one workspace = one tenant: no companies,
 // tenants, roles-per-tenant or license; people are directory entries, never sign-ins (C84).
 import { handleChannel, normalizeHandle, ulid } from "@opt2-tealbrick/manifest";
-import { type Db, type SliceAgent, TbError } from "@opt2-tealbrick/miniapp-sdk";
+import type { Db, SliceAgent } from "@opt2-tealbrick/miniapp-sdk";
+import { beforePersonDelete, initPerson, kindChanged, statusRequested } from "./lifecycle/transitions.ts";
+import { bump, fail, revision } from "./meta.ts";
 import { cleanText } from "./text.ts";
 import { type ContactKind, defaultTrust, NEW_AGENT_TRUST, type Source, type Trust } from "./trust.ts";
 
@@ -83,19 +85,8 @@ export const LIMITS = { teams: 500, people: 2000, handlesPerPerson: 10 } as cons
 type Row = Record<string, unknown>;
 const iso = (ms: unknown) => new Date(Number(ms)).toISOString();
 const tags = (v: unknown): string[] => JSON.parse(String(v)) as string[];
-export const fail = (code: string, message: string, status: number): never => {
-  throw new TbError(code, message, status);
-};
 
-// ── revision ────────────────────────────────────────────────────────────────────────────────────────────────────
-
-export function revision(db: Db): number {
-  return Number(db.prepare("SELECT value FROM fleet_meta WHERE key = 'revision'").get()?.value ?? 0);
-}
-
-export function bump(db: Db): void {
-  db.prepare("UPDATE fleet_meta SET value = value + 1 WHERE key = 'revision'").run();
-}
+export { bump, fail, revision };
 
 // ── reads ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -106,7 +97,7 @@ function handlesOf(db: Db, personId: string): string[] {
     .map((r) => String(r.handle));
 }
 
-function teamsOf(db: Db, kind: "person" | "agent", id: string): TeamRef[] {
+export function teamsOf(db: Db, kind: "person" | "agent", id: string): TeamRef[] {
   return db
     .prepare(
       "SELECT t.id, t.name, m.role FROM fleet_members m JOIN fleet_teams t ON t.id = m.team_id WHERE m.kind = ? AND m.subject_id = ? ORDER BY t.name COLLATE NOCASE, t.id",
@@ -342,6 +333,8 @@ export interface PersonInput {
   handles?: string[];
 }
 
+const OWNER = { kind: "owner", id: null } as const;
+
 export function setPerson(db: Db, input: PersonInput, now = Date.now()): Person {
   return db.transaction(() => {
     const name = own(input.name);
@@ -367,13 +360,16 @@ export function setPerson(db: Db, input: PersonInput, now = Date.now()): Person 
           input.email === undefined ? old.email : input.email,
           ownOpt(input.title) ?? String(old.title),
           ...(extra ? [input.org === undefined ? String(old.org) : own(input.org), input.relationship === undefined ? String(old.relationship) : own(input.relationship)] : []),
-          input.status ?? String(old.status),
+          // a person's status follows the lifecycle (below); an outside agent has no lifecycle and keeps the plain field
+          (input.kind ?? String(old.kind)) === "person" ? String(old.status) : (input.status ?? String(old.status)),
           input.kind ?? String(old.kind),
           JSON.stringify(cleanTags(input.tags) ?? tags(old.tags)),
           now,
           id,
         ] as never[]),
       );
+      kindChanged(db, id, name, String(old.kind), input.kind ?? String(old.kind), input.status ?? String(old.status), now);
+      if ((input.kind ?? String(old.kind)) === "person" && String(old.kind) === "person" && input.status !== undefined) statusRequested(db, id, input.status, OWNER, now);
     } else {
       const count = Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_people").get()?.n);
       if (count >= LIMITS.people) fail("limit_reached", `a workspace has at most ${LIMITS.people} people`, 409);
@@ -387,7 +383,7 @@ export function setPerson(db: Db, input: PersonInput, now = Date.now()): Person 
           input.email ?? null,
           ownOpt(input.title) ?? "",
           ...(extra ? [own(input.org ?? ""), own(input.relationship ?? "")] : []),
-          input.status ?? "active",
+          (input.kind ?? "person") === "person" ? "active" : (input.status ?? "active"),
           input.kind ?? "person",
           defaultTrust(source, input.kind ?? "person"),
           source,
@@ -396,6 +392,8 @@ export function setPerson(db: Db, input: PersonInput, now = Date.now()): Person 
           now,
         ] as never[]),
       );
+      initPerson(db, id, input.kind ?? "person", name, now);
+      if ((input.kind ?? "person") === "person" && input.status === "departed") statusRequested(db, id, "departed", OWNER, now);
     }
     if (handles) {
       for (const h of handles) {
@@ -410,8 +408,9 @@ export function setPerson(db: Db, input: PersonInput, now = Date.now()): Person 
   });
 }
 
-export function deletePerson(db: Db, id: string): boolean {
+export function deletePerson(db: Db, id: string, now = Date.now()): boolean {
   return db.transaction(() => {
+    beforePersonDelete(db, id, OWNER, now);
     db.prepare("DELETE FROM fleet_members WHERE kind = 'person' AND subject_id = ?").run(id);
     db.prepare("DELETE FROM fleet_handles WHERE person_id = ?").run(id);
     db.prepare("UPDATE fleet_agents SET owner_id = NULL WHERE owner_id = ?").run(id);
