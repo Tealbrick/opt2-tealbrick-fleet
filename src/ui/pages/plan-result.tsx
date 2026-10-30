@@ -26,7 +26,8 @@ const STEP_TAG = { open: { status: "needs-you", word: "Waiting for you in Portal
 export function PlanResult({ colleague, portalHref, showLine = true, showNotChanged = true, sendFailure, onEnded }: { colleague: Colleague; portalHref?: string; showLine?: boolean; showNotChanged?: boolean; sendFailure?: string | null; onEnded?: () => void }) {
   const { plan, floor, notices } = colleague;
   const portal = plan?.portalUrl ?? portalHref;
-  if (FEATURES.plans)
+  // a stop has a live plan; a Portal step on an entry that is not stopped (resume) stays the plain list below
+  if (FEATURES.plans && (colleague.lifecycle === "suspended" || colleague.lifecycle === "leaving"))
     return (
       <div className="tb-stack">
         {showLine ? <p>{colleague.line}</p> : null}
@@ -38,7 +39,7 @@ export function PlanResult({ colleague, portalHref, showLine = true, showNotChan
             {n}
           </Notice>
         ))}
-        <PlanLive kind={colleague.kind} id={colleague.id} portalHref={portal} sendFailure={sendFailure} onEnded={onEnded} />
+        <PlanLive kind={colleague.kind} id={colleague.id} since={colleague.at} portalHref={portal} sendFailure={sendFailure} onEnded={onEnded} />
       </div>
     );
   return (

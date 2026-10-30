@@ -6,6 +6,7 @@ import { useCallback, useState } from "react";
 import type { PlanGetOutput, SummaryGetOutput } from "#kit";
 import { LoadFailed, Loading, PageHead, useLoad } from "../common.tsx";
 import { FEATURES } from "./features.ts";
+import { liveBanners } from "./plan-poll.ts";
 import { SettingsDialog } from "./settings-dialog.tsx";
 import { subjectHref } from "./subject-link.ts";
 import { afterChangeText, floorTone, when } from "./words.ts";
@@ -65,10 +66,11 @@ function RulesNotice({ data }: { data: SummaryGetOutput }) {
 /** Alerts that reached nobody (§5): shown here, and the page says that no message was sent. */
 function PlanAlerts() {
   const { data } = useLoad(useCallback(() => (FEATURES.plans ? callOp<PlanGetOutput>("plan_get", {}) : Promise.resolve(null)), []));
-  if (!data?.banners.length) return null;
+  const banners = data ? liveBanners(data) : [];
+  if (!data || banners.length === 0) return null;
   return (
     <>
-      {data.banners.map((b) => {
+      {banners.map((b) => {
         const s = data.plans.find((p) => p.id === b.plan)?.subject;
         return (
           <Notice key={`${b.plan}:${b.kind}`} tone="needs-you" role="status">

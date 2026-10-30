@@ -445,7 +445,7 @@ export const scenes: Scene[] = [
             const order = calls.map((c) => c.op).filter((o) => ["agent_set", "lifecycle_set", "plan_send"].includes(o));
             const send = calls.find((c) => c.op === "plan_send")?.input as { transfers?: string[]; items?: unknown[] } | undefined;
             const bad: string[] = [];
-            if (order.join() !== "agent_set,lifecycle_set,plan_send") bad.push(`order: ${order.join()}`);
+            if (order.join() !== "lifecycle_set,agent_set,plan_send") bad.push(`order: ${order.join()}`);
             if (!send?.transfers?.includes(ID.a)) bad.push("no transfer in plan_send");
             if (!send?.items?.length) bad.push("no ticks in plan_send");
             return bad;

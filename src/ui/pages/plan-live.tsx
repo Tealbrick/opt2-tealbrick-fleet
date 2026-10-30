@@ -6,7 +6,7 @@ import { Button, ButtonLink, Notice, type Status, Tag } from "@opt2-tealbrick/ui
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PlanGetOutput, PlanSendInput, PlanSendOutput } from "#kit";
 import { changeError, LoadFailed, Loading } from "../common.tsx";
-import { pollDelay } from "./plan-poll.ts";
+import { currentPlans, pollDelay } from "./plan-poll.ts";
 import { NotChanged } from "./plan-result.tsx";
 import { when } from "./words.ts";
 
@@ -111,12 +111,15 @@ export async function sendPlan(input: PlanSendInput): Promise<string | null> {
   }
 }
 
-export function PlanLive({ kind, id, portalHref, sendFailure, onEnded }: { kind: "person" | "agent"; id: string; portalHref?: string; sendFailure?: string | null; onEnded?: () => void }) {
+export function PlanLive({ kind, id, since, portalHref, sendFailure, onEnded }: { kind: "person" | "agent"; id: string; since?: string | null; portalHref?: string; sendFailure?: string | null; onEnded?: () => void }) {
   const [plans, setPlans] = useState<Plan[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(sendFailure ?? null);
   const seq = useRef(0);
+  const [kick, setKick] = useState(0);
+  const ended = useRef(onEnded);
+  ended.current = onEnded;
   const load = useCallback(async () => {
     const mine = ++seq.current;
     try {
@@ -141,7 +144,7 @@ export function PlanLive({ kind, id, portalHref, sendFailure, onEnded }: { kind:
       if (got?.some((p) => p.closedAt === null)) wasOpen = true;
       else if (wasOpen && got) {
         wasOpen = false;
-        onEnded?.();
+        ended.current?.();
       }
       if (delay !== null) timer = setTimeout(() => void tick(), delay);
     };
@@ -151,13 +154,14 @@ export function PlanLive({ kind, id, portalHref, sendFailure, onEnded }: { kind:
       seq.current++;
       if (timer) clearTimeout(timer);
     };
-  }, [load, onEnded]);
+    // kick: after Try again or Prepare, a loop that stopped at an ended plan starts again
+  }, [load, kick]);
   const act = async (op: "plan_retry" | "plan_cancel", plan: string) => {
     setBusy(true);
     setFailure(null);
     try {
       await callOp(op, { plan });
-      await load();
+      setKick((k) => k + 1);
     } catch (e) {
       setFailure(changeError(e));
     } finally {
@@ -166,11 +170,14 @@ export function PlanLive({ kind, id, portalHref, sendFailure, onEnded }: { kind:
   };
   const prepare = async () => {
     setBusy(true);
-    setFailure(await sendPlan({ kind, id }));
-    await load();
+    const before = plans?.[0]?.id;
+    const refused = await sendPlan({ kind, id });
+    const out = refused ? null : await callOp<PlanGetOutput>("plan_get", { kind, id }).catch(() => null);
+    setFailure(refused ?? (out && out.plans[0]?.id === before ? "This entry has nothing to stop now." : null));
+    setKick((k) => k + 1);
     setBusy(false);
   };
-  const latest = plans?.filter((p, _i, all) => p.groupId === all[0]?.groupId) ?? [];
+  const latest = plans ? currentPlans(plans, since) : [];
   return (
     <div className="tb-stack">
       {failure ? (

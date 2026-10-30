@@ -430,6 +430,34 @@ describe("the person flow", () => {
     assert.equal(reloaded, 1);
     await m.unmount();
   });
+  it("a move that fails after the mark says so, and the retry does not mark again", async () => {
+    reset();
+    stub.answers.lifecycle_set = ok({ colleague: DETAIL({ kind: "person", name: "Marco" }), transition: null });
+    stub.answers.colleagues_list = ok({ items: [ROW({ kind: "person", id: "per_2", name: "Bob", runtime: null, owner: null, line: "Active" })], nextCursor: null, total: 1 });
+    stub.answers.plan_preview = refuse(500, "internal", "x");
+    stub.answers.agent_set = refuse(409, "owner_inactive", "x");
+    const m = await mount(h(flow.LeaveFlow, { c: person({ agents: [ROW()] }), onClose: () => {}, onChanged: () => {} }));
+    const dlg = m.host.querySelector("dialog") as Element;
+    await chooseReason(dlg, "They left");
+    await next(dlg);
+    const move = [...dlg.querySelectorAll('[role="radio"]')].find((r) => r.textContent?.includes("Pause and transfer"));
+    assert.ok(move);
+    await click(move as Element);
+    assert.match(dlg.textContent ?? "", /A new key is needed/);
+    assert.equal(button(dlg, "Next").disabled, true, "no new owner yet");
+    const boxes = [...dlg.querySelectorAll('[role="combobox"]')];
+    await click(boxes.at(-1) as Element);
+    await click([...document.querySelectorAll('[role="option"]')].find((o) => o.textContent?.includes("Bob")) as Element);
+    await next(dlg);
+    await next(dlg);
+    await next(dlg, "Stop");
+    assert.match([...dlg.querySelectorAll('[role="alert"]')].map((x) => x.textContent).join(" "), /The stop is recorded, but Henry did not move/);
+    stub.answers.agent_set = ok({});
+    await next(dlg, "Stop");
+    assert.deepEqual(opsCalled().filter((o) => ["lifecycle_set", "agent_set", "plan_send"].includes(o)), ["lifecycle_set", "agent_set", "agent_set", "plan_send"]);
+    assert.deepEqual(stub.calls.find((c) => c.op === "plan_send")?.input.transfers, ["agt_A"]);
+    await m.unmount();
+  });
   it("Keep running needs a named reason before Next", async () => {
     reset();
     stub.answers.colleagues_list = ok({ items: [], nextCursor: null, total: 0 });

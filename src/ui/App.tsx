@@ -14,6 +14,7 @@ import { DirectoryPage } from "./pages/directory.tsx";
 import { EveryonePage } from "./pages/everyone.tsx";
 import { FEATURES } from "./pages/features.ts";
 import { Identities } from "./pages/identities.tsx";
+import { liveBanners } from "./pages/plan-poll.ts";
 import { SubjectPage } from "./pages/subject.tsx";
 import { SUBJECT_PATH } from "./pages/subject-link.ts";
 import { SummaryPage } from "./pages/summary.tsx";
@@ -68,7 +69,7 @@ export function App() {
   const portalLink = portal === "./" ? undefined : portal;
   const loadAlerts = useCallback(() => (signedIn && FEATURES.plans ? callOp<PlanGetOutput>("plan_get", {}) : Promise.resolve(null)), [signedIn]);
   const alerts = useLoad(loadAlerts);
-  const pages = PAGES.map((p) => (p.id === "summary" ? { ...p, badge: alerts.data?.banners.length || null } : p.id === "holds" ? { ...p, badge: holds.holds?.length || null } : p.id === "reviews" ? { ...p, badge: reviewBadge(badge.data) } : p));
+  const pages = PAGES.map((p) => (p.id === "summary" ? { ...p, badge: (alerts.data ? liveBanners(alerts.data).length : 0) || null } : p.id === "holds" ? { ...p, badge: holds.holds?.length || null } : p.id === "reviews" ? { ...p, badge: reviewBadge(badge.data) } : p));
   return (
     <AppShell
       title={NAME}

@@ -69,7 +69,7 @@ function Subject({ kind, id, portalHref }: { kind: SubjectKind; id: string; port
               ))}
             </section>
           ) : null}
-          {c.plan || (FEATURES.plans && c.lifecycle !== "active" && c.lifecycle !== "proposed") ? (
+          {c.plan || (FEATURES.plans && (c.lifecycle === "suspended" || c.lifecycle === "leaving")) ? (
             <section className="tb-stack" aria-label="What happens now">
               <h2 className="sub-head">What happens now</h2>
               <PlanResult colleague={c} portalHref={portalHref} showLine={false} onEnded={() => void reload()} />

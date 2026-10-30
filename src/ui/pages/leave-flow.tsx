@@ -71,6 +71,9 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
   const [step, setStep] = useState(0);
   const [result, setResult] = useState<Colleague | null>(null);
   const sent = useRef(false);
+  // what already went through: a retry goes on from there, and never marks or moves twice
+  const mark = useRef<Colleague | null>(null);
+  const moved = useRef(new Set<string>());
   const [capCount, setCapCount] = useState<number | null>(null);
   const person = c.kind === "person";
   // an agent already leaving or closed has its own state: no decision to make here
@@ -89,9 +92,18 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
     const decided = agents.filter((a) => decisions[a.id] !== "transfer");
     if (decided.length) input.decisions = decided.map((a) => (decisions[a.id] === "keep" ? { agent: a.id, decision: "keep" as const, reason: (keepReasons[a.id] ?? "").trim() } : { agent: a.id, decision: "stop" as const }));
     try {
-      // the new owner first: an agent that moved is no longer this person's, and agent_set is safe to repeat after a refusal below
-      for (const a of transfers) await callOp("agent_set", { agent: a.id, owner: newOwners[a.id] as string });
-      const out = await callOp<LifecycleSetOutput>("lifecycle_set", input);
+      // the mark first: if it is refused, nothing moved. A move that fails after it is said as such, and Try again goes on from there.
+      if (!mark.current) mark.current = (await callOp<LifecycleSetOutput>("lifecycle_set", input)).colleague;
+      for (const a of transfers) {
+        if (moved.current.has(a.id)) continue;
+        try {
+          await callOp("agent_set", { agent: a.id, owner: newOwners[a.id] as string });
+          moved.current.add(a.id);
+        } catch (e) {
+          setFailure(`The stop is recorded, but ${a.name} did not move to the new owner. ${changeError(e)}`);
+          return false;
+        }
+      }
       if (FEATURES.plans) {
         const plan: PlanSendInput = { kind: c.kind, id: c.id };
         if (transfers.length) plan.transfers = transfers.map((a) => a.id);
@@ -99,7 +111,7 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
         setSendFailure(await sendPlan(plan));
       }
       sent.current = true;
-      setResult(out.colleague);
+      setResult(mark.current);
       await onChanged();
       return undefined;
     } catch (e) {
