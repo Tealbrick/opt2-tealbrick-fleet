@@ -2,6 +2,19 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
+## 0.4.0-dev.7 - 2026-10-30
+
+C380 Tier 2, DEV only. Not for stable until Martin has read C380-DECISIONS.md. The pages stay off the navigation until their QA rows pass; each route works by its address.
+
+- Flat roles (T2-a): a role and an assignment with a reason and dates; it ends by itself after its end date. A role is a record: it grants nothing until a Rules rule names it, and ending it removes no Portal grant. Feed `accept: ["roles"]`. Route `/roles`. Migration 0011.
+- Review rounds and the access record (T2-b): one round asks once per entry; a verdict that removes access makes a plan by the plan path. The record lists each sweep with ended rows, findings, exceptions, time to stop, apps not read and approvers. It makes no legal claim. Routes `/review-rounds`, `/access-record`. Migration 0012.
+- Cannot hold both (T2-c): checked at assignment with date overlap, flagged on reconcile. It checks roles only. Portal grants are not checked. A stop, transfer or new owner is never refused. Route `/cannot-hold-both`. Migration 0013.
+- Join (T2-d): one person, a pasted list, or a new agent, with a contractor end date on `person_set`. Key age and last use say "Not available" (no release of Core, spec or SDK). Route `/join`.
+- N2-T1: a stale Join never lifts a stop. Reason `reviewed` is valid only from `proposed`.
+- N2-T2: a review round never lifts a block. Blocked entries stay out of every round; the dialog starts with no verdict.
+- N2-T3: the access record carries a reference for each app item, not the app's own id, which can hold a handle.
+- A database at 0013 cannot go back to 0.4.0-dev.6 without a restore. Rules keeps its stops through a restore until you clear them.
+
 ## 0.4.0-dev.6 - 2026-10-30
 
 C380 final security review, DEV only. Not for stable until Martin has read C380-DECISIONS.md.
