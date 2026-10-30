@@ -179,5 +179,15 @@ export function lastDayInstant(day: string, now: number = Date.now()): { ok: tru
   return { ok: true, iso: new Date(end).toISOString() };
 }
 
+/**
+ * The end date to SEND, decided at the moment of sending. A contractor never goes out without one: a day that ended while the dialog was open
+ * (it is read again from the clock) is refused here, never sent as "no end date".
+ */
+export function untilToSend(contractor: boolean, day: string, now: number = Date.now()): { ok: true; until: string | null } | { ok: false; text: string } {
+  if (!contractor && day === "") return { ok: true, until: null };
+  const last = lastDayInstant(day, now);
+  return last.ok ? { ok: true, until: last.iso } : { ok: false, text: contractor ? `The last day is not right. ${last.text}` : last.text };
+}
+
 /** `contractor` is a tag the owner can see and edit on the People page. The server does not read it: the end date does the work. */
 export const CONTRACTOR_TAG = "contractor";

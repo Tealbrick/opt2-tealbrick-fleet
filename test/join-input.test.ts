@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { cleanText } from "../src/text.ts";
-import { checkAgainst, cleanCell, LIMITS, lastDayInstant, parsePastedList, problemOf, splitCells } from "../src/ui/pages/join-input.ts";
+import { checkAgainst, cleanCell, LIMITS, lastDayInstant, parsePastedList, problemOf, splitCells, untilToSend } from "../src/ui/pages/join-input.ts";
 
 const NOW = Date.UTC(2026, 9, 30, 12);
 
@@ -125,4 +125,15 @@ test("fire on bad: an email in the name, an empty name column, and a handle with
   assert.match(String(rows[2]?.problem), /handle has a space or no value/);
   assert.match(String(problemOf({ name: "Ann", email: null, title: "", handles: ["U1234"] })), /needs buzz:, slack: or telegram: in front/);
   assert.match(String(problemOf({ name: "Ann marco@x.test", email: null, title: "", handles: [] })), /name has an email address in it/);
+});
+
+test("a contractor never goes out with no end date: the day is read again when it is sent, and a day that ended in between is refused", () => {
+  assert.deepEqual(untilToSend(true, "2026-10-30", NOW), { ok: true, until: "2026-10-30T23:59:59.000Z" });
+  const late = Date.UTC(2026, 9, 31, 0, 0, 1);
+  const out = untilToSend(true, "2026-10-30", late);
+  assert.equal(out.ok, false);
+  assert.match(out.ok ? "" : out.text, /The last day is not right\. This day has passed in UTC/);
+  assert.equal(untilToSend(true, "", NOW).ok, false, "a contractor with no day");
+  assert.deepEqual(untilToSend(false, "", NOW), { ok: true, until: null }, "a person who stays may have none");
+  assert.equal(untilToSend(false, "2026-10-30", late).ok, false, "a day typed and gone is never dropped quietly");
 });
