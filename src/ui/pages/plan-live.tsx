@@ -117,7 +117,8 @@ export function PlanLive({ kind, id, since, portalHref, sendFailure, onEnded }: 
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(sendFailure ?? null);
   const seq = useRef(0);
-  const [kick, setKick] = useState(0);
+  // after Try again or Prepare, a loop that stopped at an ended plan starts again
+  const restart = useRef<() => void>(() => {});
   const ended = useRef(onEnded);
   ended.current = onEnded;
   const load = useCallback(async () => {
@@ -148,20 +149,23 @@ export function PlanLive({ kind, id, since, portalHref, sendFailure, onEnded }: 
       }
       if (delay !== null) timer = setTimeout(() => void tick(), delay);
     };
+    restart.current = () => {
+      if (timer) clearTimeout(timer);
+      void tick();
+    };
     void tick();
     return () => {
       stopped = true;
       seq.current++;
       if (timer) clearTimeout(timer);
     };
-    // kick: after Try again or Prepare, a loop that stopped at an ended plan starts again
-  }, [load, kick]);
+  }, [load]);
   const act = async (op: "plan_retry" | "plan_cancel", plan: string) => {
     setBusy(true);
     setFailure(null);
     try {
       await callOp(op, { plan });
-      setKick((k) => k + 1);
+      restart.current();
     } catch (e) {
       setFailure(changeError(e));
     } finally {
@@ -174,7 +178,7 @@ export function PlanLive({ kind, id, since, portalHref, sendFailure, onEnded }: 
     const refused = await sendPlan({ kind, id });
     const out = refused ? null : await callOp<PlanGetOutput>("plan_get", { kind, id }).catch(() => null);
     setFailure(refused ?? (out && out.plans[0]?.id === before ? "This entry has nothing to stop now." : null));
-    setKick((k) => k + 1);
+    restart.current();
     setBusy(false);
   };
   const latest = plans ? currentPlans(plans, since) : [];
