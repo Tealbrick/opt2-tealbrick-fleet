@@ -9,6 +9,7 @@ import { handlers, manifest } from "../src/app.ts";
 import { appendEvent, verifyChain, verifyChainPaged } from "../src/lifecycle/events.ts";
 import { loadColleagues } from "../src/lifecycle/view.ts";
 import { buildRecord, digestOfRecord, MAX_DAYS, periodOf } from "../src/record/index.ts";
+import { itemRef } from "../src/record/sweeps.ts";
 import { manyApprovers, NO_APPROVER, ONE_APPROVER } from "../src/record/words.ts";
 import { recordReview, requestReview } from "../src/reviews.ts";
 import { answer, wire } from "./access-helpers.ts";
@@ -52,10 +53,10 @@ test("R6: per-sweep lists keep the rows that ended and say which store was not r
   assert.equal(record.format, "tealbrick.access-record/1");
   const [one, two] = record.sweeps.lists;
   assert.equal(record.sweeps.lists.length, 2);
-  assert.deepEqual(one?.items?.map((i) => i.id), ["account_as_itself:a1", "routine:r1"]);
+  assert.deepEqual(one?.items?.map((i) => i.id), [itemRef("connect", "account_as_itself:a1"), itemRef("evolution", "routine:r1")]);
   assert.deepEqual(one?.counts, { appeared: 2, changed: 0, ended: 0 });
-  assert.deepEqual(two?.items?.map((i) => i.id), ["account_as_itself:a1"], "Connect was not read: its row is not dropped");
-  assert.deepEqual(two?.ended.map((i) => i.id), ["routine:r1"], "the ended row stays in the record, with what it was");
+  assert.deepEqual(two?.items?.map((i) => i.id), [itemRef("connect", "account_as_itself:a1")], "Connect was not read: its row is not dropped");
+  assert.deepEqual(two?.ended.map((i) => i.id), [itemRef("evolution", "routine:r1")], "the ended row stays in the record, with what it was");
   assert.equal(two?.ended[0]?.label, "Routine r1");
   assert.equal(two?.ended[0]?.subject && "name" in two.ended[0].subject ? two.ended[0].subject.name : null, "Henry");
   assert.deepEqual(two?.stores.map((s) => [s.product, s.readThisSweep]), [["connect", false], ["evolution", true], ["kanban", true], ["knowledge", true]]);
@@ -267,9 +268,11 @@ test("the list of a sweep follows the log up to the sweep's watermark, not a clo
   assert.deepEqual(lists.map((l) => l.id), ["swp_0", "swp_1", "swp_2"].sort((a, b) => (a === "swp_0" ? -1 : 0) + (b === "swp_0" ? 1 : 0)));
   const by = Object.fromEntries(lists.map((l) => [l.id, l]));
   assert.equal(by.swp_0?.listKept, false);
-  assert.deepEqual(by.swp_1?.items?.map((i) => i.id), ["routine:a", "routine:b"], "swp_2's row is not in swp_1's list");
-  assert.deepEqual(by.swp_2?.items?.map((i) => i.id), ["routine:b"]);
-  assert.deepEqual(by.swp_2?.ended.map((i) => i.id), ["routine:a"]);
+  const ref = (id: string) => itemRef(String(by.swp_1?.items?.[0]?.product), id);
+  assert.deepEqual(by.swp_1?.items?.map((i) => i.id), [ref("routine:a"), ref("routine:b")], "swp_2's row is not in swp_1's list");
+  assert.deepEqual(by.swp_2?.items?.map((i) => i.id), [ref("routine:b")]);
+  assert.deepEqual(by.swp_2?.ended.map((i) => i.id), [ref("routine:a")]);
+  assert.equal(JSON.stringify(lists).includes("routine:a"), false, "an app item id, which can hold a handle, is not in the file (N2-T3)");
 });
 
 test("a list of 2000 differences may be cut: the file says so", async () => {

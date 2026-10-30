@@ -1,6 +1,7 @@
 // The list of every sweep in a period (C380 T2-b): what each store listed, the rows that ended, and which stores were read. Rebuilt from the
 // change log (src/access/history.ts) in one pass, in pages, so the app answers other calls between pages. The shadow copy is not read: it
 // holds the rows as they are now and lets an ended row go.
+import { createHash } from "node:crypto";
 import type { Db } from "@opt2-tealbrick/miniapp-sdk";
 import { type AccessTarget, TARGET_NAMES } from "../access/items.ts";
 import { fail } from "../meta.ts";
@@ -64,6 +65,9 @@ export function namesOf(db: Db): Names {
   };
 }
 
+/** An app's item id can hold a handle (Connect: channel_sender:<handle>), and the record says it lists none (C380 N2-T3). This reference is the same in each sweep, so rows still match across sweeps. */
+export const itemRef = (product: string, itemId: string): string => `item:${createHash("sha256").update(`${product}\n${itemId}`).digest("hex").slice(0, 32)}`;
+
 function itemOf(r: Row, names: Names): SweepItem {
   const product = String(r.target);
   const kind = String(r.subject_kind);
@@ -71,7 +75,7 @@ function itemOf(r: Row, names: Names): SweepItem {
   return {
     product,
     store: nameOf(product),
-    id: String(r.item_id),
+    id: itemRef(product, String(r.item_id)),
     kind: String(r.kind),
     subject: kind === "unlinked" ? { kind: "unlinked" } : { kind, id, name: (kind === "agent" ? names.agents : names.people).get(id) ?? null },
     level: String(r.level),

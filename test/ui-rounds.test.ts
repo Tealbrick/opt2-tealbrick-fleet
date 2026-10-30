@@ -77,6 +77,8 @@ describe("Review rounds", () => {
     assert.match(dialog.textContent ?? "", /This app cannot end this from here/);
     assert.equal(button(dialog, "Record").disabled, true);
     await typeInto(dialog.querySelector("textarea") as Element, "Not needed any more.");
+    assert.equal(button(dialog, "Record").disabled, true, "a reason alone is not a verdict: the dialog starts with none (N2-T2)");
+    await click(dialog.querySelector('[role="radio"]') as Element);
     await click(dialog.querySelector('input[type="checkbox"], [role="switch"]') as Element);
     await click(button(dialog, "Record and remove 1"));
     assert.deepEqual(callsOf("round_verdict"), [{ round: "rnd_1", subject: { kind: "person", id: "per_1" }, verdict: "trusted", reason: "Not needed any more.", snapshotDigest: "snap1", accessDigest: "acc1", remove: [{ product: "connect", id: "account_as_itself:a1", digest: "sha256:aa" }] }]);
@@ -96,6 +98,7 @@ describe("Review rounds", () => {
     await click(button(m.host, "Review"));
     const dialog = m.host.querySelector("dialog") as Element;
     await typeInto(dialog.querySelector("textarea") as Element, "Because.");
+    await click(dialog.querySelector('[role="radio"]') as Element);
     await click(button(dialog, "Record"));
     assert.match(m.host.querySelector("dialog")?.textContent ?? "", /changed since you looked/);
     assert.equal((m.host.querySelector("dialog textarea") as HTMLTextAreaElement).value, "Because.");
@@ -130,6 +133,7 @@ describe("Review rounds", () => {
     await click(button(m.host, "Review"));
     const dialog = m.host.querySelector("dialog") as Element;
     await typeInto(dialog.querySelector("textarea") as Element, "Because.");
+    await click(dialog.querySelector('[role="radio"]') as Element);
     await click(button(dialog, "Record"));
     assert.equal(reads, 2, "the round was read again");
     await click(button(m.host.querySelector("dialog") as Element, "Record"));

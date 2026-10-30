@@ -118,6 +118,21 @@ test("fire on bad: not in the round, decided twice, stale snapshot, stale access
   assert.throws(() => decide(w.db, OWNER, { round: r.id, subject: { kind: "person", id: w.ann.id }, verdict: "blocked", reason: "Again.", snapshotDigest: v.snapshotDigest, accessDigest: v.accessDigest }, w.clock.t), refused("already_decided", 409));
 });
 
+test("N2-T2: a blocked entry is not in a round, in any scope, and a round cannot lift a block that came later", () => {
+  const w = makeWorld();
+  w.db.prepare("UPDATE fleet_agents SET trust = 'blocked' WHERE id = ?").run(SALES);
+  createRound(w.db, OWNER, { title: "Agents", scope: "agents" }, w.clock.t);
+  const open = w.db.prepare("SELECT subject_id FROM fleet_campaign_items").all().map((r) => String(r.subject_id));
+  assert.equal(open.includes(SALES), false, "scope agents leaves the blocked entry out");
+  const c = createRound(w.db, OWNER, { title: "Chosen", scope: "chosen", subjects: [{ kind: "agent", id: SALES }, { kind: "person", id: w.ann.id }] }, w.clock.t);
+  assert.equal(w.db.prepare("SELECT COUNT(*) AS n FROM fleet_campaign_items WHERE round_id = ? AND subject_id = ?").get(c.id, SALES)?.n, 0, "scope chosen too");
+  // blocked after the round began: a non-blocked verdict is refused, a blocked one is quiet
+  const held = verdict(w, c.id, "person", w.ann.id);
+  w.db.prepare("UPDATE fleet_people SET trust = 'blocked' WHERE id = ?").run(w.ann.id);
+  assert.throws(() => decide(w.db, OWNER, held, w.clock.t), refused("blocked_use_review", 409));
+  assert.equal(w.db.prepare("SELECT trust FROM fleet_people WHERE id = ?").get(w.ann.id)?.trust, "blocked", "the block stays");
+});
+
 test("a verdict that asks to remove access makes a plan by the plan path, and the runner ends it at the store", async () => {
   const w = makeWorld();
   w.connect.add(personItem(w, "channel_sender:s1", "channel_sender"));

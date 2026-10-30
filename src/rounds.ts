@@ -32,10 +32,12 @@ const n = (v: unknown): number => Number(v ?? 0);
 
 // ── who is in a round ───────────────────────────────────────────────────────────────────────────────────────────
 
-/** New and active agents, and active people. A stopped or closed entry is not asked about: its access shows as a difference instead. */
+const isBlocked = (db: Db, kind: "agent" | "person", id: string): boolean => db.prepare(kind === "agent" ? "SELECT trust FROM fleet_agents WHERE id = ?" : "SELECT trust FROM fleet_people WHERE id = ?").get(id)?.trust === "blocked";
+
+/** New and active agents, and active people. A stopped, closed or blocked entry is not asked about: its access shows as a difference instead, and a block is lifted only on the review page (C380 N2-T2). */
 function pick(db: Db, scope: string, chosen: readonly Ref[] | undefined): Ref[] {
-  const agents = () => db.prepare("SELECT id FROM fleet_agents WHERE status <> 'removed' AND lifecycle IN ('proposed', 'active') ORDER BY name COLLATE NOCASE, id").all().map((r) => ({ kind: "agent" as const, id: String(r.id) }));
-  const people = () => db.prepare("SELECT id FROM fleet_people WHERE kind = 'person' AND lifecycle = 'active' ORDER BY name COLLATE NOCASE, id").all().map((r) => ({ kind: "person" as const, id: String(r.id) }));
+  const agents = () => db.prepare("SELECT id FROM fleet_agents WHERE status <> 'removed' AND lifecycle IN ('proposed', 'active') AND trust <> 'blocked' ORDER BY name COLLATE NOCASE, id").all().map((r) => ({ kind: "agent" as const, id: String(r.id) }));
+  const people = () => db.prepare("SELECT id FROM fleet_people WHERE kind = 'person' AND lifecycle = 'active' AND trust <> 'blocked' ORDER BY name COLLATE NOCASE, id").all().map((r) => ({ kind: "person" as const, id: String(r.id) }));
   if (scope === "agents") return agents();
   if (scope === "people") return people();
   if (scope === "everyone") return [...agents(), ...people()];
@@ -45,7 +47,7 @@ function pick(db: Db, scope: string, chosen: readonly Ref[] | undefined): Ref[] 
       const key = `${r.kind}:${r.id}`;
       if (seen.has(key)) return false;
       seen.add(key);
-      return true;
+      return !isBlocked(db, r.kind, r.id);
     });
   }
   return fail("input_invalid", "Choose agents, people, everyone or a list.", 400);
@@ -243,6 +245,8 @@ export function decide(db: Db, reviewer: string, input: DecideInput, now = Date.
     const c = db.prepare("SELECT * FROM fleet_campaign_items WHERE round_id = ? AND subject_kind = ? AND subject_id = ?").get(input.round, input.subject.kind, input.subject.id) ?? fail("not_in_round", "This entry is not in this round.", 404);
     const rev = db.prepare("SELECT status FROM fleet_reviews WHERE id = ?").get(String(c.review_id));
     if (rev?.status !== "requested") fail("already_decided", "This entry was decided already.", 409);
+    // A block is a hard stop on the floor (C380 N2-T2): it can come after the round began, and a round never lifts it.
+    if (input.verdict !== "blocked" && isBlocked(db, input.subject.kind, input.subject.id)) fail("blocked_use_review", "This entry is blocked. A round cannot lift a block. Open its review page to change it.", 409);
     const rows = accessOf(db, input.subject.kind, input.subject.id);
     if (accessDigestOf(rows) !== input.accessDigest) fail("access_stale", "The access of this entry changed since you looked. Open the round again.", 409);
     const ticks = input.remove ?? [];

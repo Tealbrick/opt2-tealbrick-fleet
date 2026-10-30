@@ -286,7 +286,7 @@ const VERDICTS = [
 ];
 
 function EntryDialog({ round, item, onClose, onDone }: { round: string; item: Item; onClose: () => void; onDone: () => Promise<void> }) {
-  const [verdict, setVerdict] = useState<"trusted" | "limited" | "blocked">("trusted");
+  const [verdict, setVerdict] = useState<"trusted" | "limited" | "blocked" | null>(null);
   const [reason, setReason] = useState("");
   const [ticked, setTicked] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
@@ -295,7 +295,7 @@ function EntryDialog({ round, item, onClose, onDone }: { round: string; item: It
   const stores = [...new Set(item.access.map((a) => a.productName))];
   const chosen = item.access.filter((a) => ticked[`${a.product}:${a.id}`]);
   const save = async () => {
-    if (!item.snapshotDigest) return;
+    if (!item.snapshotDigest || verdict === null) return;
     setBusy(true);
     setFailure(null);
     try {
@@ -334,7 +334,7 @@ function EntryDialog({ round, item, onClose, onDone }: { round: string; item: It
             <Button onClick={onClose} disabled={busy}>
               Cancel
             </Button>
-            <Button variant="primary" onClick={() => void save()} disabled={busy || reason.trim() === "" || !item.snapshotDigest}>
+            <Button variant="primary" onClick={() => void save()} disabled={busy || verdict === null || reason.trim() === "" || !item.snapshotDigest}>
               {chosen.length > 0 ? `Record and remove ${chosen.length}` : "Record"}
             </Button>
           </>
