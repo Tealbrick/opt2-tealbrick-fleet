@@ -708,7 +708,7 @@ test("split: above 100 Core steps, numbered plans, each under the limit, an agen
     store.setAgent(w.db, { agent: id, owner: w.ann.id }, w.clock.t);
     w.core.addAgent(id, 0, 0);
   }
-  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  set(w.db, "person", w.ann.id, "leaving", { noCap: true }, w.clock.t);
   const made = w.makePlan({ kind: "person", id: w.ann.id });
   const parts = w.db.prepare("SELECT id, part, parts FROM fleet_plans WHERE group_id = ? ORDER BY part").all(made);
   assert.equal(parts.length, 2);
@@ -945,7 +945,7 @@ test("a part with more agents than one list call may name: each is read, in chun
   }
   const last = ids[39] as string;
   w.connect.add(agentItem({ id: "account_as_itself:last", kind: "account_as_itself", agent: last }));
-  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  set(w.db, "person", w.ann.id, "leaving", { noCap: true }, w.clock.t);
   set(w.db, "agent", last, "leaving", {}, w.clock.t);
   const id = w.makePlan({ kind: "person", id: w.ann.id });
   await w.tick(id);

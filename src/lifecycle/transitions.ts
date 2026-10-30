@@ -10,7 +10,7 @@ import { bump, fail, revision } from "../meta.ts";
 import { hasAppliedStop, hasOpenPlan, lastPlanUnfinished, unnamedAccounts } from "../plans/guards.ts";
 import { cleanText } from "../text.ts";
 import type { Trust } from "../trust.ts";
-import { appendEvent, SNAPSHOT_MAX, stopsSince } from "./events.ts";
+import { appendEvent, SNAPSHOT_MAX, stoppedSince, stopsSince } from "./events.ts";
 import { coolingDays, stopCap } from "./settings.ts";
 import { type Lifecycle, NEXT, personStatusOf, type Reason, STOP_STATES, type SubjectKind } from "./states.ts";
 
@@ -139,9 +139,19 @@ export function capState(db: Db, now: number): { used: number; limit: number } {
   return { used: stopsSince(db, now - CAP_WINDOW_MS), limit: stopCap(db) };
 }
 
-export function assertCap(db: Db, confirmCount: number | undefined, now: number): void {
-  const { used, limit } = capState(db, now);
-  if (used >= limit && confirmCount !== used + 1) throw new TbError("stop_cap_reached", `You stopped ${used} in the last 10 minutes. Confirm stop number ${used + 1}.`, 409, { count: used + 1 });
+/** The entries one stop reaches: a person and the agents that stop with them. */
+export function stopReach(db: Db, kind: string, id: string): string[] {
+  const own = kind === "person" ? db.prepare("SELECT id FROM fleet_agents WHERE owner_id = ? AND status <> 'removed' AND keep_running = 0").all(id).map((r) => `agent:${String(r.id)}`) : [];
+  return [`${kind}:${id}`, ...own];
+}
+
+/** N2-3: counted in entries, and only what is new in this window needs the confirm. `details.count` stays: any page that can call this can read the count, so hiding it would stop no script. */
+export function assertCap(db: Db, confirmCount: number | undefined, now: number, adding: readonly string[]): void {
+  const seen = stoppedSince(db, now - CAP_WINDOW_MS);
+  const before = seen.size;
+  for (const k of adding) seen.add(k);
+  const limit = stopCap(db);
+  if (seen.size > before && seen.size > limit && confirmCount !== seen.size) throw new TbError("stop_cap_reached", `This makes ${seen.size} stopped in the last 10 minutes. Confirm ${seen.size}.`, 409, { count: seen.size });
 }
 
 export interface Grant {
@@ -203,7 +213,7 @@ export function transition(db: Db, input: TransitionInput, now = Date.now()): { 
     if (input.expectedRev !== undefined && input.expectedRev !== s.rev) fail("lifecycle_stale", "This entry changed since you looked. Open it again.", 409);
     const problem = guardOf(db, s, input.to, { waive: input.waive }, now);
     if (problem) throw new TbError(problem.code, problem.message, problem.status);
-    if (STOP_STATES.includes(input.to) && !input.noCap) assertCap(db, input.confirmCount, now);
+    if (STOP_STATES.includes(input.to) && !input.noCap) assertCap(db, input.confirmCount, now, stopReach(db, s.kind, s.id));
     const note = cleanText(input.note ?? "").slice(0, 500) || null;
     const waive = cleanText(input.waive ?? "").slice(0, 200);
     const from = s.lifecycle;
@@ -318,7 +328,7 @@ export function setDates(db: Db, input: { kind: SubjectKind; id: string; validFr
     if (input.validUntil !== undefined && until !== null && until <= now && !input.confirmPastDate) fail("date_in_past", "This end date has passed. Confirm that you want to stop this entry.", 409);
     // S2-7: a start date in the future stops a working entry at once (floor, not_started), so it counts as a stop. A later date on an entry that already waits does not.
     const startsLater = from !== null && from > now && (s.validFrom === null || s.validFrom <= now) && (s.lifecycle === "active" || s.lifecycle === "proposed");
-    if (startsLater && !input.noCap) assertCap(db, input.confirmCount, now);
+    if (startsLater && !input.noCap) assertCap(db, input.confirmCount, now, stopReach(db, s.kind, s.id));
     bump(db);
     const table = s.kind === "agent" ? "fleet_agents" : "fleet_people";
     db.prepare(`UPDATE ${table} SET valid_from = ?, valid_until = ?, lifecycle_rev = ? WHERE id = ?`).run(from, until, revision(db), s.id);
