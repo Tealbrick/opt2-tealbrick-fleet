@@ -5679,6 +5679,16 @@
                     "type": "null"
                   }
                 ]
+              },
+              "rulesHolds": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             }
           },
@@ -6690,6 +6700,16 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "rulesHolds": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 }
               },
@@ -7609,6 +7629,16 @@
                     ]
                   },
                   "gateNote": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "rulesHolds": {
                     "anyOf": [
                       {
                         "type": "string"

@@ -11,6 +11,8 @@ export interface FloorView {
   entries: number | null;
   lastGateAt: string | null;
   gateNote: string | null;
+  /** N2-2: stops Rules keeps that this directory no longer lists */
+  rulesHolds?: string | null;
 }
 export interface FloorStatus {
   version: string;
@@ -41,8 +43,8 @@ export function floorView(read: FloorStatus | Exclude<FloorState, "confirmed" | 
   const state: FloorState = read.feedRevision !== null && read.feedRevision >= rev ? "confirmed" : "not_confirmed";
   const gateMs = read.lastGateAt === null ? Number.NaN : Date.parse(read.lastGateAt);
   const gateNote = !agentsRun ? null : read.lastGateAt === null ? "Rules has not checked a call yet." : Number.isFinite(gateMs) && gateMs + GATE_STALE_MS < now ? `Rules has not checked a call since ${new Date(gateMs).toISOString()}.` : null;
-  const unlisted = typeof read.unlisted === "number" && read.unlisted > 0 ? `Rules still holds ${read.unlisted} stops Governance does not list. Clear them on the Rules page.` : null;
-  return { state, text: FLOOR_TEXT[state], version: read.version, feedRevision: read.feedRevision, entries: read.entries, lastGateAt: read.lastGateAt, gateNote: [unlisted, gateNote].filter(Boolean).join(" ") || null };
+  const rulesHolds = typeof read.unlisted === "number" && read.unlisted > 0 ? `Rules still holds ${read.unlisted} stops Governance does not list. Clear them on the Rules page.` : null;
+  return { state, text: FLOOR_TEXT[state], version: read.version, feedRevision: read.feedRevision, entries: read.entries, lastGateAt: read.lastGateAt, gateNote, rulesHolds };
 }
 
 const isStatus = (o: unknown): o is FloorStatus => {

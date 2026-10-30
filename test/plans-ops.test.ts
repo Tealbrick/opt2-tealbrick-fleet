@@ -1323,7 +1323,8 @@ test("N2-2: the feed sends one epoch to a reader of the lifecycle, on full, unch
 test("N2-2: after a Governance that went back, the page says what Rules still holds", async () => {
   const { floorView } = await import("../src/lifecycle/floor.ts");
   const read = { version: "0.7.0-dev.3", feedRevision: 9, entries: 3, lastGateAt: null };
-  assert.match(String(floorView({ ...read, unlisted: 2 }, 1, 0, false).gateNote), /Rules still holds 2 stops Governance does not list\. Clear them on the Rules page\./);
-  assert.equal(floorView({ ...read, unlisted: 0 }, 1, 0, false).gateNote, null);
-  assert.equal(floorView(read, 1, 0, false).gateNote, null);
+  assert.match(String(floorView({ ...read, unlisted: 2 }, 1, 0, false).rulesHolds), /Rules still holds 2 stops Governance does not list\. Clear them on the Rules page\./);
+  assert.equal(floorView({ ...read, unlisted: 2 }, 1, 0, false).gateNote, null, "not the gate's sentence: the page reads that one as a stale gate");
+  assert.equal(floorView({ ...read, unlisted: 0 }, 1, 0, false).rulesHolds, null);
+  assert.equal(floorView(read, 1, 0, false).rulesHolds, null);
 });
