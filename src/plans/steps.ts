@@ -45,6 +45,7 @@ export interface StepRow {
 /** A failed step the job does not retry any more, or one that only the owner can move. */
 export function stuckStep(s: StepRow): boolean {
   if (OWNER_MUST_ACT.includes(s.state)) return true;
+  if (s.state === "not_revocable") return s.tries >= MAX_TRIES;
   return s.state === "failed" && (s.tries >= MAX_TRIES || s.code === "idempotency_conflict");
 }
 
@@ -58,6 +59,8 @@ export function stateFromSteps(steps: readonly StepRow[]): Extract<PlanState, "r
 /** The kinds a store ends by pausing: the row stays and reads `paused`. For every other kind only absence proves the end: an account row reads `paused` when its AGENT is paused. */
 export const ENDS_BY_PAUSE: readonly string[] = ["routine"];
 
+/** Past a job's timeout (5 min). */
+export const TICK_LEASE_MS = 6 * 60_000;
 export const POLL_FAST_MS = 60_000;
 export const POLL_SLOW_MS = 15 * 60_000;
 export const FAST_WINDOW_MS = 30 * 60_000;

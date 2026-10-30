@@ -98,15 +98,16 @@ export function headlineOf(p: Row, counts: { proved: number; said: number; manua
     case "partial":
       return p.code === "core_failed" ? "Portal stopped on a step. Open Portal and apply it again." : "Part of this did not work. Look at the open steps.";
     case "done":
-      return counts.manual > 0 ? `Governance did its part. ${counts.manual} are for someone to do by hand.` : "Done. Each step is proved by the app or Portal that owns it.";
+      if (counts.manual > 0) return `Governance did its part. ${counts.manual} are for someone to do by hand.`;
+      return counts.proved > 0 ? "Done. Each step is proved by the app or Portal that owns it." : "Nothing was left to end.";
     case "reported":
-      return `Portal says this is done. Governance could not see ${counts.said} of the steps.`;
+      return link ? `Governance could not see ${counts.said} of the steps. Check them in Portal.` : `Portal says this is done. Governance could not see ${counts.said} of the steps.`;
     case "expired":
-      return "This request expired. Nothing in it was applied.";
+      return p.code === "partly_applied" ? "This request expired after Portal did part of it. Look at the steps." : "This request expired. Nothing in it was applied.";
     case "rejected":
-      return "This request was rejected in Portal. Nothing in it was applied.";
+      return p.code === "partly_applied" ? "This request was rejected after Portal did part of it. Look at the steps." : "This request was rejected in Portal. Nothing in it was applied.";
     case "withdrawn":
-      return "This request was taken back.";
+      return p.code === "not_taken_back" ? "Governance could not take this request back. If it is still in Portal, reject it there." : "This request was taken back.";
     case "replaced":
       return "A newer plan replaced this one.";
     case "cancelled":
