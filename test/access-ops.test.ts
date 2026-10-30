@@ -110,12 +110,13 @@ test("effect: revocable stops; about is about; info stays; not revocable is manu
   });
   const out = await planPreview(accessEnv(f.callApp), db, "person", ann.id, null, NOW);
   validOut("plan_preview", out);
-  const effects = Object.fromEntries(out.stores.flatMap((s) => s.items).map((i) => [i.id, [i.effect, i.who]]));
-  assert.deepEqual(effects["agent_area:a"], ["manual", AGENT_A.name]);
-  assert.deepEqual(effects["team_grant:g"], ["about", null]);
-  assert.deepEqual(effects["account_as_itself:x"], ["stops", AGENT_A.name]);
-  assert.deepEqual(effects["first_contacts:y"], ["stays", AGENT_A.name]);
-  assert.deepEqual(effects["account_as_itself:k"], ["stays", AGENT_B.name], "keep running");
+  const effects = Object.fromEntries(out.stores.flatMap((s) => s.items).map((i) => [i.id, [i.effect, i.label]]));
+  assert.deepEqual(effects["agent_area:a"], ["manual", `${AGENT_A.name}: A thing`], "the words name the agent");
+  assert.deepEqual(effects["team_grant:g"], ["about", "A thing"]);
+  assert.deepEqual(effects["account_as_itself:x"], ["stops", `${AGENT_A.name}: A thing`]);
+  assert.deepEqual(effects["first_contacts:y"], ["stays", `${AGENT_A.name}: A thing`]);
+  assert.deepEqual(effects["account_as_itself:k"], ["stays", `${AGENT_B.name}: A thing`], "keep running");
+  assert.equal(effects["runtime:" + AGENT_B.id]?.[0], "stays", "keep running: Portal too");
   assert.equal(out.unlinkedAccounts, 1);
   assert.equal(effects["account_as_me:u"], undefined, "an account with no person is a count, not an item of this person");
 });
@@ -145,6 +146,9 @@ test("Portal's row: what runs, from the slice; who can use what when the owner a
   assert.ok(core.items.every((i) => i.effect === "stops"));
   assert.deepEqual(core.notShown, []);
   assert.equal(JSON.stringify(core.items.map((i) => i.label)).includes("agt_"), false, "no raw id in the words");
+  assert.equal(core.items[1]?.label, "Can use an app", "no product code when the picture has no name");
+  const named = await planPreview(accessEnv(f.callApp), db, "agent", AGENT_A.id, PICTURE({ instances: [{ ins: "ins_1", product: "knowledge", name: "Knowledge base", version: "1" }] }), NOW);
+  assert.equal(storeOf(named, "core").items[1]?.label, "Can use Knowledge base");
   const off = storeOf(await planPreview(accessEnv(f.callApp), db, "agent", AGENT_A.id, null, NOW), "core");
   assert.deepEqual([off.state, off.items.map((i) => i.kind), off.notShown[0]?.kind], ["read", ["agent_runtime"], "app_access"]);
   const cut = storeOf(await planPreview(accessEnv(f.callApp), db, "agent", AGENT_A.id, PICTURE({ truncated: true }), NOW), "core");
@@ -152,6 +156,20 @@ test("Portal's row: what runs, from the slice; who can use what when the owner a
   db.prepare("UPDATE fleet_agents SET status = 'paused' WHERE id = ?").run(AGENT_A.id);
   const paused = storeOf(await planPreview(accessEnv(f.callApp), db, "agent", AGENT_A.id, null, NOW), "core");
   assert.deepEqual([paused.items[0]?.label, paused.items[0]?.effect], ["Paused in Portal", "stays"]);
+  const pausedSeen = storeOf(await planPreview(accessEnv(f.callApp), db, "agent", AGENT_A.id, PICTURE(), NOW), "core");
+  assert.ok(pausedSeen.items.every((i) => i.effect === "stays"), "nothing to stop on a paused agent");
+  db.prepare("UPDATE fleet_agents SET status = 'removed' WHERE id = ?").run(AGENT_A.id);
+  const gone = storeOf(await planPreview(accessEnv(f.callApp), db, "agent", AGENT_A.id, null, NOW), "core");
+  assert.deepEqual([gone.items[0]?.label, gone.items[0]?.state], ["Not listed in Portal", "dormant"]);
+});
+
+test("a person's read covers an owned card that is gone: an app may still list what it held; Portal's row leaves it out", async () => {
+  const { db, ann } = world();
+  db.prepare("UPDATE fleet_agents SET status = 'removed' WHERE id = ?").run(AGENT_A.id);
+  const f = fakeStores({ ...quiet, evolution: () => answer([wire("evolution", { id: "routine:a", kind: "routine", subject: { kind: "agent", id: AGENT_A.id } })]) });
+  const out = await planPreview(accessEnv(f.callApp), db, "person", ann.id, null, NOW);
+  assert.equal(storeOf(out, "evolution").items.length, 1);
+  assert.equal(storeOf(out, "core").items.length, 0);
 });
 
 test("plan_preview: an unknown entry is 404; an outside agent is no person", async () => {
@@ -257,6 +275,29 @@ test("exception_set: accepted, shown with its reason, recorded; it comes back on
   assert.deepEqual(row?.exception, { reason: "Test agent", until });
   const later = NOW + 2 * 86_400_000;
   assert.equal(list(db, { read: true }, later).items.find((i) => i.code === "no_owner" && i.subject?.id === AGENT_B.id)?.exception, null);
+});
+
+test("an acceptance covers what the owner saw: a new item or a new lifecycle change shows the difference again", () => {
+  const { db } = world();
+  storeItems(db, "evolution", [held({ id: "routine:a", kind: "routine" })], "s", T0);
+  leave(db, "agent", AGENT_A.id);
+  const row = () => {
+    const r = loadColleagues(db, NOW).byId.get(`agent:${AGENT_A.id}`);
+    assert.ok(r);
+    return { kind: r.kind, id: r.id, name: r.name, at: r.at, findings: r.findings };
+  };
+  const until = new Date(NOW + 86_400_000).toISOString();
+  setException(db, { code: "access_after_leave", kind: "agent", id: AGENT_A.id, reason: "Known", until }, row(), "o", NOW);
+  const accepted = () => list(db).items.find((i) => i.code === "access_after_leave")?.exception;
+  assert.ok(accepted());
+  const note = db.prepare("SELECT note FROM fleet_lifecycle_events ORDER BY seq DESC LIMIT 1").get()?.note;
+  assert.ok(!String(note).includes("access_after_leave") && String(note).includes("Known"), "the history reads in words");
+  storeItems(db, "evolution", [held({ id: "routine:b", kind: "routine" })], "s", NOW + 5);
+  assert.equal(accepted(), null, "a new item");
+  db.exec("DELETE FROM fleet_access_items WHERE item_id = 'routine:b'");
+  assert.ok(accepted());
+  db.prepare("UPDATE fleet_agents SET lifecycle_at = ? WHERE id = ?").run(NOW + 5, AGENT_A.id);
+  assert.equal(accepted(), null, "a new change");
 });
 
 test("exception_set refuses: no such entry, a finding that is gone, a date past or too far, an empty reason; nothing is written", () => {

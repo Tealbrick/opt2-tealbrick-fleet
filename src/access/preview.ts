@@ -4,6 +4,7 @@
 import type { Db } from "@opt2-tealbrick/miniapp-sdk";
 import type { PlanPreviewOutput } from "#kit";
 import { fail } from "../meta.ts";
+import { cleanText } from "../text.ts";
 import type { DecodedTopology } from "../topology-slice.ts";
 import { type AccessEnv, absentAnswer, inBackoff, noteStop, presence, readPage, readStateOf } from "./client.ts";
 import { ACCESS_TARGETS, type AccessItem, type AccessTarget, LIST_LIMITS, type ListSubject, type NotShown, onlyAsked, personSubject, shadowOf, TARGET_NAMES, unlinkedCount } from "./items.ts";
@@ -32,9 +33,12 @@ function effectOf(i: Pick<AccessItem, "direction" | "revocable" | "level">, keep
   return i.level === "info" ? "stays" : "manual";
 }
 
+/** On a person's list the row says which agent, in the words: two agents may hold rows that read the same. */
+const ofAgent = (a: Agent | undefined, subjectId: string, label: string): string => (a && a.id !== subjectId ? `${a.name}: ${label}` : label);
+
 function toRow(i: AccessItem, subjectId: string, agents: ReadonlyMap<string, Agent>): Row {
   const owned = i.subject.kind === "agent" ? agents.get(i.subject.id) : undefined;
-  return { id: i.id, kind: i.kind, label: i.label, level: i.level, direction: i.direction, state: i.state, effect: effectOf(i, owned?.keepRunning === true), who: owned && owned.id !== subjectId ? owned.name : null };
+  return { id: i.id, kind: i.kind, label: ofAgent(owned, subjectId, i.label), level: i.level, direction: i.direction, state: i.state, effect: effectOf(i, owned?.keepRunning === true), who: null };
 }
 
 /** 32 subjects per call. */
@@ -74,7 +78,7 @@ async function readStore(env: AccessEnv, db: Db, target: AccessTarget, subjects:
   for (const chunk of chunks(subjects)) {
     let cursor: string | null = null;
     do {
-      if (pages >= PREVIEW_PAGES) return notRead("not_read", "This app has more to list than a preview reads. Use Check now.");
+      if (pages >= PREVIEW_PAGES) return notRead("not_read", "This app has more to list than a preview reads.");
       const left = deadline - Date.now();
       if (left <= 0) return notRead("not_read", "The app did not answer in time.");
       pages++;
@@ -99,15 +103,19 @@ async function readStore(env: AccessEnv, db: Db, target: AccessTarget, subjects:
 /** Portal's own row: what runs, from the signed slice, and who can use what, when the owner allowed Governance to see it. */
 function portalStore(topology: DecodedTopology | null, agents: readonly Agent[], subjectId: string, now: number): Store {
   const items: Row[] = [];
+  const appName = new Map(topology?.instances.map((i) => [i.ins, cleanText(i.name)]) ?? []);
   for (const a of agents) {
-    const who = a.id === subjectId ? null : a.name;
     const running = a.status === "active";
-    items.push({ id: `runtime:${a.id}`, kind: "agent_runtime", label: running ? "Runs now" : "Paused in Portal", level: "use", direction: "held_by", state: running ? "active" : "paused", effect: running && !a.keepRunning ? "stops" : "stays", who });
+    const gone = a.status === "removed";
+    // Only a running agent has anything to stop here: a paused one stays paused, and its grants already do nothing.
+    const effect = running && !a.keepRunning ? "stops" : "stays";
+    const row = (r: Pick<Row, "id" | "kind" | "label" | "level" | "state">): Row => ({ ...r, label: ofAgent(a, subjectId, r.label), direction: "held_by", effect, who: null });
+    items.push(row({ id: `runtime:${a.id}`, kind: "agent_runtime", label: gone ? "Not listed in Portal" : running ? "Runs now" : "Paused in Portal", level: "use", state: gone ? "dormant" : running ? "active" : "paused" }));
     for (const e of topology?.edges.filter((x) => x.agent === a.id) ?? []) {
-      items.push({ id: `edge:${a.id}:${e.ins}`, kind: "app_access", label: `Can use ${e.product}`, level: e.crud.some((c) => c !== "read") ? "write" : "read", direction: "held_by", state: e.paused ? "paused" : "active", effect: a.keepRunning ? "stays" : "stops", who });
+      items.push(row({ id: `edge:${a.id}:${e.ins}`, kind: "app_access", label: `Can use ${appName.get(e.ins) || "an app"}`, level: e.crud.some((c) => c !== "read") ? "write" : "read", state: e.paused ? "paused" : "active" }));
     }
     for (const c of topology?.connections.filter((x) => x.agt === a.id && x.status === "active") ?? []) {
-      items.push({ id: `connection:${c.con}`, kind: "connection", label: "A connected machine or key", level: "use", direction: "held_by", state: "active", effect: a.keepRunning ? "stays" : "stops", who });
+      items.push(row({ id: `connection:${c.con}`, kind: "connection", label: "A connected machine or key", level: "use", state: "active" }));
     }
   }
   const notShown: NotShown[] = !topology
@@ -122,8 +130,8 @@ export async function planPreview(env: AccessEnv, db: Db, kind: "person" | "agen
   const toAgent = (r: Record<string, unknown>): Agent => ({ id: String(r.id), name: String(r.name), status: String(r.status), keepRunning: Number(r.keep_running) === 1 });
   const row = db.prepare(kind === "agent" ? "SELECT id, name, status, keep_running FROM fleet_agents WHERE id = ?" : "SELECT id, name FROM fleet_people WHERE id = ? AND kind = 'person'").get(id);
   if (!row) return fail(kind === "agent" ? "agent_not_found" : "person_not_found", "No such entry.", 404);
-  // A person's stop reaches the agents the person owns (§2). A closed card has nothing left to stop.
-  const agents = kind === "agent" ? [toAgent(row)] : db.prepare("SELECT id, name, status, keep_running FROM fleet_agents WHERE owner_id = ? AND status <> 'removed' ORDER BY name COLLATE NOCASE, id").all(id).map(toAgent);
+  // A person's stop reaches the agents the person owns (§2). A card that is gone stays in the read: an app may still list what it held.
+  const agents = kind === "agent" ? [toAgent(row)] : db.prepare("SELECT id, name, status, keep_running FROM fleet_agents WHERE owner_id = ? ORDER BY name COLLATE NOCASE, id").all(id).map(toAgent);
   const subjects: ListSubject[] = kind === "agent" ? [{ kind: "agent", id }] : [personSubject(db, id), { kind: "unlinked" }, ...agents.map((a): ListSubject => ({ kind: "agent", id: a.id }))];
   const byId = new Map(agents.map((a) => [a.id, a]));
   const reads = await Promise.all(ACCESS_TARGETS.map((t) => readStore(env, db, t, subjects, { id, agents: byId }, now, budgetMs)));
@@ -132,6 +140,6 @@ export async function planPreview(env: AccessEnv, db: Db, kind: "person" | "agen
     subject: { kind, id, name: String(row.name) },
     asOf: iso(now),
     unlinkedAccounts: kind === "agent" ? 0 : (fresh ?? unlinkedCount(db)),
-    stores: [portalStore(topology, agents, id, now), ...reads.map((r) => r.store)],
+    stores: [portalStore(topology, kind === "agent" ? agents : agents.filter((a) => a.status !== "removed"), id, now), ...reads.map((r) => r.store)],
   };
 }

@@ -213,11 +213,15 @@ export function noteRead(db: Db, target: AccessTarget, notShown: readonly NotSho
   ).run(target, now, now, JSON.stringify(notShown));
 }
 
-/** A read that did not finish. `read_at` and `not_shown_json` stay: they belong to the last full read. A running backoff stays too: no second hold. */
+/** A read that did not finish. `read_at` and `not_shown_json` stay: they belong to the last full read. A running backoff stays with its state and words: a blip is no reason for a second hold. */
 export function noteStop(db: Db, target: AccessTarget, a: { state: Exclude<ReadStateName, "read">; code: string; text: string; backoffMs?: number }, now: number): void {
   db.prepare(
-    `INSERT INTO fleet_read_state (target, state, code, text, read_at, tried_at, backoff_until, not_shown_json) VALUES (?, ?, ?, ?, NULL, ?, ?, '[]')
-     ON CONFLICT (target) DO UPDATE SET state = excluded.state, code = excluded.code, text = excluded.text, tried_at = excluded.tried_at, backoff_until = MAX(fleet_read_state.backoff_until, excluded.backoff_until)`,
+    `INSERT INTO fleet_read_state (target, state, code, text, read_at, tried_at, backoff_until, not_shown_json) VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, '[]')
+     ON CONFLICT (target) DO UPDATE SET
+       state = CASE WHEN fleet_read_state.backoff_until > ?5 AND excluded.backoff_until <= ?5 THEN fleet_read_state.state ELSE excluded.state END,
+       code = CASE WHEN fleet_read_state.backoff_until > ?5 AND excluded.backoff_until <= ?5 THEN fleet_read_state.code ELSE excluded.code END,
+       text = CASE WHEN fleet_read_state.backoff_until > ?5 AND excluded.backoff_until <= ?5 THEN fleet_read_state.text ELSE excluded.text END,
+       tried_at = excluded.tried_at, backoff_until = MAX(fleet_read_state.backoff_until, excluded.backoff_until)`,
   ).run(target, a.state, a.code, a.text, now, now + (a.backoffMs ?? 0));
 }
 

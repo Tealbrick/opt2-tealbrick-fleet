@@ -12,7 +12,7 @@ import { type AccessTarget, TARGET_NAMES, unlinkedCount } from "./items.ts";
 import { lastSweepAt } from "./sweep.ts";
 
 export const ACCESS_AFTER_LEAVE: Finding = { code: "access_after_leave", text: "Still has access after leaving." };
-const ORPHAN: Finding = { code: "orphan", text: "An app lists access for someone Governance does not know." };
+const ORPHAN: Finding = { code: "orphan", text: "An app lists access for an agent that is gone, or for someone Governance does not know." };
 const EXCEPTION_MAX_MS = 366 * 86_400_000;
 const FINDINGS_MAX = 2000;
 /** Findings where the time of the last lifecycle change says since when. */
@@ -25,20 +25,21 @@ const iso = (ms: number): string => new Date(ms).toISOString();
  * Stores that still report something a leaving or closed subject holds, by subject. An item for information, one that only says others
  * can read the subject's things, and a dormant one are not access held. A paused one is: it comes back at a resume, until it is revoked.
  */
-export function accessAfterLeave(db: Db): Map<string, string[]> {
-  const out = new Map<string, string[]>();
+export function accessAfterLeave(db: Db): Map<string, { stores: string[]; newest: number }> {
+  const out = new Map<string, { stores: string[]; newest: number }>();
   const rows = db
     .prepare(
-      `SELECT DISTINCT i.subject_kind AS kind, i.subject_id AS id, i.target FROM fleet_access_items i
+      `SELECT i.subject_kind AS kind, i.subject_id AS id, i.target, MAX(i.first_seen) AS newest FROM fleet_access_items i
        LEFT JOIN fleet_agents a ON i.subject_kind = 'agent' AND a.id = i.subject_id
        LEFT JOIN fleet_people p ON i.subject_kind = 'person' AND p.id = i.subject_id
        WHERE i.level <> 'info' AND i.direction = 'held_by' AND i.state <> 'dormant' AND COALESCE(a.lifecycle, p.lifecycle) IN ('leaving', 'archived')
-       ORDER BY i.target`,
+       GROUP BY i.subject_kind, i.subject_id, i.target ORDER BY i.target`,
     )
     .all();
   for (const r of rows) {
     const key = `${String(r.kind)}:${String(r.id)}`;
-    out.set(key, [...(out.get(key) ?? []), nameOf(String(r.target))]);
+    const seen = out.get(key);
+    out.set(key, { stores: [...(seen?.stores ?? []), nameOf(String(r.target))], newest: Math.max(seen?.newest ?? 0, Number(r.newest)) });
   }
   return out;
 }
@@ -59,13 +60,31 @@ function orphansByStore(db: Db): string[] {
     .map((r) => String(r.target));
 }
 
-const accepted = (db: Db, now: number): Map<string, { reason: string; until: string }> =>
+interface Accepted {
+  reason: string;
+  until: string;
+  at: number;
+}
+
+const accepted = (db: Db, now: number): Map<string, Accepted> =>
   new Map(
     db
-      .prepare("SELECT code, subject_kind, subject_id, reason, until FROM fleet_exceptions WHERE until > ?")
+      .prepare("SELECT code, subject_kind, subject_id, reason, until, at FROM fleet_exceptions WHERE until > ?")
       .all(now)
-      .map((r) => [`${String(r.code)}:${String(r.subject_kind)}:${String(r.subject_id)}`, { reason: String(r.reason), until: iso(Number(r.until)) }] as const),
+      .map((r) => [`${String(r.code)}:${String(r.subject_kind)}:${String(r.subject_id)}`, { reason: String(r.reason), until: iso(Number(r.until)), at: Number(r.at) }] as const),
   );
+
+/**
+ * An acceptance covers what the owner saw. A new lifecycle change after it, or a store that lists a new item after it, is news: the
+ * difference shows again, not under an old "Accepted".
+ */
+function acceptanceOf(ok: ReadonlyMap<string, Accepted>, leave: ReturnType<typeof accessAfterLeave>, code: string, s: Pick<FindingSubject, "kind" | "id" | "at">): Accepted | null {
+  const a = ok.get(`${code}:${s.kind}:${s.id}`);
+  if (!a) return null;
+  if (s.at !== null && Date.parse(s.at) > a.at) return null;
+  if (code === ACCESS_AFTER_LEAVE.code && (leave.get(`${s.kind}:${s.id}`)?.newest ?? 0) > a.at) return null;
+  return a;
+}
 
 export interface FindingSubject {
   kind: SubjectKind;
@@ -83,6 +102,8 @@ export function unreadOf(db: Db, portal: { read: true } | { read: false; text: s
   return portal.read ? out : [{ product: "core", name: "Portal", text: portal.text }, ...out];
 }
 
+const shown = (a: Accepted | null): { reason: string; until: string } | null => (a ? { reason: a.reason, until: a.until } : null);
+
 export function findingsList(db: Db, subjects: readonly FindingSubject[], portal: Parameters<typeof unreadOf>[1], now: number): FindingsListOutput {
   const leave = accessAfterLeave(db);
   const ok = accepted(db, now);
@@ -93,9 +114,9 @@ export function findingsList(db: Db, subjects: readonly FindingSubject[], portal
         code: f.code,
         text: f.text,
         subject: { kind: s.kind, id: s.id, name: s.name },
-        productName: f.code === ACCESS_AFTER_LEAVE.code ? (leave.get(`${s.kind}:${s.id}`)?.join(", ") ?? null) : null,
+        productName: f.code === ACCESS_AFTER_LEAVE.code ? (leave.get(`${s.kind}:${s.id}`)?.stores.join(", ") ?? null) : null,
         since: SINCE_THE_CHANGE.has(f.code) ? s.at : null,
-        exception: ok.get(`${f.code}:${s.kind}:${s.id}`) ?? null,
+        exception: shown(acceptanceOf(ok, leave, f.code, s)),
       });
     }
   }
@@ -109,9 +130,10 @@ export function findingsList(db: Db, subjects: readonly FindingSubject[], portal
 }
 
 /** Differences an owner has not accepted, for the Summary. */
-export function openDifferences(db: Db, subjects: readonly Pick<FindingSubject, "kind" | "id" | "findings">[], now: number): number {
+export function openDifferences(db: Db, subjects: readonly Pick<FindingSubject, "kind" | "id" | "at" | "findings">[], now: number): number {
   const ok = accepted(db, now);
-  const own = subjects.reduce((n, s) => n + s.findings.filter((f) => !ok.has(`${f.code}:${s.kind}:${s.id}`)).length, 0);
+  const leave = accessAfterLeave(db);
+  const own = subjects.reduce((n, s) => n + s.findings.filter((f) => !acceptanceOf(ok, leave, f.code, s)).length, 0);
   return own + (unlinkedCount(db) > 0 ? 1 : 0) + orphansByStore(db).length;
 }
 
@@ -122,13 +144,14 @@ export function setException(db: Db, input: ExceptionSetInput, subject: FindingS
   const until = Date.parse(input.until);
   if (!Number.isFinite(until) || until <= now) return fail("until_invalid", "Choose a date in the future.", 400);
   if (until > now + EXCEPTION_MAX_MS) return fail("until_invalid", "Choose a date within one year.", 400);
-  if (!subject.findings.some((f) => f.code === input.code)) return fail("finding_gone", "This difference is no longer there. Open the list again.", 409);
+  const finding = subject.findings.find((f) => f.code === input.code);
+  if (!finding) return fail("finding_gone", "This difference is no longer there. Open the list again.", 409);
   return db.transaction(() => {
     db.prepare(
       `INSERT INTO fleet_exceptions (code, subject_kind, subject_id, reason, until, by_id, at) VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (code, subject_kind, subject_id) DO UPDATE SET reason = excluded.reason, until = excluded.until, by_id = excluded.by_id, at = excluded.at`,
     ).run(input.code, input.kind, input.id, reason, until, actor, now);
-    appendEvent(db, { subject: { kind: input.kind, id: input.id, name: subject.name }, kind: "changed", actor: { kind: "owner", id: actor }, note: `Accepted "${input.code}" until ${iso(until).slice(0, 10)}: ${reason}`.slice(0, 500), at: now });
+    appendEvent(db, { subject: { kind: input.kind, id: input.id, name: subject.name }, kind: "changed", actor: { kind: "owner", id: actor }, note: `Accepted until ${iso(until).slice(0, 10)}: ${finding.text} Why: ${reason}`.slice(0, 500), at: now });
     return { exception: { code: input.code, reason, until: iso(until) } };
   });
 }
