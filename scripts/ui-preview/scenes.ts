@@ -150,8 +150,8 @@ const AGENT = `person-or-agent?kind=agent&id=${ID.a}`;
 const PERSON = `person-or-agent?kind=person&id=${ID.p}`;
 
 
-// ── Tier 2 pages (C380 T2-b): review rounds. The route works with the ops; the nav entry waits for the QA rows. ──
-const TIER2_OPS = ["round_create", "round_get", "round_verdict", "round_set", "overview_get", "reviews_list"];
+// ── Tier 2 pages (C380 T2-b): review rounds and the Access record. The route works with the ops; the nav entry waits for the QA rows. ──
+const TIER2_OPS = ["round_create", "round_get", "round_verdict", "round_set", "record_export", "overview_get", "reviews_list"];
 const roundCounts = { total: 3, open: 1, trusted: 1, limited: 0, blocked: 0, dismissed: 1, removalQueued: 1, removalPlanned: 1 };
 const roundSummary = { id: "rnd_01J0000000000000000000R1", title: "Q4 review", scope: "everyone", createdAt: "2026-10-28T09:00:00Z", dueAt: "2026-11-10T09:00:00Z", closedAt: null, state: "open", overdue: false, counts: roundCounts };
 const accessRows = [
@@ -169,6 +169,22 @@ const roundDetail = {
   ],
 };
 const roundOps = { ...shell, round_get: (i: unknown) => ((i as { round?: string }).round ? ok({ rounds: [roundSummary], round: roundDetail })(i) : ok({ rounds: [roundSummary, { ...roundSummary, id: "rnd_2", title: "Q3 review", state: "closed", closedAt: "2026-07-30T09:00:00Z", counts: { ...roundCounts, open: 0 } }], round: null })(i)) };
+
+const recordFile = {
+  format: "tealbrick.access-record/1",
+  header: "What each app reported and what the Portal slice showed, in Teal Brick stores only. Not proof of compliance.",
+  limits: ["Our own apps report this data. A list proves only what the app reported.", "This record makes no claim about any law, standard or audit.", "One person approved all items. Governance has one owner login today."],
+  period: { from: "2026-08-01T00:00:00.000Z", to: "2026-10-30T00:00:00.000Z" },
+  generatedAt: "2026-10-30T12:00:00.000Z",
+  contents: { includes: ["Names and ids of people and agents."], excludes: ["Email addresses, titles, tags."], decision: "What this file holds about people is a default. Nobody checked this against a law." },
+  approvers: { count: 1, ids: ["per_1"], line: "One person approved all items." },
+  sweeps: { count: 2, notFinished: 0, lists: [{ id: "swp_1", startedAt: "a", finishedAt: "2026-10-29T10:00:00.000Z", listKept: true, stores: [{ product: "connect", store: "Connect", state: "read", readThisSweep: true }], items: [], ended: [] }, { id: "swp_2", startedAt: "b", finishedAt: "2026-10-30T10:00:00.000Z", listKept: true, stores: [{ product: "connect", store: "Connect", state: "not_read", readThisSweep: false }], items: [], ended: [] }] },
+  findings: { items: [{ text: "This agent has no owner. Name an owner." }] },
+  exceptions: [],
+  timeToStop: [{ subject: { name: "Marco Rossi" }, markedAt: "2026-10-29T10:00:00.000Z", stoppedAt: "2026-10-29T10:01:12.000Z", seconds: 72, note: null, steps: { proved: 3, total: 3 } }],
+  appsNotRead: { now: [{ product: "connect", name: "Connect", text: "Could not be read." }] },
+  integrity: { chain: { ok: true, rows: 40 }, digest: "sha256:abc" },
+};
 
 export const scenes: Scene[] = [
   { name: "summary", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: pageOps, ready: "Ready to stop an agent?", expect: ["Could not be read", "Not installed", "Rules has this change", "cannot see that switch"] },
@@ -364,6 +380,18 @@ export const scenes: Scene[] = [
     expect: ["What the apps report", "Slack: Marco's handle", "This app cannot end this from here", "Your review"],
     forbid: ["sha256", "has been removed"],
   },
+  { name: "record", path: "access-record", personOps: TIER2_OPS, strict: true, ops: { ...shell, record_export: ok({ record: recordFile, digest: "sha256:abc" }) }, ready: "Make the record", expect: ["Access record", "Our own apps report this data", "no claim about any law or standard"], forbid: ["compliance", "Evidence"] },
+  {
+    name: "record-ready",
+    path: "access-record",
+    personOps: TIER2_OPS,
+    strict: true,
+    ops: { ...shell, record_export: ok({ record: recordFile, digest: "sha256:abc" }) },
+    ready: "Make the record",
+    steps: (p) => button(p, "Make the record"),
+    expect: ["The file is ready", "2 sweeps", "One person approved all items", "Not read: Connect", "Download the file", "Print"],
+  },
+  { name: "record-error", path: "access-record", personOps: TIER2_OPS, strict: true, ops: { ...shell, record_export: fail("record_too_big", 409, "This period has too many rows for one file. Choose a shorter period.") }, ready: "Make the record", steps: (p) => button(p, "Make the record"), expect: ["Choose a shorter period"] },
   { name: "nav-waits-for-qa", path: "", personOps: [...LIFECYCLE_OPS, ...TIER2_OPS], strict: true, ops: pageOps, ready: "Ready to stop an agent?", forbid: ["Review rounds", "Access record"] },
   { name: "signed-out", path: "people", ops: {}, signedOut: true, ready: "Open this app from Portal" },
 ];
