@@ -184,11 +184,7 @@ function writeState(db: Db, s: Subject, to: Lifecycle, reason: Reason | "migrate
   if (s.kind === "agent") {
     db.prepare("UPDATE fleet_agents SET lifecycle = ?, lifecycle_rev = ?, lifecycle_reason = ?, lifecycle_note = ?, lifecycle_at = ?, migrated_note = NULL WHERE id = ?").run(to, rev, reason, note, now, s.id);
   } else {
-<<<<<<< HEAD
     db.prepare("UPDATE fleet_people SET lifecycle = ?, status = ?, lifecycle_rev = ?, lifecycle_reason = ?, lifecycle_note = ?, lifecycle_at = ? WHERE id = ?").run(to, personStatusOf(to), rev, reason, note, now, s.id);
-=======
-    db.prepare("UPDATE fleet_people SET lifecycle = ?, status = ?, lifecycle_rev = ?, lifecycle_reason = ?, lifecycle_note = ?, lifecycle_at = ?, updated_at = ? WHERE id = ?").run(to, personStatusOf(to), rev, reason, note, now, now, s.id);
->>>>>>> origin/main
   }
   return rev;
 }
@@ -308,12 +304,8 @@ function parseDate(raw: string | null, what: string): number | null {
 export function setDates(db: Db, input: { kind: SubjectKind; id: string; validFrom?: string | null | undefined; validUntil?: string | null | undefined; confirmPastDate?: boolean | undefined; confirmCount?: number | undefined; noCap?: boolean | undefined; actor: Actor }, now = Date.now()): void {
   db.transaction(() => {
     const s = loadSubject(db, input.kind, input.id) ?? fail(input.kind === "agent" ? "agent_not_found" : "person_not_found", "No such entry.", 404);
-<<<<<<< HEAD
     const typed = input.validFrom === undefined ? s.validFrom : parseDate(input.validFrom, "validFrom");
     const from = typed !== null && typed <= now && input.validFrom !== undefined ? null : typed; // a start date that has passed needs no wait
-=======
-    const from = input.validFrom === undefined ? s.validFrom : parseDate(input.validFrom, "validFrom");
->>>>>>> origin/main
     const until = input.validUntil === undefined ? s.validUntil : parseDate(input.validUntil, "validUntil");
     if (from !== null && until !== null && from >= until) fail("input_invalid", "The start date must be before the end date.", 400);
     if (input.validUntil !== undefined && until !== null && until <= now && !input.confirmPastDate) fail("date_in_past", "This end date has passed. Confirm that you want to stop this entry.", 409);
@@ -322,11 +314,7 @@ export function setDates(db: Db, input: { kind: SubjectKind; id: string; validFr
     if (startsLater && !input.noCap) assertCap(db, input.confirmCount, now);
     bump(db);
     const table = s.kind === "agent" ? "fleet_agents" : "fleet_people";
-<<<<<<< HEAD
     db.prepare(`UPDATE ${table} SET valid_from = ?, valid_until = ?, lifecycle_rev = ? WHERE id = ?`).run(from, until, revision(db), s.id);
-=======
-    db.prepare(`UPDATE ${table} SET valid_from = ?, valid_until = ?, lifecycle_rev = ?, updated_at = ? WHERE id = ?`).run(from, until, revision(db), now, s.id);
->>>>>>> origin/main
     const iso = (ms: number | null) => (ms === null ? "none" : new Date(ms).toISOString().slice(0, 10));
     appendEvent(db, { subject: { kind: s.kind, id: s.id, name: s.name }, kind: "changed", from: s.lifecycle, to: startsLater ? "not_started" : s.lifecycle, actor: input.actor, note: `Start date ${iso(from)}. End date ${iso(until)}.`, at: now });
   });
@@ -351,11 +339,7 @@ export function startDatePassed(db: Db, kind: SubjectKind, id: string, now: numb
     if (!s || s.validFrom === null || s.validFrom > now) return;
     bump(db);
     const table = kind === "agent" ? "fleet_agents" : "fleet_people";
-<<<<<<< HEAD
     db.prepare(`UPDATE ${table} SET valid_from = NULL, lifecycle_rev = ? WHERE id = ?`).run(revision(db), id);
-=======
-    db.prepare(`UPDATE ${table} SET valid_from = NULL, lifecycle_rev = ?, updated_at = ? WHERE id = ?`).run(revision(db), now, id);
->>>>>>> origin/main
     appendEvent(db, { subject: { kind, id, name: s.name }, kind: "changed", from: "not_started", to: s.lifecycle, actor: { kind: "system", id: null }, note: "The start date passed.", at: now });
   });
 }
