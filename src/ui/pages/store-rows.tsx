@@ -32,7 +32,7 @@ function StoreBody({ store, subjectName }: { store: PreviewStore; subjectName: s
   return (
     <>
       {store.items.length === 0 ? (
-        <p className="tb-soft">{`${store.name} reports nothing for ${subjectName}.`}</p>
+        <p className="tb-soft">{store.notShown.length ? `${store.name} lists nothing for ${subjectName}, and it cannot list everything.` : `${store.name} reports nothing for ${subjectName}.`}</p>
       ) : (
         <details className="store-items" open={store.items.length <= 6}>
           <summary>{store.items.length === 1 ? "1 item" : `${store.items.length} items`}</summary>
@@ -64,7 +64,7 @@ export function StoreRows({ stores, subjectName, unlinkedAccounts = 0 }: { store
             <h3>{s.name}</h3>
             <Tag status={STATE_TAG[s.state].status}>{STATE_TAG[s.state].word}</Tag>
           </div>
-          {s.state === "read" && s.at ? <p className="tb-hint">{`Reported by ${s.name}, ${when(s.at)}. This is what the app says, not a check of it.`}</p> : null}
+          {s.state === "read" && s.product === "core" ? <p className="tb-hint">From the copy of Portal's records in this workspace.</p> : s.state === "read" && s.at ? <p className="tb-hint">{`Reported by ${s.name}, ${when(s.at)}. This is what the app says, not a check of it.`}</p> : null}
           <StoreBody store={s} subjectName={subjectName} />
         </section>
       ))}

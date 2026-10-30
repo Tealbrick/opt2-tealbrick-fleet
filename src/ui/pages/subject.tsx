@@ -12,7 +12,7 @@ import { PlanResult } from "./plan-result.tsx";
 import { StopNow } from "./stop-now.tsx";
 import { StoreRows } from "./store-rows.tsx";
 import { openSubject, type SubjectKind, subjectFromUrl, subjectHref } from "./subject-link.ts";
-import { loadPreview, WhatWouldStop } from "./what-would-stop.tsx";
+import { loadPreview } from "./what-would-stop.tsx";
 import { type Lifecycle, reasonLabel, when } from "./words.ts";
 
 type Colleague = ColleagueGetOutput["colleague"];
@@ -45,7 +45,6 @@ function Subject({ kind, id, portalHref }: { kind: SubjectKind; id: string; port
   const load = useCallback(() => callOp<ColleagueGetOutput>("colleague_get", { kind, id }), [kind, id]);
   const { data, error, loading, reload } = useLoad(load);
   const [doing, setDoing] = useState<Action | null>(null);
-  const [preview, setPreview] = useState(false);
   const c = data?.colleague;
   const gone = error !== null && !data;
   return (
@@ -58,7 +57,7 @@ function Subject({ kind, id, portalHref }: { kind: SubjectKind; id: string; port
         <>
           <PageHead title={c.name} lede={c.line} />
           {error ? <LoadFailed message={`This page may be old. ${error}`} retrying={loading} onRetry={() => void reload()} /> : null}
-          <Actions actions={c.actions} onChoose={setDoing} onPreview={FEATURES.preview ? () => setPreview(true) : undefined} />
+          <Actions actions={c.actions} onChoose={setDoing} />
           <Facts c={c} />
           {c.findings.length ? (
             <section className="tb-stack" aria-label="Differences">
@@ -97,7 +96,6 @@ function Subject({ kind, id, portalHref }: { kind: SubjectKind; id: string; port
               <dd>{c.rev}</dd>
             </dl>
           </details>
-          {preview ? <WhatWouldStop subject={c} onClose={() => setPreview(false)} /> : null}
           {doing ? <Doing c={c} action={doing} portalHref={portalHref} onClose={() => setDoing(null)} onChanged={reload} /> : null}
         </>
       ) : !gone ? (
@@ -109,12 +107,11 @@ function Subject({ kind, id, portalHref }: { kind: SubjectKind; id: string; port
 
 const PRIMARY: Partial<Record<Lifecycle, boolean>> = { active: true };
 
-function Actions({ actions, onChoose, onPreview }: { actions: Action[]; onChoose: (a: Action) => void; onPreview?: () => void }) {
-  if (actions.length === 0 && !onPreview) return null;
+function Actions({ actions, onChoose }: { actions: Action[]; onChoose: (a: Action) => void }) {
+  if (actions.length === 0) return null;
   return (
     <div className="tb-stack">
       <div className="tb-row">
-        {onPreview ? <Button onClick={onPreview}>See what would stop</Button> : null}
         {actions.map((a) => (
           <Button key={a.to} variant={a.to === "suspended" || a.to === "leaving" ? "danger" : PRIMARY[a.to] ? "primary" : "secondary"} disabled={a.blocked !== null} onClick={() => onChoose(a)}>
             {a.label}
@@ -166,6 +163,7 @@ function AccessByStore({ kind, id, name }: { kind: SubjectKind; id: string; name
   return (
     <section className="tb-stack" aria-label="Access">
       <h2 className="sub-head">Access</h2>
+      <p className="tb-soft">What each app reports now, and what Stop and remove access would do to it. Stop now ends less.</p>
       {error ? <LoadFailed message={error} retrying={loading} onRetry={() => void reload()} /> : null}
       {data === null ? error ? null : <Loading what="what each app reports" /> : <StoreRows stores={data.stores} subjectName={name} unlinkedAccounts={data.unlinkedAccounts} />}
     </section>

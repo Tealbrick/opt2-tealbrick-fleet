@@ -17,7 +17,7 @@ export function WhatWouldStop({ subject, onClose }: { subject: { kind: "person" 
     <Dialog
       open
       size="lg"
-      title={`If ${subject.name} stopped now`}
+      title={`If ${subject.name} left now`}
       onClose={onClose}
       footer={
         <Button variant="primary" onClick={onClose}>
@@ -27,7 +27,7 @@ export function WhatWouldStop({ subject, onClose }: { subject: { kind: "person" 
     >
       <div className="tb-stack">
         <Notice tone="neutral" role="status">
-          {`This is a preview. Nothing changes.${data ? ` Read ${when(data.asOf)}.` : ""}`}
+          {`This is a preview of Stop and remove access. Nothing stops and no access changes.${data ? ` Read ${when(data.asOf)}.` : ""}`}
         </Notice>
         {error ? <LoadFailed message={error} retrying={loading} onRetry={() => void reload()} /> : null}
         {data === null ? error ? null : <Loading what="what each app reports" /> : <StoreRows stores={data.stores} subjectName={subject.name} unlinkedAccounts={data.unlinkedAccounts} />}

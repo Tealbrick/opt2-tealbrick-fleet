@@ -18,10 +18,11 @@ const rank = (code: string) => {
   return i < 0 ? FIRST.length : i;
 };
 
-export function groupFindings(items: FindingRow[]): { code: string; rows: FindingRow[] }[] {
+/** One group per sentence: the same code can have two wordings, and a heading must be true for each row under it. */
+export function groupFindings(items: FindingRow[]): { key: string; text: string; rows: FindingRow[] }[] {
   const groups = new Map<string, FindingRow[]>();
-  for (const f of items) groups.set(f.code, [...(groups.get(f.code) ?? []), f]);
-  return [...groups].map(([code, rows]) => ({ code, rows })).sort((a, b) => rank(a.code) - rank(b.code));
+  for (const f of items) groups.set(`${f.code}:${f.text}`, [...(groups.get(`${f.code}:${f.text}`) ?? []), f]);
+  return [...groups].map(([key, rows]) => ({ key, text: rows[0]?.text ?? "", rows })).sort((a, b) => rank(a.rows[0]?.code ?? "") - rank(b.rows[0]?.code ?? ""));
 }
 
 function AcceptDialog({ row, onClose, onChanged }: { row: FindingRow; onClose: () => void; onChanged: () => void | Promise<void> }) {
@@ -161,8 +162,8 @@ export function Differences() {
             <EmptyState title={`No differences at ${when(data.lastSweepAt)}.`}>{`${data.storesRead} apps read. This says what they reported, and nothing about what they could not read.`}</EmptyState>
           ) : (
             groups.map((g) => (
-              <section className="tb-stack" key={g.code} aria-label={g.rows[0]?.text}>
-                <h2 className="sub-head">{g.rows[0]?.text}</h2>
+              <section className="tb-stack" key={g.key} aria-label={g.text}>
+                <h2 className="sub-head">{g.text}</h2>
                 <ul className="ready">
                   {g.rows.map((r) => (
                     <Row key={`${r.code}:${r.subject?.id ?? r.productName}`} row={r} onAccept={setAccept} />
