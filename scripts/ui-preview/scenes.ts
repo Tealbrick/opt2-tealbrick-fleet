@@ -155,16 +155,16 @@ const TIER2_OPS = ["round_create", "round_get", "round_verdict", "round_set", "r
 const roundCounts = { total: 3, open: 1, trusted: 1, limited: 0, blocked: 0, dismissed: 1, removalQueued: 1, removalPlanned: 1 };
 const roundSummary = { id: "rnd_01J0000000000000000000R1", title: "Q4 review", scope: "everyone", createdAt: "2026-10-28T09:00:00Z", dueAt: "2026-11-10T09:00:00Z", closedAt: null, state: "open", overdue: false, counts: roundCounts };
 const accessRows = [
-  { product: "connect", productName: "Connect", id: "channel_sender:s1", kind: "channel_sender", label: "Slack: Marco's handle", level: "use", state: "active", revocable: true, digest: "sha256:01" },
-  { product: "knowledge", productName: "Knowledge", id: "team_grant:t1", kind: "team_grant", label: "Support team reads Marco's memory", level: "read", state: "active", revocable: true, digest: "sha256:02" },
-  { product: "kanban", productName: "Task Board", id: "assignment:i1", kind: "assignment", label: "Issue: Renew the contract", level: "info", state: "active", revocable: false, digest: "sha256:03" },
+  { product: "connect", productName: "Connect", id: "channel_sender:s1", kind: "channel_sender", label: "Slack: Marco's handle", level: "use", direction: "held_by", state: "active", revocable: true, digest: "sha256:01" },
+  { product: "knowledge", productName: "Knowledge", id: "team_grant:t1", kind: "team_grant", label: "Support team reads Marco's memory", level: "read", direction: "about", state: "active", revocable: true, digest: "sha256:02" },
+  { product: "kanban", productName: "Task Board", id: "assignment:i1", kind: "assignment", label: "Issue: Renew the contract", level: "info", direction: "held_by", state: "active", revocable: false, digest: "sha256:03" },
 ];
-const roundItem = (over: Record<string, unknown>) => ({ review: "rvw_01J0000000000000000000A1", subject: { kind: "person", id: ID.p, name: "Marco Rossi" }, status: "open", reason: null, decidedAt: null, snapshotDigest: "snap", accessDigest: "acc", access: accessRows, accessCount: 3, removal: null, ...over });
+const roundItem = (over: Record<string, unknown>) => ({ review: "rvw_01J0000000000000000000A1", subject: { kind: "person", id: ID.p, name: "Marco Rossi" }, status: "open", reason: null, decidedAt: null, decidedIn: null, snapshotDigest: "snap", accessDigest: "acc", access: accessRows, accessCount: 3, removal: null, ...over });
 const roundDetail = {
   ...roundSummary,
   items: [
     roundItem({}),
-    roundItem({ review: "rvw_2", subject: { kind: "agent", id: ID.a, name: "Henry" }, status: "trusted", reason: "Fine.", decidedAt: "2026-10-29T10:00:00Z", snapshotDigest: null, access: [], accessCount: 0, removal: { state: "queued", note: "Waiting for a free place. Send it again when the open plans are done.", plan: null, planState: null, count: 1 } }),
+    roundItem({ review: "rvw_2", subject: { kind: "agent", id: ID.a, name: "Henry" }, status: "trusted", reason: "Fine.", decidedAt: "2026-10-29T10:00:00Z", snapshotDigest: null, access: [], accessCount: 0, decidedIn: "round", removal: { state: "queued", note: "Waiting for a free place. Send it again when the open plans are done.", plan: null, planState: null, count: 1, headline: null, proved: 0, manual: 0, open: 0 } }),
     roundItem({ review: "rvw_3", subject: { kind: "agent", id: ID.b, name: "Sales" }, status: "dismissed", snapshotDigest: null, access: [], accessCount: 0 }),
   ],
 };
@@ -364,7 +364,7 @@ export const scenes: Scene[] = [
   { name: "rounds-loading", path: "review-rounds", personOps: TIER2_OPS, strict: true, ops: { ...shell, round_get: hang }, ready: "Loading review rounds" },
   { name: "rounds-error", path: "review-rounds", personOps: TIER2_OPS, strict: true, ops: { ...shell, round_get: fail("internal") }, ready: "Try again" },
   { name: "rounds-start", path: "review-rounds", personOps: TIER2_OPS, strict: true, ops: roundOps, ready: "Q4 review", steps: (p) => button(p, "Start a round"), expect: ["Name of the round", "left out"] },
-  { name: "round", path: "review-rounds", personOps: TIER2_OPS, strict: true, ops: roundOps, ready: "Q4 review", steps: (p) => button(p, /^Open Q4 review$/), expect: ["Marco Rossi", "Not decided", "Trusted", "Skipped", "Waiting for a free place", "Send waiting removals"], forbid: ["sha256", "rvw_"] },
+  { name: "round", path: "review-rounds", personOps: TIER2_OPS, strict: true, ops: roundOps, ready: "Q4 review", steps: (p) => button(p, /^Open Q4 review$/), expect: ["Marco Rossi", "Not decided", "Trusted", "Skipped", "Waiting for a free place", "Send waiting removals", "1 entry has a removal in a plan"], forbid: ["sha256", "rvw_"] },
   {
     name: "round-review",
     path: "review-rounds",
@@ -377,7 +377,7 @@ export const scenes: Scene[] = [
       await p.getByText("Marco Rossi").first().waitFor();
       await button(p, /^Review Marco Rossi$/);
     },
-    expect: ["What the apps report", "Slack: Marco's handle", "This app cannot end this from here", "Your review"],
+    expect: ["What the apps report", "Slack: Marco's handle", "Others can reach this entry's things", "This app cannot end this from here", "Your review"],
     forbid: ["sha256", "has been removed"],
   },
   { name: "record", path: "access-record", personOps: TIER2_OPS, strict: true, ops: { ...shell, record_export: ok({ record: recordFile, digest: "sha256:abc" }) }, ready: "Make the record", expect: ["Access record", "Our own apps report this data", "no claim about any law or standard"], forbid: ["compliance", "Evidence"] },

@@ -7,9 +7,9 @@ import { canonicalize } from "@opt2-tealbrick/manifest";
 import type { Db, Json } from "@opt2-tealbrick/miniapp-sdk";
 import { readStates } from "../access/client.ts";
 import { type AccessTarget, TARGET_NAMES } from "../access/items.ts";
-import { verifyChain } from "../lifecycle/events.ts";
+import { verifyChainPaged } from "../lifecycle/events.ts";
 import { fail } from "../meta.ts";
-import { approversIn, eventsIn, exceptionsIn, plansIn, roundsIn, timeToStop, verdictsIn } from "./sections.ts";
+import { approversIn, eventsIn, exceptionsIn, plansIn, roundsIn, systemMadeIn, timeToStop, verdictsIn } from "./sections.ts";
 import { namesOf, sweepLists, sweepsIn } from "./sweeps.ts";
 import { CONTENTS, HEADER, limitsOf, manyApprovers, NO_APPROVER, ONE_APPROVER, RECORD_FORMAT } from "./words.ts";
 
@@ -18,6 +18,8 @@ export const DEFAULT_DAYS = 90;
 export const MAX_SWEEPS = 120;
 export const MAX_ROWS = 20_000;
 export const MAX_BYTES = 8_000_000;
+/** `findings_list` stops at this many; a list that long may be cut, and the file says so. */
+const FINDINGS_CUT = 2000;
 const DAY_MS = 86_400_000;
 const tick = () => new Promise<void>((res) => setImmediate(res));
 
@@ -34,10 +36,17 @@ export interface RecordFacts {
   maxRows?: number | undefined;
 }
 
+const ISO = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2}))?$/;
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+/** A start and an end in ISO form. A date alone is the start of that day (UTC), or the end of it for the end. The end is never in the future. */
 export function periodOf(input: RecordInput, now: number): { from: number; to: number } {
   const bad = () => fail("period_invalid", "Choose a start and an end. The end is after the start, and the period is at most one year.", 400);
-  const to = input.to === undefined ? now : Date.parse(input.to);
-  const from = input.from === undefined ? to - DEFAULT_DAYS * DAY_MS : Date.parse(input.from);
+  const read = (v: string, end: boolean): number => {
+    if (!ISO.test(v)) return bad();
+    return Date.parse(DATE_ONLY.test(v) ? `${v}${end ? "T23:59:59.999Z" : "T00:00:00Z"}` : v);
+  };
+  const to = Math.min(input.to === undefined ? now : read(input.to, true), now);
+  const from = input.from === undefined ? to - DEFAULT_DAYS * DAY_MS : read(input.from, false);
   if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to || to - from > MAX_DAYS * DAY_MS) bad();
   return { from, to };
 }
@@ -64,12 +73,13 @@ export async function buildRecord(db: Db, input: RecordInput, facts: RecordFacts
   const plans = plansIn(db, from, to, names);
   const stops = timeToStop(db, from, to, names);
   await tick();
-  const approvers = approversIn({ verdicts, plans, exceptions, events, rounds });
-  const approverLine = approvers.length === 0 ? NO_APPROVER : approvers.length === 1 ? ONE_APPROVER : manyApprovers(approvers.length);
+  const approvers = approversIn({ verdicts, plans, exceptions, events });
+  const systemMade = systemMadeIn({ plans, events });
+  const approverLine = `${approvers.length === 0 ? NO_APPROVER : approvers.length === 1 ? ONE_APPROVER : manyApprovers(approvers.length)}${systemMade > 0 ? ` ${systemMade} changes were made by the system, and no person approved them in Governance.` : ""}`;
   const unknownSweeps = lists.filter((l) => !l.listKept).length;
   const withStores = lists.filter((l) => l.stores.length > 0);
   const missed = (product: string) => withStores.filter((l) => !l.stores.find((s) => s.product === product)?.readThisSweep).length;
-  const chain = verifyChain(db);
+  const chain = await verifyChainPaged(db);
   const record = {
     format: RECORD_FORMAT,
     app: { product: "fleet", version: facts.version },
@@ -78,9 +88,9 @@ export async function buildRecord(db: Db, input: RecordInput, facts: RecordFacts
     header: HEADER,
     limits: limitsOf({ since: knownFrom, unknownSweeps, approverLine }),
     contents: CONTENTS,
-    approvers: { count: approvers.length, ids: approvers, line: approverLine },
+    approvers: { count: approvers.length, ids: approvers, systemMade, line: approverLine },
     sweeps: { count: lists.length, notFinished, lists },
-    findings: { note: "The differences open when this file was made.", lastSweepAt: facts.findings.lastSweepAt, items: facts.findings.items },
+    findings: { note: "The differences open when this file was made.", lastSweepAt: facts.findings.lastSweepAt, cut: facts.findings.items.length >= FINDINGS_CUT, items: facts.findings.items },
     exceptions,
     timeToStop: stops,
     appsNotRead: {

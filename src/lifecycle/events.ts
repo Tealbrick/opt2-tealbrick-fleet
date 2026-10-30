@@ -49,18 +49,38 @@ export function appendEvent(db: Db, e: NewEvent): string {
   return id;
 }
 
-/** Walks the chain. A row of the migration has no `prev_hash`; every later row must name the hash of the row before it. */
-export function verifyChain(db: Db): { ok: true; rows: number } | { ok: false; brokenAt: number } {
+type ChainResult = { ok: true; rows: number } | { ok: false; brokenAt: number };
+/** A row of the migration has no `prev_hash`; every later row must name the hash of the row before it. */
+const linked = (r: Row, before: Row | null): boolean => (r.prev_hash === null ? r.kind === "migrated" : r.prev_hash === (before ? eventHash(before) : GENESIS));
+
+/** Walks the chain. */
+export function verifyChain(db: Db): ChainResult {
   let before: Row | null = null;
   let rows = 0;
   for (const r of db.prepare("SELECT * FROM fleet_lifecycle_events ORDER BY seq").all()) {
     rows++;
-    if (r.prev_hash === null) {
-      if (r.kind !== "migrated") return { ok: false, brokenAt: Number(r.seq) };
-    } else if (r.prev_hash !== (before ? eventHash(before) : GENESIS)) return { ok: false, brokenAt: Number(r.seq) };
+    if (!linked(r, before)) return { ok: false, brokenAt: Number(r.seq) };
     before = r;
   }
   return { ok: true, rows };
+}
+
+/** The same walk in pages, with the event loop free between them: a long history must not hold a request for the hook that stops agents. */
+export async function verifyChainPaged(db: Db, page = 500): Promise<ChainResult> {
+  let before: Row | null = null;
+  let rows = 0;
+  let after = 0;
+  for (;;) {
+    const batch = db.prepare("SELECT * FROM fleet_lifecycle_events WHERE seq > ? ORDER BY seq LIMIT ?").all(after, page);
+    for (const r of batch) {
+      rows++;
+      if (!linked(r, before)) return { ok: false, brokenAt: Number(r.seq) };
+      before = r;
+      after = Number(r.seq);
+    }
+    if (batch.length < page) return { ok: true, rows };
+    await new Promise<void>((res) => setImmediate(res));
+  }
 }
 
 export interface EventView {
