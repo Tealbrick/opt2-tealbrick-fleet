@@ -5,7 +5,7 @@
   "name": "Governance",
   "summary": "Governance: who is who in your workspace, who owns which agent, and how far each person, outside agent and agent is trusted.",
   "description": "Governance is the workspace's record of who should have access: one state per person and agent, with reasons and dates, and what no longer matches. It holds no grant and no credential, and it decides no call: Portal and Rules & Approvals do that.\n\n- **Summary:** how many agents you have, which have no owner, which can write or send, what no longer matches, and if you are ready to stop an agent.\n- **People and agents:** one line per person and agent: working, not reviewed, stop asked, paused. Each change has a reason and stays in the history.\n- **Stop an agent, or a person's agents:** one dialog for one agent, or a short flow for a person. Governance records the stop and lists what to do in Portal. Each screen says what does not change: their own logins, the agent's machine, copies already made.\n- **See what would stop:** a preview per app that changes nothing. Each app says what it reports; what could not be read says so, and is never shown as nothing.\n- **Differences:** what no longer matches. You can accept one with a reason until a date.\n- **Reviews:** an agent can ask for a review and say why; only you decide. Each verdict is kept with a copy of what the subject could do at that time.\n- **Who owns what:** who owns which agent and who is in which team, as a table you can print for a security review.\n- **Contact rules:** you can propose a rule from a fixed template. It is sent to Rules & Approvals as a draft; you approve it there.\n- **Feed for apps:** Rules & Approvals and Knowledge read a small, versioned directory feed. It has no email addresses and no job titles.\n\nGovernance finds no agent you do not know about. People are directory entries, not sign-ins. This is a record for your own review, not proof of compliance.",
-  "version": "0.4.0-dev.4",
+  "version": "0.4.0-dev.6",
   "sdkMajor": 1,
   "requires": {
     "bridge": "0.2.14"
@@ -895,7 +895,7 @@
               "minLength": 1,
               "maxLength": 64
             },
-            "description": "Optional extras the reader understands. \"agent_handles\": every agents[] entry also carries handles (canonical channel handles Connect issued to the agent, sorted, at most 16). \"lifecycle\": agents[] and person contacts[] also carry the effective lifecycle, and agents[] and contacts[] carry floor (true: the reader refuses this entry before any rule). Unknown values are ignored."
+            "description": "Optional extras the reader understands. \"agent_handles\": every agents[] entry also carries handles (canonical channel handles Connect issued to the agent, sorted, at most 16). \"lifecycle\": agents[] and person contacts[] also carry the effective lifecycle, and agents[] and contacts[] carry floor (true: the reader refuses this entry before any rule). \"roles\": the answer also carries a top-level roles list: each role that is not archived with its id, name and the agents and contacts that hold it now (started, not ended). Unknown values are ignored."
           }
         }
       },
@@ -1114,6 +1114,59 @@
                     }
                   }
                 }
+              },
+              "roles": {
+                "type": "array",
+                "maxItems": 200,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "members"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80
+                    },
+                    "members": {
+                      "type": "array",
+                      "maxItems": 4000,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "kind",
+                          "id"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "enum": [
+                              "agent",
+                              "contact"
+                            ]
+                          },
+                          "id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "epoch": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,64}$"
               }
             }
           },
@@ -1135,6 +1188,10 @@
               },
               "unchanged": {
                 "const": true
+              },
+              "epoch": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,64}$"
               }
             }
           }
@@ -4484,6 +4541,11 @@
           "request": {
             "type": "string",
             "maxLength": 40
+          },
+          "confirmCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
           }
         }
       },
@@ -5677,6 +5739,16 @@
                     "type": "null"
                   }
                 ]
+              },
+              "rulesHolds": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             }
           },
@@ -5719,6 +5791,29 @@
               "stopCap": {
                 "type": "integer",
                 "minimum": 0
+              }
+            }
+          },
+          "keysUndecided": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "name",
+                "text"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                }
               }
             }
           }
@@ -6665,6 +6760,16 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "rulesHolds": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 }
               },
@@ -7592,6 +7697,16 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "rulesHolds": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 }
               },
@@ -8333,7 +8448,7 @@
     {
       "id": "plan_send",
       "title": "Make a stop plan",
-      "description": "Prepare the plan for a person or agent you stopped: what your confirm ends at once, and what waits for your approval in Portal. Governance applies nothing in Portal; you approve there. Answers at once; read the progress with plan_get. Only you can do this. No agent can call it.",
+      "description": "Prepare the plan for a person or agent you stopped: what your confirm ends at once, and what waits for your approval in Portal. With no choice an agent is only paused, and its key stays until you choose. Choose per agent in `decisions` to finish in this one approval: stop and remove, move to `newOwner` with a new key, or keep running with a `reason`. Governance applies nothing in Portal; you approve there. Answers at once; read the progress with plan_get. Only you can do this. No agent can call it.",
       "input": {
         "type": "object",
         "additionalProperties": false,
@@ -8364,6 +8479,41 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 64
+            }
+          },
+          "decisions": {
+            "type": "array",
+            "maxItems": 400,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "agent",
+                "decision"
+              ],
+              "properties": {
+                "agent": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "decision": {
+                  "enum": [
+                    "stop",
+                    "transfer",
+                    "keep"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                "newOwner": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                }
+              }
             }
           },
           "items": {
@@ -8401,6 +8551,11 @@
             "type": "integer",
             "minimum": 60,
             "maximum": 86400
+          },
+          "confirmCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
           }
         }
       },
@@ -9584,6 +9739,2485 @@
         }
       },
       "crud": [
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "required",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "roles_list",
+      "title": "List roles",
+      "description": "The roles of the workspace with how many people and agents hold each, or, with a subject, the roles of that person or agent (held, waiting for a start date, and ended). A role is a record: it allows and stops nothing until a Rules rule names it. Only you can do this.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "includeArchived": {
+            "type": "boolean"
+          },
+          "subject": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "id"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "person",
+                  "agent"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              }
+            }
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "roles",
+          "assignments"
+        ],
+        "properties": {
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "name",
+                "description",
+                "archived",
+                "members",
+                "scheduled",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "archived": {
+                  "type": "boolean"
+                },
+                "members": {
+                  "type": "integer"
+                },
+                "scheduled": {
+                  "type": "integer"
+                },
+                "createdAt": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "assignments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "role",
+                "subject",
+                "reason",
+                "note",
+                "validFrom",
+                "validUntil",
+                "state",
+                "endedAt",
+                "endReason",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "subject": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "id",
+                    "name"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "person",
+                        "agent"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "note": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "validFrom": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "validUntil": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "state": {
+                  "enum": [
+                    "active",
+                    "scheduled",
+                    "ended"
+                  ]
+                },
+                "endedAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "endReason": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "createdAt": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "role_get",
+      "title": "Show one role",
+      "description": "One role with who holds it now, who waits for a start date, and the last ended assignments. Only you can do this.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "role",
+          "assignments"
+        ],
+        "properties": {
+          "role": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "description",
+              "archived",
+              "members",
+              "scheduled",
+              "createdAt"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "archived": {
+                "type": "boolean"
+              },
+              "members": {
+                "type": "integer"
+              },
+              "scheduled": {
+                "type": "integer"
+              },
+              "createdAt": {
+                "type": "string"
+              }
+            }
+          },
+          "assignments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "role",
+                "subject",
+                "reason",
+                "note",
+                "validFrom",
+                "validUntil",
+                "state",
+                "endedAt",
+                "endReason",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "subject": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "id",
+                    "name"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "person",
+                        "agent"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "note": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "validFrom": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "validUntil": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "state": {
+                  "enum": [
+                    "active",
+                    "scheduled",
+                    "ended"
+                  ]
+                },
+                "endedAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "endReason": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "createdAt": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "role_set",
+      "title": "Save a role",
+      "description": "Create a role (no id) or change one (id): its name and description, and archive it or bring it back. An archived role is left out of what Rules reads, so a rule that names it matches no one. Only you can do this.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "archived": {
+            "type": "boolean"
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "role"
+        ],
+        "properties": {
+          "role": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "description",
+              "archived",
+              "members",
+              "scheduled",
+              "createdAt"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "archived": {
+                "type": "boolean"
+              },
+              "members": {
+                "type": "integer"
+              },
+              "scheduled": {
+                "type": "integer"
+              },
+              "createdAt": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "create",
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "required",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "role_assign",
+      "title": "Assign a role",
+      "description": "Give a person or an agent a role, with a reason from the list and optional start and end dates. After the end date the assignment ends by itself, with no action by anyone. Ending it removes no Portal grant. Only you can do this.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "role",
+          "subject",
+          "reason"
+        ],
+        "properties": {
+          "role": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "subject": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "id"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "person",
+                  "agent"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              }
+            }
+          },
+          "reason": {
+            "enum": [
+              "new_role",
+              "project",
+              "cover",
+              "contract",
+              "access_review",
+              "other"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "validFrom": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "validUntil": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "assignment"
+        ],
+        "properties": {
+          "assignment": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "role",
+              "subject",
+              "reason",
+              "note",
+              "validFrom",
+              "validUntil",
+              "state",
+              "endedAt",
+              "endReason",
+              "createdAt"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "role": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "name"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              },
+              "subject": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "id",
+                  "name"
+                ],
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "person",
+                      "agent"
+                    ]
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              },
+              "reason": {
+                "type": "string"
+              },
+              "note": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "validFrom": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "validUntil": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "state": {
+                "enum": [
+                  "active",
+                  "scheduled",
+                  "ended"
+                ]
+              },
+              "endedAt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "endReason": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "createdAt": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "create"
+      ],
+      "effect": "write",
+      "idempotency": "required",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "role_end",
+      "title": "End an assignment",
+      "description": "End one assignment now, or cancel one that waits for its start date. It removes no Portal grant. Only you can do this.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "assignment"
+        ],
+        "properties": {
+          "assignment": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "assignment"
+        ],
+        "properties": {
+          "assignment": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "role",
+              "subject",
+              "reason",
+              "note",
+              "validFrom",
+              "validUntil",
+              "state",
+              "endedAt",
+              "endReason",
+              "createdAt"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "role": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "name"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              },
+              "subject": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "id",
+                  "name"
+                ],
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "person",
+                      "agent"
+                    ]
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              },
+              "reason": {
+                "type": "string"
+              },
+              "note": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "validFrom": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "validUntil": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "state": {
+                "enum": [
+                  "active",
+                  "scheduled",
+                  "ended"
+                ]
+              },
+              "endedAt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "endReason": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "createdAt": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "supported",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "round_create",
+      "title": "Start a review round",
+      "description": "Ask for one review of each person and agent in a list, and count the answers. It reads the directory and changes no access. A person or agent already in an open round is left out. Owner only. No agent can call it.",
+      "crud": [
+        "create"
+      ],
+      "effect": "write",
+      "idempotency": "required",
+      "receipt": false,
+      "audience": "person",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "scope"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "scope": {
+            "enum": [
+              "agents",
+              "people",
+              "everyone",
+              "chosen"
+            ]
+          },
+          "subjects": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "id"
+              ],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "agent",
+                    "person"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                }
+              }
+            }
+          },
+          "dueDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "round",
+          "skipped"
+        ],
+        "properties": {
+          "round": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "title",
+              "scope",
+              "createdAt",
+              "dueAt",
+              "closedAt",
+              "state",
+              "overdue",
+              "counts"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "dueAt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "closedAt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "state": {
+                "enum": [
+                  "open",
+                  "closed"
+                ]
+              },
+              "overdue": {
+                "type": "boolean"
+              },
+              "counts": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "total",
+                  "open",
+                  "trusted",
+                  "limited",
+                  "blocked",
+                  "dismissed",
+                  "removalQueued",
+                  "removalPlanned"
+                ],
+                "properties": {
+                  "total": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "open": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "trusted": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "limited": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "blocked": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "dismissed": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "removalQueued": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "removalPlanned": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          "skipped": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "round_get",
+      "title": "See review rounds",
+      "description": "The list of review rounds with their counts, and one round with each entry: what it holds now by app, what you decided and what you asked to remove. Owner only.",
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "round": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rounds",
+          "round"
+        ],
+        "properties": {
+          "rounds": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "title",
+                "scope",
+                "createdAt",
+                "dueAt",
+                "closedAt",
+                "state",
+                "overdue",
+                "counts"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "scope": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "string"
+                },
+                "dueAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "closedAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "state": {
+                  "enum": [
+                    "open",
+                    "closed"
+                  ]
+                },
+                "overdue": {
+                  "type": "boolean"
+                },
+                "counts": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "total",
+                    "open",
+                    "trusted",
+                    "limited",
+                    "blocked",
+                    "dismissed",
+                    "removalQueued",
+                    "removalPlanned"
+                  ],
+                  "properties": {
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "open": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "trusted": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "limited": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "blocked": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "dismissed": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "removalQueued": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "removalPlanned": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "round": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "title",
+                  "scope",
+                  "createdAt",
+                  "dueAt",
+                  "closedAt",
+                  "state",
+                  "overdue",
+                  "counts",
+                  "items"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "createdAt": {
+                    "type": "string"
+                  },
+                  "dueAt": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "closedAt": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "state": {
+                    "enum": [
+                      "open",
+                      "closed"
+                    ]
+                  },
+                  "overdue": {
+                    "type": "boolean"
+                  },
+                  "counts": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "total",
+                      "open",
+                      "trusted",
+                      "limited",
+                      "blocked",
+                      "dismissed",
+                      "removalQueued",
+                      "removalPlanned"
+                    ],
+                    "properties": {
+                      "total": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "open": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "trusted": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "limited": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "blocked": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "dismissed": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "removalQueued": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "removalPlanned": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "items": {
+                    "type": "array",
+                    "maxItems": 200,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "review",
+                        "subject",
+                        "status",
+                        "reason",
+                        "decidedAt",
+                        "decidedIn",
+                        "snapshotDigest",
+                        "accessDigest",
+                        "access",
+                        "accessCount",
+                        "removal"
+                      ],
+                      "properties": {
+                        "review": {
+                          "type": "string"
+                        },
+                        "subject": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "kind",
+                            "id",
+                            "name"
+                          ],
+                          "properties": {
+                            "kind": {
+                              "type": "string"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "status": {
+                          "enum": [
+                            "open",
+                            "trusted",
+                            "limited",
+                            "blocked",
+                            "dismissed"
+                          ]
+                        },
+                        "reason": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "decidedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "decidedIn": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "round",
+                                "elsewhere"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "snapshotDigest": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "accessDigest": {
+                          "type": "string"
+                        },
+                        "access": {
+                          "type": "array",
+                          "maxItems": 200,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "product",
+                              "productName",
+                              "id",
+                              "kind",
+                              "label",
+                              "level",
+                              "direction",
+                              "state",
+                              "revocable",
+                              "digest"
+                            ],
+                            "properties": {
+                              "product": {
+                                "type": "string"
+                              },
+                              "productName": {
+                                "type": "string"
+                              },
+                              "id": {
+                                "type": "string"
+                              },
+                              "kind": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "level": {
+                                "type": "string"
+                              },
+                              "direction": {
+                                "enum": [
+                                  "held_by",
+                                  "about"
+                                ]
+                              },
+                              "state": {
+                                "type": "string"
+                              },
+                              "revocable": {
+                                "type": "boolean"
+                              },
+                              "digest": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "accessCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "removal": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "state",
+                                "note",
+                                "plan",
+                                "planState",
+                                "count",
+                                "headline",
+                                "proved",
+                                "manual",
+                                "open"
+                              ],
+                              "properties": {
+                                "state": {
+                                  "type": "string"
+                                },
+                                "note": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "plan": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "planState": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "headline": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "proved": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "manual": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "open": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "round_verdict",
+      "title": "Decide one entry of a round",
+      "description": "Record the review of one entry of a round, and if you tick access to remove, make a stop plan for it by the same path as any plan. Nothing is removed until the plan runs and the app confirms. Owner only. No agent can call it.",
+      "crud": [
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "required",
+      "receipt": false,
+      "audience": "person",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "round",
+          "subject",
+          "verdict",
+          "reason",
+          "snapshotDigest",
+          "accessDigest"
+        ],
+        "properties": {
+          "round": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "subject": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "id"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "agent",
+                  "person"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              }
+            }
+          },
+          "verdict": {
+            "enum": [
+              "trusted",
+              "limited",
+              "blocked"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "snapshotDigest": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "accessDigest": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "remove": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "product",
+                "id",
+                "digest"
+              ],
+              "properties": {
+                "product": {
+                  "enum": [
+                    "connect",
+                    "knowledge",
+                    "kanban",
+                    "evolution"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "digest": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                }
+              }
+            }
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "item",
+          "plan"
+        ],
+        "properties": {
+          "item": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "review",
+              "subject",
+              "status",
+              "reason",
+              "decidedAt",
+              "decidedIn",
+              "snapshotDigest",
+              "accessDigest",
+              "access",
+              "accessCount",
+              "removal"
+            ],
+            "properties": {
+              "review": {
+                "type": "string"
+              },
+              "subject": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "id",
+                  "name"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              },
+              "status": {
+                "enum": [
+                  "open",
+                  "trusted",
+                  "limited",
+                  "blocked",
+                  "dismissed"
+                ]
+              },
+              "reason": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "decidedAt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "decidedIn": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "round",
+                      "elsewhere"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "snapshotDigest": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "accessDigest": {
+                "type": "string"
+              },
+              "access": {
+                "type": "array",
+                "maxItems": 200,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "product",
+                    "productName",
+                    "id",
+                    "kind",
+                    "label",
+                    "level",
+                    "direction",
+                    "state",
+                    "revocable",
+                    "digest"
+                  ],
+                  "properties": {
+                    "product": {
+                      "type": "string"
+                    },
+                    "productName": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "level": {
+                      "type": "string"
+                    },
+                    "direction": {
+                      "enum": [
+                        "held_by",
+                        "about"
+                      ]
+                    },
+                    "state": {
+                      "type": "string"
+                    },
+                    "revocable": {
+                      "type": "boolean"
+                    },
+                    "digest": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "accessCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "removal": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "state",
+                      "note",
+                      "plan",
+                      "planState",
+                      "count",
+                      "headline",
+                      "proved",
+                      "manual",
+                      "open"
+                    ],
+                    "properties": {
+                      "state": {
+                        "type": "string"
+                      },
+                      "note": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "plan": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "planState": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "count": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "headline": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "proved": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "manual": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "open": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "round_set",
+      "title": "Send queued removals or close a round",
+      "description": "Send makes the plans that wait for a free place. Close ends the round: entries nobody decided are dismissed and queued removals are dropped. Owner only.",
+      "crud": [
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "supported",
+      "receipt": false,
+      "audience": "person",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "round",
+          "action"
+        ],
+        "properties": {
+          "round": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "action": {
+            "enum": [
+              "send",
+              "close"
+            ]
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "round",
+          "planned",
+          "queued"
+        ],
+        "properties": {
+          "round": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "title",
+              "scope",
+              "createdAt",
+              "dueAt",
+              "closedAt",
+              "state",
+              "overdue",
+              "counts"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "dueAt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "closedAt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "state": {
+                "enum": [
+                  "open",
+                  "closed"
+                ]
+              },
+              "overdue": {
+                "type": "boolean"
+              },
+              "counts": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "total",
+                  "open",
+                  "trusted",
+                  "limited",
+                  "blocked",
+                  "dismissed",
+                  "removalQueued",
+                  "removalPlanned"
+                ],
+                "properties": {
+                  "total": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "open": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "trusted": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "limited": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "blocked": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "dismissed": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "removalQueued": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "removalPlanned": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          "planned": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "queued": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "record_export",
+      "title": "Make the access record",
+      "description": "Make one file for a period of up to a year: what each app listed in every sweep with the rows that ended, the open and accepted differences, the time from a stop to the proof, the apps that were not read, verdicts, plans with their outcomes, and who approved. Our own apps report this data. The file makes no claim about any law or standard, and it states its limits. Dates are in ISO form; a date alone is the whole day in UTC, and the end is never in the future. It changes no access. It writes one event with the digest of the file. Owner only.",
+      "crud": [
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "supported",
+      "receipt": false,
+      "audience": "person",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "from": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "to": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "record",
+          "digest"
+        ],
+        "properties": {
+          "record": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "format",
+              "period",
+              "limits",
+              "integrity"
+            ]
+          },
+          "digest": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "id": "exclusions_list",
+      "title": "List Cannot hold both rules",
+      "description": "The rules that say which two roles no one may have together, or which role an agent may not have while its owner has another, with who breaks each rule now. A rule is checked when a role is given, with the dates. This checks roles only. Portal grants are not checked. Only you can do this.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "includeArchived": {
+            "type": "boolean"
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rules"
+        ],
+        "properties": {
+          "rules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "kind",
+                "a",
+                "b",
+                "text",
+                "note",
+                "archived",
+                "idle",
+                "clashCount",
+                "clashes",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "roles",
+                    "holder_owner"
+                  ]
+                },
+                "a": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "b": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "text": {
+                  "type": "string"
+                },
+                "note": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "archived": {
+                  "type": "boolean"
+                },
+                "idle": {
+                  "type": "boolean"
+                },
+                "clashCount": {
+                  "type": "integer"
+                },
+                "clashes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "subject",
+                      "text"
+                    ],
+                    "properties": {
+                      "subject": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "kind",
+                          "id",
+                          "name"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "enum": [
+                              "person",
+                              "agent"
+                            ]
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "text": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "createdAt": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "exclusion_set",
+      "title": "Save a Cannot hold both rule",
+      "description": "Add a rule (kind and two roles) or archive one and bring it back (id). A rule is not edited: another pair is another rule. A new rule is made even when someone already breaks it: the answer counts them. This checks roles only. Portal grants are not checked. Only you can do this.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "kind": {
+            "enum": [
+              "roles",
+              "holder_owner"
+            ]
+          },
+          "roleA": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "roleB": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "archived": {
+            "type": "boolean"
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rule"
+        ],
+        "properties": {
+          "rule": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "kind",
+              "a",
+              "b",
+              "text",
+              "note",
+              "archived",
+              "idle",
+              "clashCount",
+              "clashes",
+              "createdAt"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "roles",
+                  "holder_owner"
+                ]
+              },
+              "a": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "name"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              },
+              "b": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "name"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              },
+              "text": {
+                "type": "string"
+              },
+              "note": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "archived": {
+                "type": "boolean"
+              },
+              "idle": {
+                "type": "boolean"
+              },
+              "clashCount": {
+                "type": "integer"
+              },
+              "clashes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "subject",
+                    "text"
+                  ],
+                  "properties": {
+                    "subject": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "id",
+                        "name"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "enum": [
+                            "person",
+                            "agent"
+                          ]
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "createdAt": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "create",
         "update"
       ],
       "effect": "write",

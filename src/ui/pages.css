@@ -43,3 +43,11 @@
   .item { grid-template-columns: auto minmax(0, 1fr); }
   .item > .side { grid-column: 2; grid-row: auto; justify-content: flex-start; }
 }
+
+/* Roles (C380 T2-a): who has a role, one block each so a name never breaks letter by letter on a phone */
+.holders { display: grid; }
+.holder { display: grid; gap: 4px; padding: 12px 0; min-width: 0; box-shadow: var(--tb-hair-bottom); }
+.holder:last-child { box-shadow: none; }
+.holder-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.holder .who { font-weight: var(--tb-weight-label); overflow-wrap: anywhere; }
+.holder p { color: var(--tb-ink-soft); font-size: var(--tb-text-label); line-height: 22px; overflow-wrap: anywhere; }

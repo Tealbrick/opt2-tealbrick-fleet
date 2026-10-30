@@ -1,86 +1,38 @@
-// "Stop this person's agents and access in Teal Brick" (DESIGN-C380 §10, C126 StepFlow): one step at a time. It says what it
-// does not change before the Confirm, says "This stops now" in place of a last-day field, and the last step reads back what
-// the server knows. For one agent the same flow has no "Their agents" step.
+// "Stop this person's agents and access in Teal Brick" (DESIGN-C380 §10, C126 StepFlow): one step at a time. The first step holds the reason and the
+// choice for each agent (C380 D2): the default is no choice, which only pauses, because offboarding has no quick undo. It says what it does not change
+// before the Confirm, has no last-day field, and the last step reads back what the server knows. For one agent there is no choice to make.
 import { callOp } from "@opt2-tealbrick/miniapp-sdk/client";
-import { Choices, Field, type FlowStep, Notice, Select, StepFlow, Textarea, TextInput } from "@opt2-tealbrick/ui";
-import { useCallback, useRef, useState } from "react";
-import type { ColleagueGetOutput, ColleaguesListOutput, LifecycleSetInput, LifecycleSetOutput, PlanSendInput } from "#kit";
-import { changeError, useLoad } from "../common.tsx";
+import { Field, type FlowStep, Notice, Select, StepFlow, Textarea } from "@opt2-tealbrick/ui";
+import { useRef, useState } from "react";
+import type { ColleagueGetOutput, LifecycleSetInput, LifecycleSetOutput, PlanSendInput } from "#kit";
+import { changeError } from "../common.tsx";
+import { type Choices, canChoose, choiceSummary, choicesReady, decisionsOf } from "./agent-choice.ts";
+import { AgentChoices, useOwners } from "./agent-choices.tsx";
+import { capButton, useCapConfirm } from "./cap-confirm.ts";
 import { FEATURES } from "./features.ts";
-import { lifecycleError, stopCapOf } from "./lifecycle-errors.ts";
-import { sendPlan } from "./plan-live.tsx";
+import { lifecycleError } from "./lifecycle-errors.ts";
 import { NotChanged, PlanResult } from "./plan-result.tsx";
 import { type Tick, WhatStopsStep } from "./what-stops-step.tsx";
 import { beforeChangeText, beforeChangeTone, NOTE_HINT, type Reason, reasonLabel, reasonOptions } from "./words.ts";
 
 type Colleague = ColleagueGetOutput["colleague"];
-type Decision = "stop" | "keep" | "transfer";
-
-const KEEP_SENTENCE = "The person who left may still hold this agent's key.";
-const TRANSFER_SENTENCE = "A new key is needed. The agent loses this person's personal memory and gains the new owner's.";
-type Owner = { value: string; label: string };
-
-function AgentsStep({ agents, decisions, onDecide, keepReasons, onKeepReason, owners, newOwners, onNewOwner }: { agents: Colleague["agents"]; decisions: Record<string, Decision>; onDecide: (id: string, d: Decision) => void; keepReasons: Record<string, string>; onKeepReason: (id: string, v: string) => void; owners: Owner[] | null; newOwners: Record<string, string>; onNewOwner: (id: string, v: string) => void }) {
-  if (agents.length === 0) return <p>This person owns no agents.</p>;
-  return (
-    <div className="tb-stack">
-      {agents.map((a) => (
-        <div className="tb-stack" key={a.id}>
-          <h3 className="flow-agent">
-            {a.name}
-            <span className="tb-hint">{a.line}</span>
-          </h3>
-          <Choices<Decision>
-            label={a.name}
-            value={decisions[a.id] ?? "stop"}
-            onChange={(v) => onDecide(a.id, v)}
-            options={[
-              { value: "stop", title: "Stop and remove", body: "Governance marks it to stop. It is paused and loses its access when you do the steps in Portal." },
-              { value: "keep", title: "Keep running", body: KEEP_SENTENCE },
-              ...(owners ? [{ value: "transfer" as const, title: "Pause and transfer", body: TRANSFER_SENTENCE }] : []),
-            ]}
-          />
-          {decisions[a.id] === "transfer" ? (
-            <Field label={`New owner of ${a.name}`}>
-              <Select placeholder="Choose a person" options={owners ?? []} value={newOwners[a.id] ?? ""} onValueChange={(v) => onNewOwner(a.id, v)} />
-            </Field>
-          ) : null}
-          {decisions[a.id] === "keep" ? (
-            <Field label={`Why does ${a.name} keep running?`} hint="Required. This is kept in the history.">
-              <TextInput value={keepReasons[a.id] ?? ""} maxLength={200} onChange={(e) => onKeepReason(a.id, e.target.value)} />
-            </Field>
-          ) : null}
-        </div>
-      ))}
-    </div>
-  );
-}
 
 export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague; portalHref?: string; onClose: () => void; onChanged: () => void | Promise<void> }) {
   const [reason, setReason] = useState<Reason | "">("");
   const [note, setNote] = useState("");
-  const [decisions, setDecisions] = useState<Record<string, Decision>>(() => Object.fromEntries(c.agents.filter((a) => a.keepRunning).map((a) => [a.id, "keep" as const])));
-  const [keepReasons, setKeepReasons] = useState<Record<string, string>>({});
-  const [newOwners, setNewOwners] = useState<Record<string, string>>({});
+  const [choices, setChoices] = useState<Choices>({});
   const [failure, setFailure] = useState<string | null>(null);
-  const [sendFailure, setSendFailure] = useState<string | null>(null);
   const [selected, setSelected] = useState<Tick[] | null>(null);
-  const people = useLoad(useCallback(() => (FEATURES.plans && c.kind === "person" ? callOp<ColleaguesListOutput>("colleagues_list", { kind: "person", lifecycle: "active", limit: 200 }) : Promise.resolve(null)), [c.kind]));
-  const owners = FEATURES.plans && c.kind === "person" && people.data ? people.data.items.filter((p) => p.id !== c.id).map((p) => ({ value: p.id, label: p.name })) : null;
+  const owners = useOwners(c.id);
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState(0);
   const [result, setResult] = useState<Colleague | null>(null);
   const sent = useRef(false);
-  // what already went through: a retry goes on from there, and never marks or moves twice
+  // the mark is made once: a retry after a refused plan goes on from there, and the owner can go back and change a choice
   const mark = useRef<Colleague | null>(null);
-  const moved = useRef(new Set<string>());
-  const [capCount, setCapCount] = useState<number | null>(null);
+  const cap = useCapConfirm();
   const person = c.kind === "person";
-  // an agent already leaving or closed has its own state: no decision to make here
-  const agents = person ? c.agents.filter((a) => a.lifecycle === "proposed" || a.lifecycle === "active" || a.lifecycle === "suspended") : [];
-  const keeps = agents.filter((a) => decisions[a.id] === "keep");
-  const transfers = agents.filter((a) => decisions[a.id] === "transfer");
-  const keepsNamed = keeps.every((a) => (keepReasons[a.id] ?? "").trim()) && transfers.every((a) => newOwners[a.id]);
+  const agents = person ? c.agents.filter(canChoose) : [];
 
   const send = async (): Promise<boolean | undefined> => {
     if (sent.current || !reason) return undefined;
@@ -88,35 +40,37 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
     setFailure(null);
     const input: LifecycleSetInput = { kind: c.kind, id: c.id, to: "leaving", reason, expectedRev: c.rev };
     if (note.trim()) input.note = note.trim();
-    if (capCount !== null) input.confirmCount = capCount;
-    const decided = agents.filter((a) => decisions[a.id] !== "transfer");
-    if (decided.length) input.decisions = decided.map((a) => (decisions[a.id] === "keep" ? { agent: a.id, decision: "keep" as const, reason: (keepReasons[a.id] ?? "").trim() } : { agent: a.id, decision: "stop" as const }));
+    // one press, one number: for the first call of this press only
+    const confirm = cap.take();
+    if (confirm !== null && !mark.current) input.confirmCount = confirm;
     try {
-      // the mark first: if it is refused, nothing moved. A move that fails after it is said as such, and Try again goes on from there.
+      const markedBefore = mark.current !== null;
       if (!mark.current) mark.current = (await callOp<LifecycleSetOutput>("lifecycle_set", input)).colleague;
-      for (const a of transfers) {
-        if (moved.current.has(a.id)) continue;
-        try {
-          await callOp("agent_set", { agent: a.id, owner: newOwners[a.id] as string });
-          moved.current.add(a.id);
-        } catch (e) {
-          setFailure(`The stop is recorded, but ${a.name} did not move to the new owner. ${changeError(e)}`);
-          return false;
-        }
-      }
       if (FEATURES.plans) {
         const plan: PlanSendInput = { kind: c.kind, id: c.id };
-        if (transfers.length) plan.transfers = transfers.map((a) => a.id);
+        const decisions = decisionsOf(agents, choices);
+        if (decisions.length) plan.decisions = decisions;
         if (selected) plan.items = selected;
-        setSendFailure(await sendPlan(plan));
+        if (confirm !== null && markedBefore) plan.confirmCount = confirm;
+        try {
+          await callOp("plan_send", plan);
+        } catch (e) {
+          // nothing_to_stop: no Portal step is needed. Anything else: the stop stands, and the owner can change a choice and send again.
+          if ((e as { code?: unknown } | null)?.code !== "nothing_to_stop") {
+            cap.note(e);
+            setFailure(`The stop is recorded, but the request for Portal is not ready. ${lifecycleError(e, changeError).message}`);
+            // the page behind must show the stop, also if the owner closes this now
+            await onChanged();
+            return false;
+          }
+        }
       }
       sent.current = true;
       setResult(mark.current);
       await onChanged();
       return undefined;
     } catch (e) {
-      const cap = stopCapOf(e);
-      if (cap !== null) setCapCount(cap);
+      cap.note(e);
       // the page was old: read it again, so the next try sends the new state
       const code = (e as { code?: unknown } | null)?.code;
       if (code === "lifecycle_stale" || code === "agent_not_owned") await onChanged();
@@ -130,35 +84,28 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
   const resultStep: FlowStep = {
     name: "Result",
     nextLabel: "Done",
-    render: () => (result ? <PlanResult colleague={result} portalHref={portalHref} showNotChanged={false} sendFailure={sendFailure} /> : <p className="tb-soft">Nothing has changed yet.</p>),
+    render: () => (result ? <PlanResult colleague={result} portalHref={portalHref} showNotChanged={false} /> : <p className="tb-soft">Nothing has changed yet.</p>),
   };
   // once sent, only the result is left: going back could not change what was sent
   const steps: FlowStep[] = result ? [resultStep] : [
     {
       name: "Why",
-      canNext: Boolean(reason),
+      canNext: Boolean(reason) && choicesReady(agents, choices),
       render: () => (
         <div className="tb-stack">
           <p className="tb-soft">{person ? `This marks ${c.name}'s agents to stop, and lists what to do in Portal to stop them and remove their access in Teal Brick. It does not end their employment or their own logins.` : `This marks ${c.name} to stop, and lists what to do in Portal to stop it and remove its access in Teal Brick.`}</p>
           <Field label="Reason">
-            <Select placeholder="Choose a reason" options={reasonOptions("leaving")} value={reason} onValueChange={(v) => setReason(v as Reason)} />
+            <Select placeholder="Choose a reason" disabled={Boolean(mark.current)} options={reasonOptions("leaving")} value={reason} onValueChange={(v) => { setReason(v as Reason); cap.clear(); }} />
           </Field>
           <Field label="Note" hint={NOTE_HINT}>
-            <Textarea rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
+            <Textarea rows={2} maxLength={500} disabled={Boolean(mark.current)} value={note} onChange={(e) => setNote(e.target.value)} />
           </Field>
           <Notice tone="neutral">The mark takes effect now. There is no last-day date.</Notice>
+          {person && agents.length === 0 ? <p>This person owns no agents.</p> : null}
+          {agents.length && FEATURES.plans ? <AgentChoices agents={agents} choices={choices} onChange={(next) => { setChoices(next); cap.clear(); }} owners={owners} /> : null}
         </div>
       ),
     },
-    ...(person
-      ? [
-          {
-            name: "Their agents",
-            canNext: keepsNamed,
-            render: () => <AgentsStep agents={agents} decisions={decisions} onDecide={(id, d) => setDecisions((s) => ({ ...s, [id]: d }))} keepReasons={keepReasons} onKeepReason={(id, v) => setKeepReasons((s) => ({ ...s, [id]: v }))} owners={owners} newOwners={newOwners} onNewOwner={(id, v) => setNewOwners((s) => ({ ...s, [id]: v }))} />,
-          },
-        ]
-      : []),
     ...(FEATURES.preview
       ? [
           {
@@ -169,7 +116,7 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
       : []),
     {
       name: "Confirm",
-      nextLabel: capCount !== null ? "Stop this one too" : "Stop",
+      nextLabel: cap.count !== null ? capButton(cap.count) : mark.current ? "Send again" : "Stop",
       onNext: send,
       render: () => (
         <div className="tb-stack">
@@ -190,7 +137,7 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
             {person ? (
               <div className="kv-row">
                 <dt>Their agents</dt>
-                <dd>{agents.length === 0 ? "None" : `${agents.length - keeps.length - transfers.length} stop, ${keeps.length} keep running, ${transfers.length} move to a new owner`}</dd>
+                <dd>{agents.length === 0 ? "None" : FEATURES.plans ? choiceSummary(agents, choices) : `${agents.length}`}</dd>
               </div>
             ) : null}
           </dl>

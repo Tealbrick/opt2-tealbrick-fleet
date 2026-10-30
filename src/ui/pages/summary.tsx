@@ -54,6 +54,14 @@ export function SummaryPage() {
 function RulesNotice({ data }: { data: SummaryGetOutput }) {
   const stopping = data.agents.stopping + data.people.leaving + data.people.suspended > 0;
   const { floor } = data;
+  // After a restore this directory lists no stop, and Rules still holds them: that is said with nothing else stopping.
+  if (!stopping && floor.rulesHolds) {
+    return (
+      <Notice tone="needs-you" role="status">
+        {floor.rulesHolds}
+      </Notice>
+    );
+  }
   if (!stopping && (floor.state === "confirmed" || floor.state === "not_confirmed") && !floor.gateNote) return null;
   const text = stopping ? afterChangeText(floor) : floor.gateNote && floor.lastGateAt ? `Rules has not checked a call since ${when(floor.lastGateAt)}.` : floor.text;
   return (
@@ -100,6 +108,18 @@ function SummaryBody({ data }: { data: SummaryGetOutput }) {
         </Notice>
       ) : null}
       <PlanAlerts />
+      {(data.keysUndecided ?? []).length ? (
+        <section className="tb-stack" aria-label="Keys to decide">
+          <h2 className="sub-head">{data.keysUndecided?.[0]?.text}</h2>
+          <ul className="ready">
+            {(data.keysUndecided ?? []).map((k) => (
+              <li key={k.id}>
+                <TextLink href={subjectHref("agent", k.id)}>{k.name}</TextLink>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       <div className="cards stats">
         <Stat label="Agents" value={String(data.agents.total)} note={`${data.agents.running} running, ${data.agents.paused} paused, ${data.agents.notReviewed} not reviewed`} href="./people-and-agents" />
         <Stat label="No owner" value={String(data.noOwner)} note={data.settings.defaultOwner ? `Default owner: ${data.settings.defaultOwner.name}` : "No default owner"} />

@@ -12,10 +12,14 @@ import { useLoad } from "./common.tsx";
 import { ContactRulesPage } from "./contact-rules.tsx";
 import { DirectoryPage } from "./pages/directory.tsx";
 import { EveryonePage } from "./pages/everyone.tsx";
+import { CannotHoldBothPage } from "./pages/exclusions.tsx";
 import { FEATURES } from "./pages/features.ts";
 import { Identities } from "./pages/identities.tsx";
 import { JoinPage } from "./pages/join-page.tsx";
 import { liveBanners } from "./pages/plan-poll.ts";
+import { RecordPage } from "./pages/record.tsx";
+import { RolesPage } from "./pages/roles.tsx";
+import { RoundsPage } from "./pages/rounds.tsx";
 import { SubjectPage } from "./pages/subject.tsx";
 import { SUBJECT_PATH } from "./pages/subject-link.ts";
 import { SummaryPage } from "./pages/summary.tsx";
@@ -31,7 +35,9 @@ const STILLS = new URL("./stills/", import.meta.url).href;
 const OLD_ROUTES = { teams: "", topology: "topology", access: "access", reviews: "reviews", rules: "contact-rules", people: "people", agents: "agents", identities: "identities", holds: "holds" } as const;
 /** With the lifecycle ops (C380): Summary is the launch page; /people and /agents stay as routes and leave the nav for one release. */
 const NEW_ROUTES = { ...OLD_ROUTES, summary: "", everyone: "people-and-agents", subject: SUBJECT_PATH, teams: "teams", join: "join" } as const;
-const ROUTES: Readonly<Record<string, string>> = FEATURES.lifecycle ? NEW_ROUTES : OLD_ROUTES;
+/** Tier 2: a route exists when the ops are there; the nav entry waits for the QA rows (features.ts). */
+const TIER2_ROUTES = { ...(FEATURES.roles ? { roles: "roles" } : {}), ...(FEATURES.exclusions ? { exclusions: "cannot-hold-both" } : {}), ...(FEATURES.rounds ? { rounds: "review-rounds" } : {}), ...(FEATURES.record ? { record: "access-record" } : {}) };
+const ROUTES: Readonly<Record<string, string>> = { ...(FEATURES.lifecycle ? NEW_ROUTES : OLD_ROUTES), ...TIER2_ROUTES };
 const LAUNCH = FEATURES.lifecycle ? "summary" : "teams";
 const OLD_PAGES = [
   { id: "teams", label: "Teams" },
@@ -55,7 +61,17 @@ const NEW_PAGES = [
   { id: "identities", label: "Identities" },
   { id: "holds", label: "Waiting for approval" },
 ];
-const PAGES = FEATURES.lifecycle ? NEW_PAGES : OLD_PAGES;
+/** Review rounds follow Reviews, the Access record follows Access, Roles follows Teams, Cannot hold both follows Roles (or Teams when Roles is not in the navigation). */
+function withTier2(pages: { id: string; label: string }[]): { id: string; label: string }[] {
+  return pages.flatMap((p) => [
+    p,
+    ...(p.id === "reviews" && FEATURES.roundsNav ? [{ id: "rounds", label: "Review rounds" }] : []),
+    ...(p.id === "access" && FEATURES.recordNav ? [{ id: "record", label: "Access record" }] : []),
+    ...(p.id === "teams" && FEATURES.rolesInNav ? [{ id: "roles", label: "Roles" }] : []),
+    ...(p.id === "teams" && FEATURES.exclusionsInNav ? [{ id: "exclusions", label: "Cannot hold both" }] : []),
+  ]);
+}
+const PAGES = withTier2(FEATURES.lifecycle ? NEW_PAGES : OLD_PAGES);
 
 export function App() {
   const { principal, status, signOut } = useSession();
@@ -78,7 +94,7 @@ export function App() {
       art={appArt("fleet", STILLS)}
       portalHref={portal}
       pages={pages}
-      current={nav.page === "subject" || nav.page === "join" ? "everyone" : nav.page}
+      current={nav.page === "subject" || nav.page === "join" ? "everyone" : (nav.page === "roles" && !FEATURES.rolesInNav) || (nav.page === "exclusions" && !FEATURES.exclusionsInNav) ? LAUNCH : nav.page}
       onNavigate={nav.go}
       pageHref={nav.href}
       actions={
@@ -126,8 +142,16 @@ export function App() {
         <ContactRulesPage />
       ) : nav.page === "reviews" ? (
         <ReviewsPage onChanged={() => void badge.reload()} />
+      ) : nav.page === "rounds" ? (
+        <RoundsPage />
+      ) : nav.page === "record" ? (
+        <RecordPage />
       ) : nav.page === "identities" ? (
         <Identities />
+      ) : nav.page === "roles" ? (
+        <RolesPage />
+      ) : nav.page === "exclusions" ? (
+        <CannotHoldBothPage />
       ) : (
         <DirectoryPage page={nav.page as "teams" | "people" | "agents"} />
       )}

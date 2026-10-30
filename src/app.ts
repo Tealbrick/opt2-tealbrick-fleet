@@ -15,16 +15,21 @@ import { assignDefaultOwner } from "./lifecycle/settings.ts";
 import { startDatesTimer } from "./lifecycle/validity.ts";
 import { accessOps } from "./ops/access.ts";
 import { directoryOps } from "./ops/directory.ts";
+import { exclusionOps } from "./ops/exclusions.ts";
 import { lifecycleOps } from "./ops/lifecycle.ts";
 import { planOps } from "./ops/plans.ts";
 import { proposalOps } from "./ops/proposals.ts";
+import { recordOps } from "./ops/record.ts";
 import { reviewOps } from "./ops/reviews.ts";
+import { roleOps } from "./ops/roles.ts";
+import { roundOps } from "./ops/rounds.ts";
 import { topologyOps } from "./ops/topology.ts";
 import { wakePlans } from "./plans/control.ts";
 import { kickPlans, planJobs, startPlanClock } from "./plans/jobs.ts";
 import { releaseTicks } from "./plans/runner.ts";
 import { startProposalTimer } from "./proposals.ts";
 import * as reviews from "./reviews.ts";
+import { startRolesTimer } from "./roles/expiry.ts";
 import * as store from "./store.ts";
 
 export const manifest = JSON.parse(readFileSync(new URL("../tealbrick.manifest.json", import.meta.url), "utf8")) as AppDefinition["manifest"];
@@ -42,6 +47,10 @@ export const handlers = {
   ...lifecycleOps,
   ...accessOps,
   ...planOps,
+  ...roundOps,
+  ...recordOps,
+  ...roleOps,
+  ...exclusionOps,
 } satisfies Record<OpId, HandlerSpec>;
 
 export const hooks: Record<string, HookHandler> = {
@@ -53,6 +62,7 @@ export const hooks: Record<string, HookHandler> = {
 let stopTimer: (() => void) | null = null;
 let stopHandlesTimer: (() => void) | null = null;
 let stopDatesTimer: (() => void) | null = null;
+let stopRolesTimer: (() => void) | null = null;
 
 export const definition: SdkAppDefinition = {
   manifest,
@@ -62,10 +72,12 @@ export const definition: SdkAppDefinition = {
   // Every 60 s (C85): the status of drafts sent to Rules. draft_status only; the timer never submits a draft.
   // Every 60 s (C373 §3): the agent handles cache from Connect identities_list, outside every call (read only).
   // Every 60 s (C380 §2): end and start dates; two ticks must agree. It calls nothing.
+  // Every 30 s (C380 T2-a): end and start dates of role assignments; two ticks must agree. It calls nothing.
   // Each minute (C380 §5): the plans job. A plan's state lives in its tables, so a restart goes on by itself.
   async onStart(ctx) {
     noteRestore(ctx.db, Date.now());
     stopDatesTimer = startDatesTimer(ctx.db, ctx.log);
+    stopRolesTimer = startRolesTimer(ctx.db, ctx.log);
     releaseTicks(ctx.db);
     startPlanClock(ctx);
     stopTimer = startProposalTimer(ctx.db, ctx.callApp, ctx.log);
@@ -85,6 +97,8 @@ export const definition: SdkAppDefinition = {
     stopHandlesTimer = null;
     stopDatesTimer?.();
     stopDatesTimer = null;
+    stopRolesTimer?.();
+    stopRolesTimer = null;
   },
   migrations: migrationsDir,
   events: {

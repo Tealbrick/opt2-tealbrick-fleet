@@ -11,6 +11,8 @@ export interface FloorView {
   entries: number | null;
   lastGateAt: string | null;
   gateNote: string | null;
+  /** N2-2: stops Rules keeps that this directory no longer lists */
+  rulesHolds?: string | null;
 }
 export interface FloorStatus {
   version: string;
@@ -18,6 +20,8 @@ export interface FloorStatus {
   feedRevision: number | null;
   entries: number;
   lastGateAt: string | null;
+  /** N2-2, Rules 0.7.0-dev.3: stops Rules keeps after a Governance that went back. Absent on an older Rules */
+  unlisted?: number;
 }
 
 export const FLOOR_TEXT = {
@@ -39,7 +43,8 @@ export function floorView(read: FloorStatus | Exclude<FloorState, "confirmed" | 
   const state: FloorState = read.feedRevision !== null && read.feedRevision >= rev ? "confirmed" : "not_confirmed";
   const gateMs = read.lastGateAt === null ? Number.NaN : Date.parse(read.lastGateAt);
   const gateNote = !agentsRun ? null : read.lastGateAt === null ? "Rules has not checked a call yet." : Number.isFinite(gateMs) && gateMs + GATE_STALE_MS < now ? `Rules has not checked a call since ${new Date(gateMs).toISOString()}.` : null;
-  return { state, text: FLOOR_TEXT[state], version: read.version, feedRevision: read.feedRevision, entries: read.entries, lastGateAt: read.lastGateAt, gateNote };
+  const rulesHolds = typeof read.unlisted === "number" && read.unlisted > 0 ? `Rules still holds ${read.unlisted === 1 ? "1 entry" : `${read.unlisted} entries`} Governance does not list. They still refuse calls. Clear them on the Rules page.` : null;
+  return { state, text: FLOOR_TEXT[state], version: read.version, feedRevision: read.feedRevision, entries: read.entries, lastGateAt: read.lastGateAt, gateNote, rulesHolds };
 }
 
 const isStatus = (o: unknown): o is FloorStatus => {

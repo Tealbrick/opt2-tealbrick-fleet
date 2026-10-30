@@ -1,5 +1,6 @@
 // Plain words for a plan (C380, DESIGN-C380 §10). Each sentence says only what its state proves: `done` words are for proofs, the others say who said what.
 import { TARGET_NAMES } from "../access/items.ts";
+import { KEY_STILL_EXISTS } from "../findings.ts";
 import type { Row } from "./plan.ts";
 import { MAX_TRIES } from "./steps.ts";
 
@@ -12,7 +13,8 @@ export function coreLabel(op: string, name: string): string {
   return `Remove the old key of ${name}`;
 }
 
-export function coreStepText(s: Row, mode: string): string {
+/** `undecided`: this agent is paused now, and no choice was made for it. */
+export function coreStepText(s: Row, mode: string, undecided = false): string {
   const state = String(s.state);
   const pause = s.op === "agents.pause";
   switch (state) {
@@ -21,7 +23,7 @@ export function coreStepText(s: Row, mode: string): string {
     case "pending_bridge":
       return "Portal says this is done. The bridge has not shown it yet.";
     case "done":
-      return pause ? "Stopped at the bridge." : s.op === "agents.offboard" ? "Stopped at the bridge. Portal shows no access left." : "Portal shows no old key left.";
+      return pause ? (undecided ? KEY_STILL_EXISTS : "Stopped at the bridge.") : s.op === "agents.offboard" ? "Stopped at the bridge. Portal shows no access left." : "Portal shows no old key left.";
     case "reported":
       return String(s.detail ?? "Portal says this is done. Governance cannot see it.");
     case "not_provable":
@@ -56,6 +58,10 @@ export function itemStepText(s: Row): string {
       return s.item_kind === "routine" ? `${app} shows this as paused.` : `${app} no longer lists this.`;
     case "reported":
       return String(s.detail ?? `${app} says this ended. This version cannot list it.`);
+    case "excepted":
+      return "You accepted this. It stays.";
+    case "not_provable":
+      return String(s.detail ?? `Governance cannot see this. Check it in ${app}.`);
     case "manual":
       return `Governance cannot end this. Someone must do it in ${app}.`;
     case "listed":
@@ -95,7 +101,7 @@ export function headlineOf(p: Row, counts: { proved: number; said: number; manua
     case "applying":
       return p.code === "portal_stopped" ? "Portal stopped mid-way. Open Portal and check." : "Portal is applying this.";
     case "running":
-      return link ? `${counts.open} still open.` : `Portal applied this. ${counts.open} still open.`;
+      return link || p.rail === "none" ? `${counts.open} still open.` : `Portal applied this. ${counts.open} still open.`;
     case "partial":
       return p.code === "core_failed" ? "Portal stopped on a step. Open Portal and apply it again." : "Part of this did not work. Look at the open steps.";
     case "done":
@@ -122,6 +128,7 @@ export function headlineOf(p: Row, counts: { proved: number; said: number; manua
   }
 }
 
+export const noteKeys = (n: number): string => `${n === 1 ? "1 agent stays" : `${n} agents stay`} paused with the key. Choose for each: stop and remove, move to a new owner, or keep running.`;
 export const NOTE_NOT_REACHED = "Portal did not answer when you asked to take this back, so it could still be applied. Try that again.";
 export const NOTE_APPROVED_FIRST = "You approved this part in Portal first. It cannot be taken back here.";
 export const NOTE_MIXED = "The parts of this plan do not all have the same state. Read each part.";

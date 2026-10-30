@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { NOT_CHANGED as SERVER_NOT_CHANGED } from "../src/plans/portal-link.ts";
+import { canChoose, choiceSummary, choicesReady, decisionsOf, hasOwnStop } from "../src/ui/pages/agent-choice.ts";
 import { featuresOf } from "../src/ui/pages/features.ts";
 import { lifecycleError, stopCapOf } from "../src/ui/pages/lifecycle-errors.ts";
 import { currentPlans, liveBanners, pollDelay } from "../src/ui/pages/plan-poll.ts";
@@ -11,7 +12,7 @@ import { afterChangeText, beforeChangeText, beforeChangeTone, floorTone, NOT_CHA
 
 describe("features come from the ops of this build", () => {
   it("on when every op is there", () => {
-    assert.deepEqual(featuresOf(["summary_get", "colleagues_list", "colleague_get", "lifecycle_set", "plan_preview", "findings_list"]), { lifecycle: true, preview: true, differences: true, plans: false, join: false, joinInNav: false });
+    assert.deepEqual(featuresOf(["summary_get", "colleagues_list", "colleague_get", "lifecycle_set", "plan_preview", "findings_list"]), { lifecycle: true, preview: true, differences: true, plans: false, roles: false, rolesInNav: false, exclusions: false, exclusionsInNav: false, rounds: false, record: false, roundsNav: false, recordNav: false, join: false, joinInNav: false });
   });
   it("off when one op is missing", () => {
     assert.equal(featuresOf(["summary_get", "colleagues_list", "colleague_get"]).lifecycle, false);
@@ -19,6 +20,37 @@ describe("features come from the ops of this build", () => {
     assert.equal(featuresOf(["summary_get"]).differences, false);
     assert.equal(featuresOf(["plan_send", "plan_get", "plan_retry"]).plans, false);
     assert.equal(featuresOf(["plan_send", "plan_get", "plan_retry", "plan_cancel"]).plans, true);
+  });
+});
+
+describe("the choice for each agent (D2)", () => {
+  const agents = [{ id: "a", lifecycle: "active" }, { id: "b", lifecycle: "active" }, { id: "c", lifecycle: "active" }, { id: "d", lifecycle: "active" }];
+  const later = { choice: "later", reason: "", newOwner: "" } as const;
+  it("the default is no choice: nothing goes to plan_send, so the agents are only paused", () => {
+    assert.deepEqual(decisionsOf(agents, {}), []);
+    assert.deepEqual(decisionsOf(agents, { a: later }), []);
+    assert.equal(choicesReady(agents, {}), true);
+    assert.equal(choiceSummary(agents, {}), "4 decided later, 0 stop and remove, 0 move to a new owner, 0 keep running");
+  });
+  it("sends only what was chosen, in the shape of the op", () => {
+    assert.deepEqual(decisionsOf(agents, { a: { ...later, choice: "stop" }, b: { ...later, choice: "keep", reason: " on call " }, c: { ...later, choice: "transfer", newOwner: "per_2" } }), [
+      { agent: "a", decision: "stop" },
+      { agent: "b", decision: "keep", reason: "on call" },
+      { agent: "c", decision: "transfer", newOwner: "per_2" },
+    ]);
+  });
+  it("a keep needs a reason and a transfer a new owner", () => {
+    assert.equal(choicesReady(agents, { a: { ...later, choice: "keep" } }), false);
+    assert.equal(choicesReady(agents, { a: { ...later, choice: "keep", reason: "  " } }), false);
+    assert.equal(choicesReady(agents, { a: { ...later, choice: "transfer" } }), false);
+    assert.equal(choicesReady(agents, { a: { ...later, choice: "transfer", newOwner: "p" } }), true);
+  });
+  it("who can choose", () => {
+    assert.equal(canChoose({ lifecycle: "leaving" }), false);
+    assert.equal(canChoose({ lifecycle: "archived" }), false);
+    assert.equal(canChoose({ lifecycle: "suspended" }), true);
+    assert.equal(hasOwnStop({ lifecycle: "suspended" }), true);
+    assert.equal(hasOwnStop({ lifecycle: "active" }), false);
   });
 });
 
@@ -114,7 +146,13 @@ describe("refusals of lifecycle_set", () => {
   it("the stop cap names the count and hands it back for the confirm", () => {
     const e = { code: "stop_cap_reached", details: { count: 6 } };
     assert.equal(stopCapOf(e), 6);
-    assert.match(lifecycleError(e, fallback).message, /You stopped 5 entries in the last 10 minutes/);
+    assert.match(lifecycleError(e, fallback).message, /^This makes 6 people and agents stopped in the last 10 minutes/);
+    assert.doesNotMatch(lifecycleError(e, fallback).message, /You stopped/, "the count holds cascades and verdicts, not only what this owner pressed");
+  });
+  it("a cap with no count (the old People form) shows the server's sentence and offers no number", () => {
+    const e = { code: "stop_cap_reached", message: "5 were stopped in the last 10 minutes. Open this person's page to confirm this stop." };
+    assert.equal(stopCapOf(e), null);
+    assert.match(lifecycleError(e, fallback).message, /Open this person's page/);
   });
   it("another error is no cap and gets the shared wording", () => {
     assert.equal(stopCapOf({ code: "internal" }), null);

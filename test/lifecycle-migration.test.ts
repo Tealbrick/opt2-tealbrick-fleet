@@ -25,9 +25,9 @@ test("A24: migration 0008 on 0.3.2 data keeps every row and column; removed = ar
   const before = dump();
   const revision = () => Number(db.prepare("SELECT value FROM fleet_meta WHERE key = 'revision'").get()?.value);
   const rev = revision();
-  for (const m of migrationFiles().slice(7)) db.exec(`BEGIN;\n${m.sql}\nCOMMIT;`);
+  for (const m of migrationFiles(10).slice(7)) db.exec(`BEGIN;\n${m.sql}\nCOMMIT;`);
   assert.deepEqual(dump(), before, "no 0.3.2 column changed");
-  assert.equal(revision(), rev + 1, "the revision moves once");
+  assert.equal(revision(), rev + 1, "the revision moves once (0008; 0011 moves it again and has its own test)");
   const agents = Object.fromEntries(db.prepare("SELECT id, lifecycle, migrated_note FROM fleet_agents").all().map((r) => [String(r.id), [r.lifecycle, r.migrated_note]]));
   assert.deepEqual(agents[AGENT_A.id], ["active", null]);
   assert.deepEqual(agents[AGENT_B.id], ["active", null], "a paused or unowned agent is active: nothing is paused for having no owner");

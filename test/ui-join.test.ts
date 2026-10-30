@@ -302,7 +302,7 @@ describe("Join stays off the page until its rows pass", () => {
     const ops = ["person_set", "overview_get", "members_set"];
     assert.equal(features.JOIN_ROWS_PASSED, false, "the switch is off in this PR");
     assert.deepEqual([features.featuresOf(ops).join, features.featuresOf(ops).joinInNav], [true, false]);
-    assert.deepEqual([features.featuresOf(ops, true).join, features.featuresOf(ops, true).joinInNav], [true, true]);
-    assert.deepEqual([features.featuresOf(["person_set", "overview_get"], true).join, features.featuresOf(["person_set", "overview_get"], true).joinInNav], [false, false]);
+    assert.deepEqual([features.featuresOf(ops, false, false, undefined, true).join, features.featuresOf(ops, false, false, undefined, true).joinInNav], [true, true]);
+    assert.deepEqual([features.featuresOf(["person_set", "overview_get"], false, false, undefined, true).join, features.featuresOf(["person_set", "overview_get"], false, false, undefined, true).joinInNav], [false, false]);
   });
 });

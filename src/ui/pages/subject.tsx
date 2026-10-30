@@ -5,6 +5,8 @@ import { appName, Button, ButtonLink, EmptyState, Notice, Table, Tag, TextLink }
 import { useCallback, useEffect, useState } from "react";
 import type { ColleagueGetOutput } from "#kit";
 import { LoadFailed, Loading, PageHead, useLoad } from "../common.tsx";
+import { canChoose } from "./agent-choice.ts";
+import { ChooseDialog } from "./agent-choices.tsx";
 import { ChangeDialog, CloseDialog } from "./change-dialogs.tsx";
 import { KEY_USE_TEXT } from "./credential.ts";
 import { FEATURES } from "./features.ts";
@@ -46,6 +48,7 @@ function Subject({ kind, id, portalHref }: { kind: SubjectKind; id: string; port
   const load = useCallback(() => callOp<ColleagueGetOutput>("colleague_get", { kind, id }), [kind, id]);
   const { data, error, loading, reload } = useLoad(load);
   const [doing, setDoing] = useState<Action | null>(null);
+  const [choosing, setChoosing] = useState(false);
   const c = data?.colleague;
   const gone = error !== null && !data;
   return (
@@ -59,6 +62,7 @@ function Subject({ kind, id, portalHref }: { kind: SubjectKind; id: string; port
           <PageHead title={c.name} lede={c.line} />
           {error ? <LoadFailed message={`This page may be old. ${error}`} retrying={loading} onRetry={() => void reload()} /> : null}
           <Actions actions={c.actions} onChoose={setDoing} />
+          <KeyChoice c={c} onChoose={() => setChoosing(true)} />
           <Facts c={c} />
           {c.findings.length ? (
             <section className="tb-stack" aria-label="Differences">
@@ -97,6 +101,7 @@ function Subject({ kind, id, portalHref }: { kind: SubjectKind; id: string; port
               <dd>{c.rev}</dd>
             </dl>
           </details>
+          {choosing ? <ChooseDialog c={c} onClose={() => setChoosing(false)} onChanged={reload} /> : null}
           {doing ? <Doing c={c} action={doing} portalHref={portalHref} onClose={() => setDoing(null)} onChanged={reload} /> : null}
         </>
       ) : !gone ? (
@@ -125,6 +130,40 @@ function Actions({ actions, onChoose }: { actions: Action[]; onChoose: (a: Actio
           <p className="tb-hint" key={a.to}>{`${a.label}: ${a.blocked}`}</p>
         ))}
     </div>
+  );
+}
+
+/** The second stage (D2): a stopped person's agents wait for a choice; an agent stopped through its owner is chosen on the owner's page. */
+function KeyChoice({ c, onChoose }: { c: Colleague; onChoose: () => void }) {
+  if (!FEATURES.plans) return null;
+  if (c.kind === "person") {
+    const stopped = c.lifecycle === "suspended" || c.lifecycle === "leaving";
+    if (!stopped || !c.agents.some(canChoose)) return null;
+    return (
+      <div className="tb-row">
+        <Button variant="primary" onClick={onChoose}>
+          Choose for their agents
+        </Button>
+        <span className="tb-hint">An agent with no choice is only paused, when you approve in Portal, and its key still exists.</span>
+      </div>
+    );
+  }
+  if (!c.findings.some((f) => f.code === "key_not_decided") || !c.owner || c.lifecycle === "suspended") return null;
+  const { owner } = c;
+  return (
+    <p className="tb-soft">
+      {"Choose for this agent on the page of "}
+      <TextLink
+        href={subjectHref("person", owner.id)}
+        onClick={(e) => {
+          e.preventDefault();
+          openSubject("person", owner.id);
+        }}
+      >
+        {owner.name}
+      </TextLink>
+      .
+    </p>
   );
 }
 

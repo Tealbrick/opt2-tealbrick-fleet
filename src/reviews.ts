@@ -14,7 +14,7 @@
 import { createHash } from "node:crypto";
 import { canonicalize, ulid } from "@opt2-tealbrick/manifest";
 import type { Db, Json } from "@opt2-tealbrick/miniapp-sdk";
-import { markNewAgent } from "./lifecycle/transitions.ts";
+import { assertCap, markNewAgent } from "./lifecycle/transitions.ts";
 import { type Shown, sameShown } from "./shown.ts";
 import { bump, fail, fleetHandle, MAX_TEAMS_PER_ANSWER, setPerson } from "./store.ts";
 import { cleanText } from "./text.ts";
@@ -328,6 +328,18 @@ export function requestReview(db: Db, by: Requester & { id: string }, input: Req
   });
 }
 
+/**
+ * A review round asks for the owner's own review of a subject (C380 T2-b). The owner's open request about it is reused; otherwise one is made.
+ * Null when the entry is gone or removed. The request is the owner's, so the cap on requests of an agent or of Governance does not apply.
+ */
+export function ownerRequest(db: Db, ownerId: string, kind: SubjectKind, id: string, why: string, now = Date.now()): { id: string; name: string } | null {
+  const s = subjectOf(db, kind, id);
+  if (!s || s.status === "removed") return null;
+  const by: Requester = { kind: "owner", id: ownerId };
+  const mine = ownOpen(db, by, s);
+  return { id: mine ? String(mine.id) : insertRequest(db, s, by, cleanText(why).slice(0, 500), now), name: s.name };
+}
+
 /** `agentsChanged`: a new agent gets one review request when the policy says so (system request; at most MAX_OPEN_SYSTEM open). */
 export function requestForNewAgents(db: Db, created: readonly { id: string; name: string }[], now = Date.now()): number {
   if (created.length === 0) return 0;
@@ -371,6 +383,8 @@ export interface RecordInput {
   snapshotDigest: string;
   nextReviewDays?: number;
   request?: string;
+  /** N2-3: a `blocked` verdict is a stop in the floor, so it passes the same cap. */
+  confirmCount?: number;
 }
 
 /**
@@ -404,6 +418,7 @@ export function recordReview(db: Db, reviewer: string, input: RecordInput, now =
       const made = setPerson(db, { name, kind: s.kind as "person" | "outside_agent", source: "agent", handles: [pendingHandle] }, now);
       s = subjectOf(db, s.kind, made.id) as Subject;
     }
+    if (input.verdict === "blocked") assertCap(db, input.confirmCount, now, [`${s.kind}:${s.id}`]);
     // The stale check above bound the picture the owner LOOKED at (for a handle: "pending", no owner, no teams). What is KEPT with
     // the verdict is the entry as it is after this write (L31, same transaction): the picture the next review_get computes, so
     // "changed since the last review" starts false and turns true only on a real change. For a known entry the two are the same.

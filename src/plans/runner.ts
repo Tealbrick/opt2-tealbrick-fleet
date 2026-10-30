@@ -243,7 +243,7 @@ const parseTicks = (p: Row): Tick[] | null => (typeof p.wanted_json === "string"
 /** §2 "Agent's things": what a stop ends unless the owner ticked otherwise. A suspension keeps accounts; `about` is off by default. */
 function endsByDefault(purpose: string, item: AccessItem): boolean {
   if (item.direction === "about") return false;
-  if (purpose === "leave") return true;
+  if (purpose === "leave" || purpose === "bar") return true;
   if (purpose === "suspend") return item.kind === "routine" || item.kind === "scheduled_post";
   return false;
 }
@@ -259,7 +259,7 @@ function absorb(pc: PlanCtx, p: Row, target: string, items: readonly AccessItem[
     if (!isOpenPlan(String(getPlan(db, id)?.state))) return;
     let n = Number(db.prepare("SELECT COALESCE(MAX(n), -1) + 1 AS n FROM fleet_plan_steps WHERE plan_id = ?").get(id)?.n);
     for (const item of items) {
-      if (item.subject.kind === "unlinked") continue;
+      if (item.subject.kind === "unlinked" || (p.purpose === "bar" && item.kind !== "channel_sender")) continue;
       const { kind: subjectKind, id: subjectId } = item.subject;
       if (db.prepare("SELECT 1 FROM fleet_plan_steps WHERE plan_id = ? AND target = ? AND item_id = ?").get(id, target, item.id)) continue;
       const tick = ticks?.find((t) => t.product === target && t.id === item.id);
@@ -270,7 +270,8 @@ function absorb(pc: PlanCtx, p: Row, target: string, items: readonly AccessItem[
       let code: string | null = null;
       if (!item.revocable) state = item.level === "info" ? "listed" : "manual";
       // The owner confirmed nothing in a plan the system opened: what needs a confirm waits for a plan he makes. Only what stands on his approval in Portal runs.
-      else if (!wanted || (phase === "now" && p.trigger_kind === "system")) state = "listed";
+      // A transferred agent goes on working: Portal's review says it keeps its access to apps. Its things stay, ticked or not (N3-3).
+      else if (!wanted || (phase === "now" && p.trigger_kind === "system" && p.purpose !== "bar") || (db.prepare("SELECT 1 FROM fleet_plan_steps WHERE plan_id = ? AND op = 'agents.rotate' AND agent_id = ?").get(id, subjectId) && !db.prepare("SELECT 1 FROM fleet_plan_steps WHERE plan_id = ? AND op = 'agents.offboard' AND agent_id = ?").get(id, subjectId))) state = "listed";
       else if (tick?.digest !== undefined && tick.digest !== item.digest) {
         state = "changed";
         code = "changed_since_preview";
@@ -536,7 +537,7 @@ async function alerts(pc: PlanCtx, p: Row): Promise<void> {
   if (p.state === "waiting" && p.trigger_kind === "system") await alertOnce(pc, p, "waiting");
   if (p.state === "expired") await alertOnce(pc, p, "expired");
   // A date passed and no draft waits (a person with no agents): the owner still hears of it.
-  if (p.trigger_kind === "system" && p.rail === "none") await alertOnce(pc, p, "date_passed");
+  if (p.trigger_kind === "system" && p.rail === "none" && p.purpose !== "bar") await alertOnce(pc, p, "date_passed");
 }
 
 /** Boot: no tick of this process runs yet, so no lease is alive. A plan cut off by a crash goes on at once. */

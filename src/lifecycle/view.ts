@@ -5,10 +5,11 @@ import type { ColleagueGetOutput, ColleaguesListOutput, SummaryGetOutput } from 
 import { readStates } from "../access/client.ts";
 import { ACCESS_AFTER_LEAVE, accessAfterLeave, openDifferences } from "../access/differences.ts";
 import { type AccessTarget, TARGET_NAMES } from "../access/items.ts";
-import { type Finding, findingsOf } from "../findings.ts";
+import { type Finding, findingsOf, KEY_STILL_EXISTS } from "../findings.ts";
 import { fail, revision } from "../meta.ts";
-import { latestPlanStates, unnamedAccounts } from "../plans/guards.ts";
+import { keyEndedAt, latestPlanStates, ownerChangedAt, senderBarOpen, unnamedAccounts } from "../plans/guards.ts";
 import { type PlanAgent, portalPlan } from "../plans/portal-link.ts";
+import { exclusionFindings } from "../roles/exclusions.ts";
 import { cleanTopology, type DecodedTopology, decodeTopology } from "../topology-slice.ts";
 import type { Trust } from "../trust.ts";
 import { lastLeavingSnapshot, stopsSince, subjectEvents } from "./events.ts";
@@ -24,7 +25,7 @@ const isoOf = (ms: unknown): string | null => (ms === null || ms === undefined ?
 const runtimeOf = (status: unknown): "running" | "paused" | "gone" => (status === "active" ? "running" : status === "paused" ? "paused" : "gone");
 
 /** One line, no pills: the three axes in plain words. */
-function lineOf(kind: SubjectKind, lifecycle: Lifecycle, effective: Effective, runtime: Row["runtime"], validFrom: unknown): string {
+function lineOf(kind: SubjectKind, lifecycle: Lifecycle, effective: Effective, runtime: Row["runtime"], validFrom: unknown, keyEnded = false): string {
   if (effective === "not_started") return `Starts on ${String(isoOf(validFrom)).slice(0, 10)}`;
   if (kind === "person") {
     return { proposed: "New, not reviewed", active: "Active", suspended: "Stop asked", leaving: "Leaving", archived: "Closed" }[effective];
@@ -34,7 +35,7 @@ function lineOf(kind: SubjectKind, lifecycle: Lifecycle, effective: Effective, r
   if (effective === "proposed") return runtime === "running" ? "New: working, not reviewed" : "New, not reviewed: paused";
   if (effective === "active") return runtime === "running" ? "Working" : "Paused in Portal";
   const word = effective === "leaving" ? "Stop and remove" : "Stop";
-  return runtime === "running" ? `${word} asked: still running` : effective === "leaving" ? "Stopped, removal waits for you" : "Stopped";
+  return runtime === "running" ? `${word} asked: still running` : effective === "leaving" ? "Stopped, removal waits for you" : keyEnded ? "Stopped" : KEY_STILL_EXISTS;
 }
 
 interface Loaded {
@@ -46,7 +47,9 @@ interface Loaded {
 export function loadColleagues(db: Db, now: number): Loaded {
   const conflicts = new Set(db.prepare("SELECT DISTINCT h.agent_id FROM fleet_agent_handles h JOIN fleet_handles p ON p.handle = h.handle").all().map((r) => String(r.agent_id)));
   const plans = latestPlanStates(db);
-  const owners = new Map<string, { name: string; lifecycle: string | null }>();
+  const keysGone = keyEndedAt(db);
+  const moved = ownerChangedAt(db);
+  const owners = new Map<string, { name: string; lifecycle: string | null; at: number }>();
   const rows: Row[] = [];
   const person = (p: Db_): Row => {
     const lifecycle = p.lifecycle as Lifecycle;
@@ -61,7 +64,7 @@ export function loadColleagues(db: Db, now: number): Loaded {
       trust: p.trust as Trust,
       owner: null,
       line: lineOf("person", lifecycle, effective, null, p.valid_from),
-      findings: findingsOf({ kind: "person", lifecycle, effective, runtime: null, hasOwner: false, ownerLifecycle: null, reason: p.lifecycle_reason === null ? null : String(p.lifecycle_reason), at: Number(p.lifecycle_at), validUntil: p.valid_until === null ? null : Number(p.valid_until), noCard: false, handleConflict: false, planState: plans.get(`person:${String(p.id)}`) ?? null, unnamedAccounts: lifecycle === "leaving" ? unnamedAccounts(db, String(p.id), now) : 0 }, now),
+      findings: findingsOf({ kind: "person", lifecycle, effective, runtime: null, hasOwner: false, ownerLifecycle: null, reason: p.lifecycle_reason === null ? null : String(p.lifecycle_reason), at: Number(p.lifecycle_at), validUntil: p.valid_until === null ? null : Number(p.valid_until), noCard: false, handleConflict: false, senderBarOpen: lifecycle === "leaving" && senderBarOpen(db, String(p.id)), planState: plans.get(`person:${String(p.id)}`) ?? null, unnamedAccounts: lifecycle === "leaving" ? unnamedAccounts(db, String(p.id), now) : 0 }, now),
       validFrom: isoOf(p.valid_from),
       validUntil: isoOf(p.valid_until),
       keepRunning: false,
@@ -69,7 +72,7 @@ export function loadColleagues(db: Db, now: number): Loaded {
     };
   };
   for (const p of db.prepare("SELECT id, name, kind, lifecycle, lifecycle_reason, lifecycle_at, valid_from, valid_until, trust FROM fleet_people").all()) {
-    owners.set(String(p.id), { name: String(p.name), lifecycle: p.lifecycle === null ? null : String(p.lifecycle) });
+    owners.set(String(p.id), { name: String(p.name), lifecycle: p.lifecycle === null ? null : String(p.lifecycle), at: Number(p.lifecycle_at) });
     if (p.kind === "person" && p.lifecycle !== null) rows.push(person(p));
   }
   for (const a of db.prepare("SELECT id, name, status, trust, owner_id, lifecycle, lifecycle_reason, lifecycle_at, valid_from, valid_until, keep_running, migrated_note FROM fleet_agents").all()) {
@@ -78,8 +81,10 @@ export function loadColleagues(db: Db, now: number): Loaded {
     const keepRunning = Number(a.keep_running) === 1;
     const effective = effectiveAgent({ lifecycle, validFrom: a.valid_from === null ? null : Number(a.valid_from), keepRunning }, owner?.lifecycle ?? null);
     const runtime = runtimeOf(a.status);
+    // Only after this stop began: an agent brought back has a new key.
+    const keyEnded = (keysGone.get(String(a.id)) ?? -1) >= Math.max(Number(a.lifecycle_at), owner?.at ?? 0);
     const findings = findingsOf(
-      { kind: "agent", lifecycle, effective, runtime, hasOwner: owner !== undefined, ownerLifecycle: owner?.lifecycle ?? null, reason: a.lifecycle_reason === null ? null : String(a.lifecycle_reason), at: Number(a.lifecycle_at), validUntil: a.valid_until === null ? null : Number(a.valid_until), noCard: a.migrated_note === "no_card", handleConflict: conflicts.has(String(a.id)), planState: plans.get(`agent:${String(a.id)}`) ?? null },
+      { kind: "agent", lifecycle, effective, runtime, hasOwner: owner !== undefined, ownerLifecycle: owner?.lifecycle ?? null, reason: a.lifecycle_reason === null ? null : String(a.lifecycle_reason), at: Number(a.lifecycle_at), validUntil: a.valid_until === null ? null : Number(a.valid_until), noCard: a.migrated_note === "no_card", handleConflict: conflicts.has(String(a.id)), planState: plans.get(`agent:${String(a.id)}`) ?? null, keyEnded, keyAfterTransfer: moved.has(String(a.id)) && (keysGone.get(String(a.id)) ?? -1) < (moved.get(String(a.id)) as number) },
       now,
     );
     rows.push({
@@ -91,7 +96,7 @@ export function loadColleagues(db: Db, now: number): Loaded {
       runtime,
       trust: a.trust as Trust,
       owner: owner ? { id: String(a.owner_id), name: owner.name } : null,
-      line: lineOf("agent", lifecycle, effective, runtime, a.valid_from),
+      line: lineOf("agent", lifecycle, effective, runtime, a.valid_from, keyEnded),
       findings,
       validFrom: isoOf(a.valid_from),
       validUntil: isoOf(a.valid_until),
@@ -101,6 +106,12 @@ export function loadColleagues(db: Db, now: number): Loaded {
   }
   const leave = accessAfterLeave(db);
   for (const r of rows) if (leave.has(`${r.kind}:${r.id}`)) r.findings.push(ACCESS_AFTER_LEAVE);
+  // C380 T2-c "Cannot hold both": broken rules, computed here from the role rows like every finding (no rule: no query beyond one)
+  const clash = exclusionFindings(db, now);
+  for (const r of rows) {
+    const c = clash.get(`${r.kind}:${r.id}`);
+    if (c) r.findings.push(c);
+  }
   rows.sort((x, y) => x.name.toLowerCase().localeCompare(y.name.toLowerCase()) || x.id.localeCompare(y.id));
   return { rows, byId: new Map(rows.map((r) => [`${r.kind}:${r.id}`, r])) };
 }
@@ -188,6 +199,8 @@ export async function colleagueDetail(ctx: OpContext, kind: SubjectKind, id: str
   const close = s.lifecycle === "leaving" ? { coolingDays: days, coolingEndsAt: isoOf(coolingEnd(s, days)), coolingOver: coolingEnd(s, days) <= now, limits: ["Stores that were not read, and access no version can list, are not checked by this close."] } : null;
   const notices: string[] = [];
   if (row.keepRunning) notices.push("The person who left may still hold this agent's key.");
+  // N3-9: bringing someone back does not lift the bar.
+  if (kind === "person" && (row.lifecycle === "active" || row.lifecycle === "proposed") && db.prepare("SELECT 1 FROM fleet_plan_steps s JOIN fleet_plans p ON p.id = s.plan_id WHERE p.subject_kind = 'person' AND p.subject_id = ? AND s.item_kind = 'channel_sender' AND s.state = 'done' LIMIT 1").get(id)) notices.push("Messages from this person may still be dropped. Remove the sender bar in Connect, on the Accounts page.");
   if (kind === "agent" && row.lifecycle === "archived" && row.runtime === "gone") notices.push("A closed agent stays closed. New work needs a new agent.");
   const running = kind === "agent" ? row.runtime === "running" : owned.some((r) => r.runtime === "running");
   const snapshot = s.lifecycle === "proposed" || s.lifecycle === "archived" || s.lifecycle === "leaving" ? lastLeavingSnapshot(db, kind, id) : null;
@@ -234,6 +247,7 @@ export async function summaryGet(ctx: OpContext, now = Date.now()): Promise<Summ
     },
     people: { total: people.length, leaving: people.filter((r) => r.lifecycle === "leaving").length, suspended: people.filter((r) => r.lifecycle === "suspended").length },
     noOwner,
+    keysUndecided: agents.filter((r) => r.findings.some((f: Finding) => f.code === "key_not_decided")).map((r) => ({ id: r.id, name: r.name, text: KEY_STILL_EXISTS })),
     differences: openDifferences(db, rows, now),
     canWriteOrSend: topology && !topology.truncated ? new Set(topology.edges.filter((e) => e.crud.some((c) => c !== "read")).map((e) => e.agent)).size : null,
     stores: [

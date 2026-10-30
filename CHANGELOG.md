@@ -2,6 +2,25 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
+## 0.4.0-dev.6 - 2026-10-30
+
+C380 final security review, DEV only. Not for stable until Martin has read C380-DECISIONS.md.
+
+- N2-1: an owner change away from a stopped owner must be a transfer: Edit agents refuses it and names the path. A transfer keeps the agent stopped until you resume it, after its key is replaced. Between active owners a finding stays until the key is replaced.
+- N2-3: the stop cap counts entries: a person with the agents that stop with them, and `blocked` verdicts. It limits accidents. It does not stop a script that can call these ops: stable needs a host per app or Martin's written acceptance.
+- N2-6: a person marked leaving is always barred: if no plan comes within 20 seconds, the job makes one for the sender bar only. A finding stays, and Close asks for a reason, until Connect has shown the bar.
+- N2-2, Governance's half: the feed sends `epoch`; a restore replaces it. The page says what Rules still holds. A restore removes stops made after the snapshot from Governance. Rules keeps them until you clear them.
+- A new plan carries a new key that an earlier plan asked for and Core never replaced.
+- A transferred agent's things stay. Not changed names sends to a known Slack direct message id. Bringing a person back says the sender bar stays.
+
+## 0.4.0-dev.5 - 2026-10-30
+
+C380 D2, DEV only. Not for stable until Martin has read C380-DECISIONS.md.
+
+- A stop has two stages. With no choice an agent is only paused, because offboarding has no quick undo; the plan, its row, a finding and the Summary say "Paused. The key still exists until you choose." An owner who knows the answer chooses on the first step: stop and remove, move to a new owner, or keep running, and one approval finishes it.
+- `plan_send` takes the per-agent `decisions`; `summary_get` lists `keysUndecided`; new finding `key_not_decided`.
+- The person flow has the choice on its first step, with "Decide later" as the default. The person's page has "Choose for their agents" for later.
+
 ## 0.4.0-dev.4 - 2026-10-30
 
 C380 pages for inventory and plans, DEV only. Not for stable until Martin has read C380-DECISIONS.md.

@@ -1,9 +1,10 @@
 // A plan as the owner reads it. Counts keep what is proved apart from what someone only said. No raw id goes into a sentence.
 import type { Db } from "@opt2-tealbrick/miniapp-sdk";
+import { undecidedKeys } from "./guards.ts";
 import { getPlan, type Row, stepsOf } from "./plan.ts";
 import { NOT_CHANGED } from "./portal-link.ts";
 import { ASK_AGAIN_STATES, isFinalStep, isOpenPlan, stuckStep } from "./steps.ts";
-import { coreLabel, coreStepText, headlineOf, itemStepText, NOTE_APPROVED_FIRST, NOTE_CONSENT, NOTE_MIXED, NOTE_NOT_REACHED, NOTE_NOT_TAKEN_BACK, NOTE_RAIL_OFF, NOTE_STILL_STOPPED, readText, storeName } from "./words.ts";
+import { coreLabel, coreStepText, headlineOf, itemStepText, NOTE_APPROVED_FIRST, NOTE_CONSENT, NOTE_MIXED, NOTE_NOT_REACHED, NOTE_NOT_TAKEN_BACK, NOTE_RAIL_OFF, NOTE_STILL_STOPPED, noteKeys, readText, storeName } from "./words.ts";
 
 const iso = (ms: unknown): string | null => (ms === null || ms === undefined ? null : new Date(Number(ms)).toISOString());
 
@@ -30,6 +31,7 @@ function noteOf(db: Db, p: Row, mode: string): string | null {
 export function planView(db: Db, id: string) {
   const p = getPlan(db, id) as Row;
   const steps = stepsOf(db, id);
+  const undecided = undecidedKeys(db, String(p.subject_kind), String(p.subject_id));
   const nameOf = (agent: unknown): string => String(db.prepare("SELECT name FROM fleet_agents WHERE id = ?").get(String(agent))?.name ?? "This agent");
   const real = steps.filter((s) => s.phase !== "read" && s.state !== "listed");
   const counts = {
@@ -54,7 +56,7 @@ export function planView(db: Db, id: string) {
     state: String(p.state),
     headline: headlineOf(p, counts),
     mode,
-    note: noteOf(db, p, mode),
+    note: [noteOf(db, p, mode), undecided.size > 0 ? noteKeys(undecided.size) : null].filter(Boolean).join(" ") || null,
     reviewUrl: p.review_url === null ? null : String(p.review_url),
     expiresAt: iso(p.expires_at),
     openedAt: iso(p.opened_at) as string,
@@ -74,7 +76,7 @@ export function planView(db: Db, id: string) {
           storeName: storeName(String(s.target)),
           label: core ? coreLabel(String(s.op), nameOf(s.agent_id)) : String(s.label ?? ""),
           state: String(s.state),
-          text: core ? coreStepText(s, mode) : itemStepText(s),
+          text: core ? coreStepText(s, mode, undecided.has(String(s.agent_id))) : itemStepText(s),
           code: s.code === null ? null : String(s.code),
           final: isFinalStep(String(s.state)),
           tries: Number(s.tries),
