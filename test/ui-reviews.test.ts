@@ -315,7 +315,7 @@ describe("Trust reviews page", () => {
     const sent = () => stub.calls.filter((c) => c.op === "review_record").map((c) => c.input);
     assert.equal(sent().length, 1, "a refusal sends nothing by itself");
     assert.equal(sent()[0]?.confirmCount, undefined);
-    assert.match(alerts(d).join(" "), /This makes 6 stopped in the last 10 minutes/);
+    assert.match(alerts(d).join(" "), /This makes 6 people and agents stopped in the last 10 minutes/);
     assert.doesNotMatch(alerts(d).join(" "), /You stopped/);
     stub.fail.review_record = undefined;
     await click(button(d, "Yes, this makes 6"));
@@ -651,6 +651,32 @@ describe("Trust reviews: step 3, the contact rule", () => {
     assert.ok(option, `who "${label}"`);
     await click(option);
   }
+
+  it("N2-3: a cap number named for one subject does not confirm another", async () => {
+    reset();
+    stub.fail.review_record = { status: 409, code: "stop_cap_reached", details: { count: 6 } };
+    const m = await mount(h(ui.ReviewsPage, {}));
+    await click(button(m.host, "Review someone"));
+    const d = dialog();
+    stub.current = snap(DIGEST, { kind: "agent", name: "Front desk", handles: [], teams: [] });
+    await pickWho(d, "Front desk (agent)");
+    await fillVerdict("Blocked", "Checked.");
+    await move(d, "Next"); // → 3
+    await move(d, "Skip, no rule"); // → 4
+    await click(button(d, "Record verdict"));
+    assert.ok(button(d, "Yes, this makes 6"));
+    for (let i = 0; i < 3; i++) await move(d, "Previous");
+    stub.current = snap(DIGEST2, { kind: "outside_agent", name: "Brightline intake", handles: ["slack:UBRIGHT01"], teams: [] });
+    await pickWho(d, "Brightline intake (outside agent)");
+    await move(d, "Next");
+    await move(d, "Next");
+    await move(d, "Skip, no rule");
+    await click(button(d, "Record verdict"));
+    const sent = stub.calls.filter((c) => c.op === "review_record").map((c) => c.input);
+    assert.equal(sent.length, 2);
+    assert.equal(sent[1]?.confirmCount, undefined);
+    await m.unmount();
+  });
 
   it("S3-1: the owner picks an agent, chooses an agent template, goes back and picks a person: the template is gone and the person gets only its own templates (fire on bad)", async () => {
     reset();

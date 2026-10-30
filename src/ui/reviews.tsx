@@ -204,6 +204,7 @@ function ReviewFlow({ subject: given, requests, dir, policy, onClose, onDone }: 
                       setHandleChoice(null);
                       setRecorded(null);
                       setRecordError(null);
+                      cap.clear();
                     }}
                   />
                 </Field>
@@ -342,7 +343,7 @@ function ReviewFlow({ subject: given, requests, dir, policy, onClose, onDone }: 
               </dl>
               {template && ruleParams ? <p className="tb-soft">{NOTHING_APPLIES}</p> : null}
               {verdict === "blocked" ? (
-                <Notice tone="needs-you">Blocked is a stop. If the Rules hook is on, Rules refuses this entry's calls and calls made for it, until you record a new review. Governance cannot see that switch: check it in Portal.</Notice>
+                <Notice tone="needs-you">Blocked is a stop. If the Rules hook is on, Rules refuses this entry's calls and calls that name it as the requester, until you record a new review. Governance cannot see that switch: check it in Portal.</Notice>
               ) : null}
               <p className="tb-soft">Governance records the verdict now and sets the trust state. Apps that read the directory see it with their next read. The record cannot be edited later.</p>
               {recordError ? (

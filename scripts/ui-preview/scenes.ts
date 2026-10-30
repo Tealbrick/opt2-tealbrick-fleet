@@ -303,7 +303,7 @@ export const scenes: Scene[] = [
       await p.getByRole("dialog").getByRole("button", { name: "Stop", exact: true }).click();
       await p.getByText("Yes, this makes 6").first().waitFor();
     },
-    expect: ["This makes 6 stopped in the last 10 minutes"],
+    expect: ["This makes 6 people and agents stopped in the last 10 minutes"],
     forbid: ["You stopped"],
   },
   { name: "agent", path: AGENT, personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, colleague_get: ok(agentDetail()) }, ready: "History", expect: ["Stop now", "Stop and remove access"] },

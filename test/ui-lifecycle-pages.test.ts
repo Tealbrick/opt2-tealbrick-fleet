@@ -262,7 +262,7 @@ describe("People and agents, Stop now", () => {
     await click(button(dialog, "Stop"));
     assert.equal(stopInput().length, 1, "a refusal sends nothing by itself");
     assert.equal(stopInput()[0].confirmCount, undefined);
-    assert.match(dialog.textContent ?? "", /This makes 6 stopped in the last 10 minutes/);
+    assert.match(dialog.textContent ?? "", /This makes 6 people and agents stopped in the last 10 minutes/);
     await click(button(dialog, "Yes, this makes 6"));
     assert.equal(stopInput()[1].confirmCount, 6);
     assert.equal(stopInput().length, 2);

@@ -95,7 +95,7 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
         <div className="tb-stack">
           <p className="tb-soft">{person ? `This marks ${c.name}'s agents to stop, and lists what to do in Portal to stop them and remove their access in Teal Brick. It does not end their employment or their own logins.` : `This marks ${c.name} to stop, and lists what to do in Portal to stop it and remove its access in Teal Brick.`}</p>
           <Field label="Reason">
-            <Select placeholder="Choose a reason" disabled={Boolean(mark.current)} options={reasonOptions("leaving")} value={reason} onValueChange={(v) => setReason(v as Reason)} />
+            <Select placeholder="Choose a reason" disabled={Boolean(mark.current)} options={reasonOptions("leaving")} value={reason} onValueChange={(v) => { setReason(v as Reason); cap.clear(); }} />
           </Field>
           <Field label="Note" hint={NOTE_HINT}>
             <Textarea rows={2} maxLength={500} disabled={Boolean(mark.current)} value={note} onChange={(e) => setNote(e.target.value)} />
