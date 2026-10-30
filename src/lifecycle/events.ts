@@ -108,7 +108,7 @@ export function stoppedSince(db: Db, since: number): Set<string> {
     .prepare(
       `SELECT subject_kind || ':' || subject_id AS k FROM fleet_lifecycle_events WHERE ${STOP_EVENT} AND at > ?
        UNION SELECT 'agent:' || a.id FROM fleet_lifecycle_events e JOIN fleet_agents a ON a.owner_id = e.subject_id
-         WHERE e.subject_kind = 'person' AND ${STOP_EVENT.replaceAll("kind =", "e.kind =").replaceAll("to_state", "e.to_state")} AND e.at > ? AND a.status <> 'removed' AND a.keep_running = 0
+         WHERE e.subject_kind = 'person' AND e.kind = 'transition' AND e.to_state IN ('suspended', 'leaving') AND e.at > ? AND a.status <> 'removed' AND a.keep_running = 0 AND a.lifecycle <> 'archived'
        UNION SELECT subject_kind || ':' || subject_id FROM fleet_reviews WHERE verdict = 'blocked' AND subject_id <> '' AND COALESCE(decided_at, created_at) > ?`,
     )
     .all(since, since, since);

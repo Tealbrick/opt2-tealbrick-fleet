@@ -141,7 +141,7 @@ export function capState(db: Db, now: number): { used: number; limit: number } {
 
 /** The entries one stop reaches: a person and the agents that stop with them. */
 export function stopReach(db: Db, kind: string, id: string): string[] {
-  const own = kind === "person" ? db.prepare("SELECT id FROM fleet_agents WHERE owner_id = ? AND status <> 'removed' AND keep_running = 0").all(id).map((r) => `agent:${String(r.id)}`) : [];
+  const own = kind === "person" ? db.prepare("SELECT id FROM fleet_agents WHERE owner_id = ? AND status <> 'removed' AND keep_running = 0 AND lifecycle <> 'archived'").all(id).map((r) => `agent:${String(r.id)}`) : [];
   return [`${kind}:${id}`, ...own];
 }
 
@@ -298,7 +298,10 @@ export function statusRequested(db: Db, id: string, want: "active" | "departed",
   const cur = personStatusOf(s.lifecycle);
   if (cur === want) return;
   if (want === "active") fail("use_bring_back", "This person left. Use Bring back on the person's page.", 409);
-  transition(db, { kind: "person", id, to: "leaving", reason: "other", note: "Marked as departed on the People page.", actor }, now);
+  // This form has no confirm to send. It stops when the window has room, however many agents the person has; past that it names the page that can confirm.
+  const { used, limit } = capState(db, now);
+  if (used >= limit) throw new TbError("stop_cap_reached", `${used} were stopped in the last 10 minutes. Open this person's page to confirm this stop.`, 409);
+  transition(db, { kind: "person", id, to: "leaving", reason: "other", note: "Marked as departed on the People page.", actor, noCap: true }, now);
 }
 
 /** person_delete: a stop must end first, by the owner's named step, because the delete would remove the floor on this person's handles and lift the owned agents' stop. Handles stay on a closed row (T7). */

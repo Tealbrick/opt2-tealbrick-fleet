@@ -1021,3 +1021,30 @@ test("N2-3: the cap counts a person's agents with the person; a blocked verdict 
   recordReview(c.db, "per_owner", { subject: { kind: "agent", id: SALES }, verdict: "trusted", reason: "ok", snapshotDigest: await digestOf(ctxOf(c), SALES) }, c.clock.t);
   assert.equal(stopsSince(c.db, c.clock.t - 1000), 0);
 });
+
+test("N2-3: nobody can confirm for the timer or the old form: a person with many agents still stops while the window has room; past it the timer waits and the form names the page", async () => {
+  const { tickDates } = await import("../src/lifecycle/validity.ts");
+  const { agentId } = await import("./plans-world.ts");
+  const w = makeWorld();
+  const many = Array.from({ length: 6 }, (_, i) => agentId(i + 60));
+  store.syncAgents(w.db, [...w.db.prepare("SELECT id, name, mode, status FROM fleet_agents").all(), ...many.map((id) => ({ id, name: id, mode: "free", status: "active" }))] as never, w.clock.t);
+  for (const id of many) store.setAgent(w.db, { agent: id, owner: w.ann.id }, w.clock.t);
+  w.db.prepare("UPDATE fleet_people SET valid_until = ? WHERE id = ?").run(w.clock.t - 1000, w.ann.id);
+  const seen = new Set<string>();
+  tickDates(w.db, seen, w.clock.t);
+  assert.equal(tickDates(w.db, seen, w.clock.t + 60_000).stopped, 1);
+  assert.equal(stateOf(w.db, "person", w.ann.id), "suspended");
+
+  const v = makeWorld();
+  for (const id of many) {
+    store.syncAgents(v.db, [...v.db.prepare("SELECT id, name, mode, status FROM fleet_agents").all(), { id, name: id, mode: "free", status: "active" }] as never, v.clock.t);
+    store.setAgent(v.db, { agent: id, owner: v.ann.id }, v.clock.t);
+  }
+  store.setPerson(v.db, { id: v.ann.id, name: "Ann", status: "departed" }, v.clock.t);
+  assert.equal(stateOf(v.db, "person", v.ann.id), "leaving");
+
+  const full = makeWorld();
+  for (const name of ["A", "B", "C", "D", "E"]) set(full.db, "person", store.setPerson(full.db, { name }, full.clock.t).id, "suspended", {}, full.clock.t);
+  assert.throws(() => store.setPerson(full.db, { id: full.ann.id, name: "Ann", status: "departed" }, full.clock.t), (e: TbError) => e.code === "stop_cap_reached" && /this person's page/.test(e.message));
+  assert.equal(stateOf(full.db, "person", full.ann.id), "active");
+});
