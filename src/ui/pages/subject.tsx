@@ -124,7 +124,7 @@ function Actions({ actions, onChoose }: { actions: Action[]; onChoose: (a: Actio
 }
 
 function Doing({ c, action, portalHref, onClose, onChanged }: { c: Colleague; action: Action; portalHref?: string; onClose: () => void; onChanged: () => Promise<void> }) {
-  if (action.to === "suspended" && c.kind === "agent") return <StopNow agent={c} portalHref={portalHref} onClose={onClose} onChanged={onChanged} />;
+  if (action.to === "suspended") return <StopNow subject={c} portalHref={portalHref} onClose={onClose} onChanged={onChanged} />;
   if (action.to === "leaving") return <LeaveFlow c={c} portalHref={portalHref} onClose={onClose} onChanged={onChanged} />;
   if (action.to === "archived") return <CloseDialog c={c} action={action} onClose={onClose} onChanged={onChanged} />;
   return <ChangeDialog c={c} action={action} onClose={onClose} onChanged={onChanged} />;

@@ -252,7 +252,7 @@ export const scenes: Scene[] = [
     ops: { ...pageOps, colleague_get: ok(agentDetail({ lifecycle: "leaving", effective: "leaving", runtime: "paused", line: "Paused, removal waits for you", reason: "left", actions: [{ to: "archived", label: "Close", blocked: null, needsWaive: true }], close: { coolingDays: 30, coolingEndsAt: "2026-11-29T09:00:00Z", coolingOver: false, limits: ["Connect could not be read.", "No version of Task Board lists project access."] } })) },
     ready: "History",
     steps: (p) => button(p, "Close"),
-    expect: ["Nothing closes by itself", "waiting period ends", "Why close before", "Connect could not be read"],
+    expect: ["Nothing closes by itself", "cooling period of 30 days ends", "Why close before the cooling", "Connect could not be read"],
   },
   {
     name: "close-blocked",

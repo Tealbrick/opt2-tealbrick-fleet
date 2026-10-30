@@ -6,7 +6,7 @@ import { Choices, Field, type FlowStep, Notice, Select, StepFlow, Textarea, Text
 import { useRef, useState } from "react";
 import type { ColleagueGetOutput, LifecycleSetInput, LifecycleSetOutput } from "#kit";
 import { changeError } from "../common.tsx";
-import { lifecycleError } from "./lifecycle-errors.ts";
+import { lifecycleError, stopCapOf } from "./lifecycle-errors.ts";
 import { NotChanged, PlanResult } from "./plan-result.tsx";
 import { beforeChangeText, beforeChangeTone, NOTE_HINT, type Reason, reasonLabel, reasonOptions } from "./words.ts";
 
@@ -50,6 +50,7 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Colleague | null>(null);
   const sent = useRef(false);
+  const [capCount, setCapCount] = useState<number | null>(null);
   const person = c.kind === "person";
   const agents = person ? c.agents : [];
   const keeps = agents.filter((a) => decisions[a.id] === "keep");
@@ -61,6 +62,7 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
     setFailure(null);
     const input: LifecycleSetInput = { kind: c.kind, id: c.id, to: "leaving", reason, expectedRev: c.rev };
     if (note.trim()) input.note = note.trim();
+    if (capCount !== null) input.confirmCount = capCount;
     if (agents.length) input.decisions = agents.map((a) => (decisions[a.id] === "keep" ? { agent: a.id, decision: "keep" as const, reason: (keepReasons[a.id] ?? "").trim() } : { agent: a.id, decision: "stop" as const }));
     try {
       const out = await callOp<LifecycleSetOutput>("lifecycle_set", input);
@@ -69,6 +71,8 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
       await onChanged();
       return undefined;
     } catch (e) {
+      const cap = stopCapOf(e);
+      if (cap !== null) setCapCount(cap);
       setFailure(lifecycleError(e, changeError).message);
       return false;
     } finally {
@@ -104,7 +108,7 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
       : []),
     {
       name: "Confirm",
-      nextLabel: "Stop",
+      nextLabel: capCount !== null ? "Stop this one too" : "Stop",
       onNext: send,
       render: () => (
         <div className="tb-stack">

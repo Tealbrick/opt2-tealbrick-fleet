@@ -7,7 +7,7 @@ import { useState } from "react";
 import type { ColleagueGetOutput, LifecycleSetInput, LifecycleSetOutput } from "#kit";
 import { changeError } from "../common.tsx";
 import { lifecycleError } from "./lifecycle-errors.ts";
-import { NOTE_HINT, type Reason, reasonOptions, when } from "./words.ts";
+import { NOTE_HINT, REASONS, type Reason, reasonOptions, when } from "./words.ts";
 
 type Colleague = ColleagueGetOutput["colleague"];
 type Action = Colleague["actions"][number];
@@ -88,7 +88,7 @@ export function ChangeDialog({ c, action, onClose, onChanged }: { c: Colleague; 
 }
 
 export function CloseDialog({ c, action, onClose, onChanged }: { c: Colleague; action: Action; onClose: () => void; onChanged: () => void | Promise<void> }) {
-  const [reason, setReason] = useState<Reason | "">((c.reason as Reason | null) ?? "");
+  const [reason, setReason] = useState<Reason | "">(REASONS.archived.includes(c.reason as Reason) ? (c.reason as Reason) : "");
   const [waive, setWaive] = useState("");
   const { busy, failure, run } = useChange(c, onClose, onChanged);
   const needsWaive = action.needsWaive;
@@ -115,7 +115,7 @@ export function CloseDialog({ c, action, onClose, onChanged }: { c: Colleague; a
         <p className="tb-soft">Close ends team memberships and keeps the record. No documents, issues or messages are deleted. Nothing closes by itself.</p>
         {c.close ? (
           <Notice tone={c.close.coolingOver ? "neutral" : "needs-you"} role="status">
-            {c.close.coolingOver ? `The ${c.close.coolingDays}-day waiting period is over.` : `The ${c.close.coolingDays}-day waiting period ends ${when(c.close.coolingEndsAt) || "later"}.`}
+            {c.close.coolingOver ? `The cooling period of ${c.close.coolingDays} days is over.` : `The cooling period of ${c.close.coolingDays} days ends ${when(c.close.coolingEndsAt) || "later"}.`}
           </Notice>
         ) : null}
         {c.close?.limits.length ? (
@@ -132,7 +132,7 @@ export function CloseDialog({ c, action, onClose, onChanged }: { c: Colleague; a
           <Select placeholder="Choose a reason" options={reasonOptions("archived")} value={reason} onValueChange={(v) => setReason(v as Reason)} />
         </Field>
         {needsWaive ? (
-          <Field label="Why close before the waiting period ends?" hint="Required. This is kept in the history.">
+          <Field label="Why close before the cooling period ends?" hint="Required. This is kept in the history.">
             <TextInput value={waive} maxLength={200} onChange={(e) => setWaive(e.target.value)} />
           </Field>
         ) : null}
