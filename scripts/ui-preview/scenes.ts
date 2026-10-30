@@ -176,7 +176,7 @@ const roleOps = {
   }),
 };
 const rolesScenes = (): Scene[] => [
-  { name: "roles", path: "roles", personOps: ROLE_OPS, strict: true, ops: roleOps, ready: "Contractor", expect: ["A role is a record of who has it", "2 holders", "Archived"], forbid: ["Roles Teams"] },
+  { name: "roles", path: "roles", personOps: ROLE_OPS, strict: true, ops: roleOps, ready: "Contractor", expect: ["A role is a record of who has it", "2 holders", "1 waiting to start", "Archived"], forbid: ["Roles Teams"] },
   { name: "roles-empty", path: "roles", personOps: ROLE_OPS, strict: true, ops: { ...roleOps, roles_list: ok({ roles: [], assignments: [] }) }, ready: "No roles yet", expect: ["Nothing changes until a rule uses it"] },
   { name: "roles-loading", path: "roles", personOps: ROLE_OPS, strict: true, ops: { ...roleOps, roles_list: hang }, ready: "Loading roles" },
   { name: "roles-error", path: "roles", personOps: ROLE_OPS, strict: true, ops: { ...roleOps, roles_list: fail("internal") }, ready: "Try again" },
@@ -187,7 +187,7 @@ const rolesScenes = (): Scene[] => [
     strict: true,
     ops: roleOps,
     ready: "Contractor",
-    steps: (p) => button(p, "Who has it"),
+    steps: (p) => button(p, /Who has Contractor/),
     expect: ["Active until 1 Dec 2026, 09:00 UTC", "Starts 5 Nov 2026, 09:00 UTC", "the end date passed"],
   },
   {
@@ -208,8 +208,8 @@ const rolesScenes = (): Scene[] => [
     ops: roleOps,
     ready: "Contractor",
     steps: async (p) => {
-      await button(p, "Who has it");
-      await p.getByRole("button", { name: "End", exact: true }).first().click();
+      await button(p, /Who has Contractor/);
+      await button(p, /^End Contractor for Marco Rossi/);
     },
     expect: ["Ending this does not remove a Portal grant.", "End now"],
   },
@@ -221,7 +221,7 @@ const rolesScenes = (): Scene[] => [
     ops: roleOps,
     ready: "Contractor",
     steps: (p) => button(p, "Archive"),
-    expect: ["A rule that names an archived role matches no one."],
+    expect: ["A rule that names an archived role matches no one.", "Archiving ends no assignment and removes no Portal grant."],
   },
   { name: "roles-not-in-nav", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: pageOps, ready: "Ready to stop an agent?", forbid: ["Roles"] },
 ];

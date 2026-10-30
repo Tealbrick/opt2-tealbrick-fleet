@@ -17,7 +17,9 @@ type Reason = RoleAssignInput["reason"];
 export const GRANT_LINE = "Ending this does not remove a Portal grant.";
 /** What a role is. */
 export const RECORD_LINE = "A role is a record of who has it. It allows and stops nothing by itself. A rule in Rules & Approvals can use it.";
-export const ARCHIVE_LINE = "A rule that names an archived role matches no one.";
+export const ARCHIVE_LINE = "A rule that names an archived role matches no one. A rule that refuses, or waits for your approval, by this role stops doing so.";
+/** Archiving ends no assignment and removes no Portal grant. */
+export const ARCHIVE_GRANT_LINE = "Archiving ends no assignment and removes no Portal grant.";
 
 const REASONS: { value: Reason; label: string }[] = [
   { value: "new_role", label: "New role" },
@@ -33,15 +35,16 @@ const reasonLabel = (r: string) => REASONS.find((x) => x.value === r)?.label ?? 
 export function stateText(a: Pick<Assignment, "state" | "validFrom" | "validUntil" | "endedAt" | "endReason">): string {
   if (a.state === "scheduled") return `Starts ${when(a.validFrom)}`;
   if (a.state === "active") return a.validUntil ? `Active until ${when(a.validUntil)}` : "Active, no end date";
-  const why = { owner: "you ended it", expired: "the end date passed", closed: "the entry was closed", deleted: "the entry was deleted" }[a.endReason ?? ""] ?? "ended";
+  const why =
+    { owner: "you ended it", expired: "the end date passed", closed: "the entry was closed", deleted: "the entry was deleted", kind_changed: "the person became an outside agent", not_started: "it never started: the entry was leaving, closed or gone" }[a.endReason ?? ""] ?? "it ended";
   return `Ended ${when(a.endedAt)}: ${why}`;
 }
 
-/** A local date-time field value to an ISO moment; empty = none. */
-const isoOf = (local: string): string | null => {
+/** A local date-time field value to an ISO moment: null for an empty field, undefined for a value that is not a date (the form says so, and sends nothing). */
+export const isoOf = (local: string): string | null | undefined => {
   if (!local) return null;
   const d = new Date(local);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
 };
 
 function RoleDialog({ role, onClose, reload }: { role: Role | "new"; onClose: () => void; reload: () => Promise<void> }) {
@@ -83,6 +86,8 @@ function AssignDialog({ role, onClose, reload }: { role: Role; onClose: () => vo
     if (note.trim()) input.note = note.trim();
     const validFrom = isoOf(from);
     const validUntil = isoOf(until);
+    if (validFrom === undefined) throw Object.assign(new Error("Check the start date."), { code: "input_invalid" });
+    if (validUntil === undefined) throw Object.assign(new Error("Check the end date."), { code: "input_invalid" });
     if (validFrom) input.validFrom = validFrom;
     if (validUntil) input.validUntil = validUntil;
     await callOp<RoleAssignOutput>("role_assign", input);
@@ -102,10 +107,10 @@ function AssignDialog({ role, onClose, reload }: { role: Role; onClose: () => vo
       <Field label="Note" hint={NOTE_HINT}>
         <TextInput value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} />
       </Field>
-      <Field label="Starts" hint="Optional. Your local time. Empty means now.">
+      <Field label="Starts" hint="Optional. In your time zone; this page shows times in UTC. Empty means now.">
         <TextInput type="datetime-local" value={from} onChange={(e) => setFrom(e.target.value)} />
       </Field>
-      <Field label="Ends" hint="Optional. Your local time. After this the role ends by itself. Empty means until you end it.">
+      <Field label="Ends" hint="Optional. In your time zone. After this the role ends by itself. Empty means until you end it.">
         <TextInput type="datetime-local" value={until} onChange={(e) => setUntil(e.target.value)} />
       </Field>
     </EditDialog>
@@ -167,7 +172,7 @@ function ArchiveDialog({ role, onClose, reload }: { role: Role; onClose: () => v
   return (
     <EditDialog title={archiving ? `Archive ${role.name}` : `Bring back ${role.name}`} onClose={onClose} save={save}>
       <p>{archiving ? ARCHIVE_LINE : "A rule that names this role matches its holders again."}</p>
-      <Notice tone="neutral">{GRANT_LINE}</Notice>
+      <Notice tone="neutral">{ARCHIVE_GRANT_LINE}</Notice>
     </EditDialog>
   );
 }
@@ -192,7 +197,7 @@ function Holders({ role, onChanged }: { role: Role; onChanged: () => Promise<voi
                 {a.subject.name} <span className="tb-hint">{a.subject.kind === "agent" ? "Agent" : "Person"}</span>
               </span>
               {a.state === "ended" ? null : (
-                <Button size="sm" variant="danger" onClick={() => setEnding(a)}>
+                <Button size="sm" variant="danger" onClick={() => setEnding(a)} aria-label={`End ${a.role.name} for ${a.subject.name}`}>
                   End
                 </Button>
               )}
@@ -213,6 +218,12 @@ export function RolesPage() {
   const [give, setGive] = useState<Role | null>(null);
   const [archive, setArchive] = useState<Role | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  // the open list of holders is read again after any change made from a dialog
+  const [version, setVersion] = useState(0);
+  const reloadAll = async () => {
+    await reload();
+    setVersion((v) => v + 1);
+  };
   return (
     <section className="app-page" aria-label="Roles">
       <PageHead
@@ -240,36 +251,35 @@ export function RolesPage() {
               <div className="card-head">
                 <h3>{r.name}</h3>
                 <span className="tb-row tight">
-                  {r.archived ? <Tag>Archived</Tag> : null}
-                  <Tag status={r.members > 0 ? "live" : "default"}>{r.members === 1 ? "1 holder" : `${r.members} holders`}</Tag>
-                  {r.scheduled > 0 ? <Tag>{r.scheduled === 1 ? "1 waits" : `${r.scheduled} wait`}</Tag> : null}
+                  {r.archived ? <Tag>Archived</Tag> : <Tag status={r.members > 0 ? "live" : "default"}>{r.members === 1 ? "1 holder" : `${r.members} holders`}</Tag>}
+                  {r.scheduled > 0 && !r.archived ? <Tag>{`${r.scheduled} waiting to start`}</Tag> : null}
                 </span>
               </div>
               {r.description ? <p className="tb-soft">{r.description}</p> : null}
               <div className="tb-ctas">
                 {r.archived ? null : (
-                  <Button size="sm" variant="primary" onClick={() => setGive(r)}>
+                  <Button size="sm" variant="primary" onClick={() => setGive(r)} aria-label={`Give ${r.name}`}>
                     Give
                   </Button>
                 )}
-                <Button size="sm" onClick={() => setOpen(open === r.id ? null : r.id)} aria-expanded={open === r.id}>
+                <Button size="sm" onClick={() => setOpen(open === r.id ? null : r.id)} aria-expanded={open === r.id} aria-label={`${open === r.id ? "Hide holders of" : "Who has"} ${r.name}`}>
                   {open === r.id ? "Hide holders" : "Who has it"}
                 </Button>
-                <Button size="sm" onClick={() => setEdit(r)}>
+                <Button size="sm" onClick={() => setEdit(r)} aria-label={`Edit ${r.name}`}>
                   Edit
                 </Button>
-                <Button size="sm" onClick={() => setArchive(r)}>
+                <Button size="sm" onClick={() => setArchive(r)} aria-label={`${r.archived ? "Bring back" : "Archive"} ${r.name}`}>
                   {r.archived ? "Bring back" : "Archive"}
                 </Button>
               </div>
-              {open === r.id ? <Holders role={r} onChanged={reload} /> : null}
+              {open === r.id ? <Holders key={`${r.id}:${version}`} role={r} onChanged={reload} /> : null}
             </Card>
           ))}
         </div>
       )}
-      {edit ? <RoleDialog role={edit} onClose={() => setEdit(null)} reload={reload} /> : null}
-      {give ? <AssignDialog role={give} onClose={() => setGive(null)} reload={reload} /> : null}
-      {archive ? <ArchiveDialog role={archive} onClose={() => setArchive(null)} reload={reload} /> : null}
+      {edit ? <RoleDialog role={edit} onClose={() => setEdit(null)} reload={reloadAll} /> : null}
+      {give ? <AssignDialog role={give} onClose={() => setGive(null)} reload={reloadAll} /> : null}
+      {archive ? <ArchiveDialog role={archive} onClose={() => setArchive(null)} reload={reloadAll} /> : null}
     </section>
   );
 }

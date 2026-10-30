@@ -138,7 +138,7 @@ describe("the Roles page", () => {
     assert.match(text, /A role is a record of who has it\. It allows and stops nothing by itself\./);
     assert.match(text, /Contractor/);
     assert.match(text, /2 holders/);
-    assert.match(text, /1 waits/);
+    assert.match(text, /1 waiting to start/);
     assert.match(text, /Archived/);
     assert.doesNotMatch(text, /rol_|ras_|agt_|per_/);
     assert.deepEqual(stub.calls.map((c) => [c.op, c.input]), [["roles_list", { includeArchived: true }]]);
@@ -230,9 +230,52 @@ describe("the Roles page", () => {
     assert.deepEqual([...card("Old").querySelectorAll("button")].map((b) => b.textContent), ["Who has it", "Edit", "Bring back"], "an archived role cannot be given");
     await click(button(card("Contractor"), "Archive"));
     const dlg = m.host.querySelector("dialog") as Element;
-    assert.match(dlg.textContent ?? "", /A rule that names an archived role matches no one\./);
+    assert.match(dlg.textContent ?? "", /A rule that names an archived role matches no one\. A rule that refuses, or waits for your approval, by this role stops doing so\./);
+    assert.match(dlg.textContent ?? "", /Archiving ends no assignment and removes no Portal grant\./);
+    assert.doesNotMatch(dlg.textContent ?? "", /Ending this does not remove/, "archiving ends nothing: the sentence for ending is not used here");
     await click(button(dlg, "Save"));
     assert.deepEqual(stub.calls.find((c) => c.op === "role_set")?.input, { id: "rol_A", archived: true });
+    await m.unmount();
+  });
+  it("an archived role shows no count of holders (rules see none); a start the server never made reads plainly", async () => {
+    reset();
+    stub.answers.roles_list = list([ROLE({ id: "rol_B", name: "Old", archived: true, members: 2, scheduled: 1 })]);
+    const m = await mount(h(roles.RolesPage, {}));
+    const text = m.host.textContent ?? "";
+    assert.match(text, /Archived/);
+    assert.doesNotMatch(text, /holders|waiting to start/);
+    await m.unmount();
+    assert.equal(roles.stateText({ state: "ended", validFrom: null, validUntil: null, endedAt: "2026-10-31T09:00:00Z", endReason: "not_started" }), "Ended 31 Oct 2026, 09:00 UTC: it never started: the entry was leaving, closed or gone");
+    assert.equal(roles.stateText({ state: "ended", validFrom: null, validUntil: null, endedAt: "2026-10-31T09:00:00Z", endReason: "kind_changed" }), "Ended 31 Oct 2026, 09:00 UTC: the person became an outside agent");
+  });
+  it("a value that is not a date reads as undefined (the form then says Check the end date and sends nothing); the open list of holders is read again after Give", async () => {
+    reset();
+    assert.equal(roles.isoOf(""), null);
+    assert.equal(roles.isoOf("10000-01-01T00:00"), undefined, "a six-digit year is not a date");
+    assert.equal(roles.isoOf("2026-12-01T09:00"), new Date("2026-12-01T09:00").toISOString());
+    stub.answers.roles_list = list([ROLE()]);
+    stub.answers.overview_get = ok(DIRECTORY);
+    stub.answers.role_get = ok({ role: ROLE(), assignments: [ASG()] });
+    stub.answers.role_assign = ok({ assignment: ASG() });
+    const m = await mount(h(roles.RolesPage, {}));
+    await click(button(m.host, "Who has it"));
+    const holderReads = () => stub.calls.filter((c) => c.op === "role_get").length;
+    assert.equal(holderReads(), 1);
+    await click(button(m.host, "Give"));
+    const dlg = m.host.querySelector("dialog") as Element;
+    await choose(dlg, 0, "Marco (person)");
+    await choose(dlg, 1, "Contract");
+    await click(button(dlg, "Save"));
+    assert.equal(stub.calls.filter((c) => c.op === "role_assign").length, 1);
+    assert.equal(holderReads(), 2, "the open list was read again");
+    await m.unmount();
+  });
+  it("the repeated buttons say which role or person they are for", async () => {
+    reset();
+    stub.answers.roles_list = list([ROLE()]);
+    const m = await mount(h(roles.RolesPage, {}));
+    const names = [...m.host.querySelectorAll("button")].map((b) => b.getAttribute("aria-label"));
+    assert.deepEqual(names.filter(Boolean), ["Give Contractor", "Who has Contractor", "Edit Contractor", "Archive Contractor"]);
     await m.unmount();
   });
   it("a new role sends its name and description; a taken name is a sentence", async () => {
