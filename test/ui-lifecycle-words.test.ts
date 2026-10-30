@@ -146,7 +146,13 @@ describe("refusals of lifecycle_set", () => {
   it("the stop cap names the count and hands it back for the confirm", () => {
     const e = { code: "stop_cap_reached", details: { count: 6 } };
     assert.equal(stopCapOf(e), 6);
-    assert.match(lifecycleError(e, fallback).message, /You stopped 5 entries in the last 10 minutes/);
+    assert.match(lifecycleError(e, fallback).message, /^This makes 6 stopped in the last 10 minutes/);
+    assert.doesNotMatch(lifecycleError(e, fallback).message, /You stopped/, "the count holds cascades and verdicts, not only what this owner pressed");
+  });
+  it("a cap with no count (the old People form) shows the server's sentence and offers no number", () => {
+    const e = { code: "stop_cap_reached", message: "5 were stopped in the last 10 minutes. Open this person's page to confirm this stop." };
+    assert.equal(stopCapOf(e), null);
+    assert.match(lifecycleError(e, fallback).message, /Open this person's page/);
   });
   it("another error is no cap and gets the shared wording", () => {
     assert.equal(stopCapOf({ code: "internal" }), null);

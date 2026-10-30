@@ -301,9 +301,10 @@ export const scenes: Scene[] = [
       await button(p, "Stop now");
       await pick(p, "Reason", "Security");
       await p.getByRole("dialog").getByRole("button", { name: "Stop", exact: true }).click();
-      await p.getByText("Stop this one too").first().waitFor();
+      await p.getByText("Yes, this makes 6").first().waitFor();
     },
-    expect: ["You stopped 5 entries"],
+    expect: ["This makes 6 stopped in the last 10 minutes"],
+    forbid: ["You stopped"],
   },
   { name: "agent", path: AGENT, personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, colleague_get: ok(agentDetail()) }, ready: "History", expect: ["Stop now", "Stop and remove access"] },
   { name: "agent-loading", path: AGENT, personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, colleague_get: hang }, ready: "Loading this entry" },

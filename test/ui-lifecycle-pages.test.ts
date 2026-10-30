@@ -250,25 +250,43 @@ describe("People and agents, Stop now", () => {
     assert.doesNotMatch(after, /has stopped|calls stopped|Rules has this change|Proved/);
     await m.unmount();
   });
-  it("the stop cap: names the count and sends the server's number on the second press", async () => {
+  it("the stop cap (N2-3): no answer by itself; the number goes once, on the next press, as the latest refusal named it", async () => {
     reset();
     stub.answers.colleagues_list = list();
-    let first = true;
-    stub.answers.lifecycle_set = () => {
-      if (first) {
-        first = false;
-        return refuse(409, "stop_cap_reached", "x", { count: 6 })();
-      }
-      return ok({ colleague: DETAIL(), transition: null })();
-    };
+    const answers = [refuse(409, "stop_cap_reached", "x", { count: 6 }), refuse(409, "stop_cap_reached", "x", { count: 7 }), refuse(500, "internal", "x"), ok({ colleague: DETAIL(), transition: null })];
+    stub.answers.lifecycle_set = () => (answers.shift() as () => { status: number; body: unknown })();
     const m = await mount(h(everyone.EveryonePage, {}));
     await click(button(m.host, "Stop now"));
     const dialog = m.host.querySelector("dialog") as Element;
     await chooseReason(dialog, "Security");
     await click(button(dialog, "Stop"));
-    assert.match(dialog.textContent ?? "", /You stopped 5 entries in the last 10 minutes/);
-    await click(button(dialog, "Stop this one too"));
+    assert.equal(stopInput().length, 1, "a refusal sends nothing by itself");
+    assert.equal(stopInput()[0].confirmCount, undefined);
+    assert.match(dialog.textContent ?? "", /This makes 6 stopped in the last 10 minutes/);
+    await click(button(dialog, "Yes, this makes 6"));
     assert.equal(stopInput()[1].confirmCount, 6);
+    assert.equal(stopInput().length, 2);
+    // another stop came in between: the new number, on a new press
+    await click(button(dialog, "Yes, this makes 7"));
+    assert.equal(stopInput()[2].confirmCount, 7);
+    // another refusal drops the number
+    await click(button(dialog, "Stop"));
+    assert.equal(stopInput()[3].confirmCount, undefined);
+    await m.unmount();
+  });
+  it("a change on the form drops the number", async () => {
+    reset();
+    stub.answers.colleagues_list = list();
+    stub.answers.lifecycle_set = refuse(409, "stop_cap_reached", "x", { count: 6 });
+    const m = await mount(h(everyone.EveryonePage, {}));
+    await click(button(m.host, "Stop now"));
+    const dialog = m.host.querySelector("dialog") as Element;
+    await chooseReason(dialog, "Security");
+    await click(button(dialog, "Stop"));
+    assert.ok(button(dialog, "Yes, this makes 6"));
+    await chooseReason(dialog, "They left");
+    await click(button(dialog, "Stop"));
+    assert.equal(stopInput()[1].confirmCount, undefined);
     await m.unmount();
   });
   it("a lost answer: the retry finds the stop made and shows the result, not a failure", async () => {
