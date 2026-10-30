@@ -93,7 +93,7 @@ export function OutsideAgentDialog({ onClose, reload }: { onClose: () => void; r
         {added ? (
           <>
             <p>{`${added.name} is in the directory. Its trust is unreviewed: your agents treat it as unknown, and Rules can hold what it asks.`}</p>
-            <p className="tb-soft">Trust records a review in the Trust reviews history. You can also review it later with more care, or block it.</p>
+            <p className="tb-soft">Trust records a review in the Reviews history. You can also review it later with more care, or block it.</p>
           </>
         ) : (
           <>

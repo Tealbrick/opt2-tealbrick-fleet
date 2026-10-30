@@ -4,7 +4,7 @@
   "id": "fleet",
   "name": "Governance",
   "summary": "Governance: who is who in your workspace, who owns which agent, and how far each person, outside agent and agent is trusted.",
-  "description": "Governance is the workspace directory and its trust record.\n\n- **Directory:** teams, people and outside agents with their Buzz, Slack and Telegram handles, and every workspace agent with its owner, role and teams.\n- **Trust:** every person, outside agent and agent has a trust state (unreviewed, trusted, limited or blocked). People you add start trusted; entries that an agent adds start unreviewed.\n- **Trust reviews:** an agent can ask for a review and say why; only you decide. Each verdict is kept with a copy of what the subject could do at that time, and it sets the trust state.\n- **Topology:** who owns which agent and who is in which team, as a table you can print for a security review. Contacts and app access appear when Connect and Core give apps that data.\n- **Contact rules:** you can propose a rule from a fixed template (hold or refuse an agent's outward actions, or the actions done for one sender, or hold the outward actions of a team's agents). It is sent to Rules & Approvals as a draft; you approve it there.\n- **Feed for apps:** Rules & Approvals and Knowledge read a small, versioned directory feed. It has no email addresses and no job titles.\n\nGovernance never grants access, never decides a hold and holds no credentials. People are directory entries, not sign-ins.",
+  "description": "Governance is the workspace's record of who should have access: one state per person and agent, with reasons and dates, and what no longer matches. It holds no grant and no credential, and it decides no call: Portal and Rules & Approvals do that.\n\n- **Summary:** how many agents you have, which have no owner, which can write or send, what no longer matches, and if you are ready to stop an agent.\n- **People and agents:** one line per person and agent: working, not reviewed, stop asked, paused. Each change has a reason and stays in the history.\n- **Stop an agent, or a person's agents:** one dialog for one agent, or a short flow for a person. Governance records the stop and lists what to do in Portal. Each screen says what does not change: their own logins, the agent's machine, copies already made.\n- **Reviews:** an agent can ask for a review and say why; only you decide. Each verdict is kept with a copy of what the subject could do at that time.\n- **Who owns what:** who owns which agent and who is in which team, as a table you can print for a security review.\n- **Contact rules:** you can propose a rule from a fixed template. It is sent to Rules & Approvals as a draft; you approve it there.\n- **Feed for apps:** Rules & Approvals and Knowledge read a small, versioned directory feed. It has no email addresses and no job titles.\n\nGovernance finds no agent you do not know about. People are directory entries, not sign-ins. This is a record for your own review, not proof of compliance.",
   "version": "0.3.2",
   "sdkMajor": 1,
   "requires": {
@@ -29,7 +29,12 @@
       "which team is this person in",
       "map a Buzz or Slack sender to a person",
       "is this sender trusted",
-      "review whether we trust this agent"
+      "review whether we trust this agent",
+      "someone left",
+      "who has access",
+      "stop this agent now",
+      "which agents have no owner",
+      "what no longer matches"
     ],
     "keywords": [
       "directory",
@@ -2302,7 +2307,7 @@
     },
     {
       "id": "topology_get",
-      "title": "Topology",
+      "title": "Who owns what",
       "description": "The workspace network for the owner, from Governance own data: people, outside agents and agents, who owns which agent, and teams with roles. Each node carries its trust, status, review due date and whether it changed since the last review. Channel contacts (Connect) and app access (a read-only copy from Portal) are not available to apps yet: their layers answer with an explicit unavailable state and no edges. Owner only; names, kinds, trust, roles and owner links only (no email, handles or review reasons). Change access in Portal.",
       "input": {
         "type": "object",
@@ -3178,7 +3183,7 @@
     },
     {
       "id": "reviews_list",
-      "title": "Trust reviews",
+      "title": "Reviews",
       "description": "Open review requests (one per requester and subject), the review history (newest first), what is due, and the review schedule. Reviews of status `done` are the verdicts; `due` lists subjects whose next review date has passed (or that were never reviewed).",
       "input": {
         "type": "object",

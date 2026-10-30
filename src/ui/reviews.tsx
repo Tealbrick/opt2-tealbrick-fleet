@@ -54,7 +54,7 @@ const TRUST_STATUS = { unreviewed: "open", trusted: "live", limited: "default", 
 export const TrustTag = ({ trust }: { trust: Trust }) => <Tag status={TRUST_STATUS[trust]}>{TRUST_LABEL[trust]}</Tag>;
 
 const VERDICTS = [
-  { value: "trusted" as const, title: "Trusted", body: "Agents may deal with it like a known contact. Holds you set still apply." },
+  { value: "trusted" as const, title: "Trusted", body: "Agents may deal with it like a known contact. Approval rules you set still apply." },
   { value: "limited" as const, title: "Limited", body: "Agents may answer it, but you approve what they do for it." },
   { value: "blocked" as const, title: "Blocked", body: "Agents refuse what it asks. Its messages stay unread by your agents." },
 ];
@@ -402,18 +402,18 @@ export function ReviewsPage({ onChanged }: { onChanged?: () => void }) {
 
   if (!l || !dir)
     return (
-      <section className="app-page" aria-label="Trust reviews">
-        <PageHead title="Trust reviews" />
-        {error ? <LoadFailed message={error} retrying={list.loading || dirLoad.loading} onRetry={() => void reload()} /> : <Loading what="trust reviews" />}
+      <section className="app-page" aria-label="Reviews">
+        <PageHead title="Reviews" />
+        {error ? <LoadFailed message={error} retrying={list.loading || dirLoad.loading} onRetry={() => void reload()} /> : <Loading what="reviews" />}
       </section>
     );
   const open = l.reviews.filter((r) => r.status === "requested");
   const history = l.reviews.filter((r) => r.status !== "requested");
   const trustOf = (s: Subject) => knownAbout(dir, s)?.trust ?? null;
   return (
-    <section className="app-page" aria-label="Trust reviews">
+    <section className="app-page" aria-label="Reviews">
       <PageHead
-        title="Trust reviews"
+        title="Reviews"
         lede="Agents can ask for a review. Only you decide. Each verdict is kept with a copy of what the subject could do at that time."
         action={
           <Button variant="primary" onClick={() => setFlow({ subject: null, requests: [] })}>
