@@ -328,6 +328,18 @@ export function requestReview(db: Db, by: Requester & { id: string }, input: Req
   });
 }
 
+/**
+ * A review round asks for the owner's own review of a subject (C380 T2-b). The owner's open request about it is reused; otherwise one is made.
+ * Null when the entry is gone or removed. The request is the owner's, so the cap on requests of an agent or of Governance does not apply.
+ */
+export function ownerRequest(db: Db, ownerId: string, kind: SubjectKind, id: string, why: string, now = Date.now()): { id: string; name: string } | null {
+  const s = subjectOf(db, kind, id);
+  if (!s || s.status === "removed") return null;
+  const by: Requester = { kind: "owner", id: ownerId };
+  const mine = ownOpen(db, by, s);
+  return { id: mine ? String(mine.id) : insertRequest(db, s, by, cleanText(why).slice(0, 500), now), name: s.name };
+}
+
 /** `agentsChanged`: a new agent gets one review request when the policy says so (system request; at most MAX_OPEN_SYSTEM open). */
 export function requestForNewAgents(db: Db, created: readonly { id: string; name: string }[], now = Date.now()): number {
   if (created.length === 0) return 0;
