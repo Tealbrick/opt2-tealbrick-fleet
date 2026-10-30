@@ -286,6 +286,38 @@ function joinScenes(): Scene[] {
       },
       expect: ["2 added, 1 did not go through, 0 not tried.", "Send again", "Nothing was added twice"],
     },
+    {
+      ...base,
+      name: "join-agent-which",
+      ops: { ...joinOps, colleagues_list: (i: unknown): Answer => ({ kind: "ok", value: { items: (i as { kind: string }).kind === "agent" ? [row({ id: ID.b, name: "Sales helper", lifecycle: "proposed", effective: "proposed", owner: null })] : rows.filter((r) => r.kind === "person"), nextCursor: null, total: 1 } }) },
+      ready: "Add a person",
+      steps: (p) => button(p, "Review a new agent"),
+      expect: ["not reviewed yet", "It grants nothing"],
+    },
+    {
+      ...base,
+      name: "join-agent-none",
+      ops: { ...joinOps, colleagues_list: ok({ items: [], nextCursor: null, total: 0 }) },
+      ready: "Add a person",
+      steps: (p) => button(p, "Review a new agent"),
+      expect: ["No new agent waits for a review."],
+    },
+    {
+      ...base,
+      name: "join-agent-reach",
+      personOps: [...JOIN_OPS, "plan_preview"],
+      ops: { ...joinOps, plan_preview: ok(previewOut), colleagues_list: (i: unknown): Answer => ({ kind: "ok", value: { items: (i as { kind: string }).kind === "agent" ? [row({ id: ID.b, name: "Sales helper", lifecycle: "proposed", effective: "proposed", owner: null })] : rows.filter((r) => r.kind === "person"), nextCursor: null, total: 1 } }) },
+      ready: "Add a person",
+      steps: async (p) => {
+        await button(p, "Review a new agent");
+        await pick(p, "Agent", "Sales helper");
+        await joinNext(p);
+        await pick(p, "Owner", "Marco Rossi");
+        await joinNext(p);
+      },
+      expect: ["Reviewing it changes none of this", "Slack account as itself"],
+      forbid: ["Would stop", "Would stay", "You would do this"],
+    },
   ];
 }
 
@@ -375,7 +407,7 @@ export const scenes: Scene[] = [
     },
     expect: ["You stopped 5 entries"],
   },
-  { name: "agent", path: AGENT, personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, colleague_get: ok(agentDetail()) }, ready: "History", expect: ["Stop now", "Stop and remove access"] },
+  { name: "agent", path: AGENT, personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, colleague_get: ok(agentDetail()) }, ready: "History", expect: ["Stop now", "Stop and remove access", "Key age and last use", "Not available. Portal does not pass it to Governance yet."] },
   { name: "agent-loading", path: AGENT, personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, colleague_get: hang }, ready: "Loading this entry" },
   { name: "agent-error", path: AGENT, personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, colleague_get: fail("internal") }, ready: "Try again" },
   { name: "agent-no-link", path: "person-or-agent", personOps: LIFECYCLE_OPS, strict: true, ops: pageOps, ready: "not in the link" },

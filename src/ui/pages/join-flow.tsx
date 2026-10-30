@@ -15,10 +15,11 @@ import { counts, type Deps, newRun, type Options, type Run, sendPeople, sendTeam
 export type JoinMode = "one" | "list";
 type Kind = "member" | "contractor";
 
-const deps: Deps = {
+/** ops that only read take no key */
+const READS = new Set(["overview_get", "colleague_get", "colleagues_list"]);
+export const deps: Deps = {
   say: changeError,
-  // an op that only reads takes no key
-  call: (op, input, key) => (op === "overview_get" ? callOp(op, input as Json) : callOp(op, input as Json, { idempotencyKey: key })),
+  call: (op, input, key) => (READS.has(op) ? callOp(op, input as Json) : callOp(op, input as Json, { idempotencyKey: key })),
 };
 const NO_TEAM = "none";
 const words = (s: string) => s.split(/[\s,;]+/).filter(Boolean);
