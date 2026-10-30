@@ -23,7 +23,7 @@ const runtimeOf = (status: unknown): "running" | "paused" | "gone" => (status ==
 function lineOf(kind: SubjectKind, lifecycle: Lifecycle, effective: Effective, runtime: Row["runtime"], validFrom: unknown): string {
   if (effective === "not_started") return `Starts on ${String(isoOf(validFrom)).slice(0, 10)}`;
   if (kind === "person") {
-    return { proposed: "New, not reviewed", active: "Active", suspended: "Stopped", leaving: "Leaving", archived: "Closed" }[effective];
+    return { proposed: "New, not reviewed", active: "Active", suspended: "Stop asked", leaving: "Leaving", archived: "Closed" }[effective];
   }
   if (runtime === "gone") return lifecycle === "archived" ? "Closed" : "Not listed in Portal";
   if (lifecycle === "archived") return "Closed, but Portal lists it again";
@@ -45,7 +45,7 @@ export function loadColleagues(db: Db, now: number): Loaded {
   const rows: Row[] = [];
   const person = (p: Db_): Row => {
     const lifecycle = p.lifecycle as Lifecycle;
-    const effective = effectivePerson({ lifecycle, validFrom: p.valid_from === null ? null : Number(p.valid_from) }, now);
+    const effective = effectivePerson({ lifecycle, validFrom: p.valid_from === null ? null : Number(p.valid_from) });
     return {
       kind: "person",
       id: String(p.id),
@@ -71,7 +71,7 @@ export function loadColleagues(db: Db, now: number): Loaded {
     const lifecycle = a.lifecycle as Lifecycle;
     const owner = a.owner_id === null ? undefined : owners.get(String(a.owner_id));
     const keepRunning = Number(a.keep_running) === 1;
-    const effective = effectiveAgent({ lifecycle, validFrom: a.valid_from === null ? null : Number(a.valid_from), keepRunning }, owner?.lifecycle ?? null, now);
+    const effective = effectiveAgent({ lifecycle, validFrom: a.valid_from === null ? null : Number(a.valid_from), keepRunning }, owner?.lifecycle ?? null);
     const runtime = runtimeOf(a.status);
     const findings = findingsOf(
       { kind: "agent", lifecycle, effective, runtime, hasOwner: owner !== undefined, ownerLifecycle: owner?.lifecycle ?? null, reason: a.lifecycle_reason === null ? null : String(a.lifecycle_reason), at: Number(a.lifecycle_at), validUntil: a.valid_until === null ? null : Number(a.valid_until), noCard: a.migrated_note === "no_card", handleConflict: conflicts.has(String(a.id)) },
@@ -206,7 +206,7 @@ export async function summaryGet(ctx: OpContext, now = Date.now()): Promise<Summ
   const people = rows.filter((r) => r.kind === "person");
   const running = agents.filter((r) => r.runtime === "running").length;
   const topology = readTopology(ctx);
-  const maxRev = Number(db.prepare("SELECT MAX(lifecycle_rev) AS r FROM (SELECT lifecycle_rev FROM fleet_agents WHERE lifecycle IN ('suspended', 'leaving') UNION ALL SELECT lifecycle_rev FROM fleet_people WHERE lifecycle IN ('suspended', 'leaving'))").get()?.r ?? 0);
+  const maxRev = Number(db.prepare("SELECT MAX(lifecycle_rev) AS r FROM (SELECT lifecycle_rev FROM fleet_agents WHERE lifecycle IN ('suspended', 'leaving') OR valid_from IS NOT NULL UNION ALL SELECT lifecycle_rev FROM fleet_people WHERE lifecycle IN ('suspended', 'leaving') OR valid_from IS NOT NULL)").get()?.r ?? 0);
   const floor = await floorFor(ctx, maxRev, running > 0, now);
   const noOwner = agents.filter((r) => r.findings.some((f: Finding) => f.code === "no_owner")).length;
   const rulesOn = floor.state === "confirmed" || floor.state === "not_confirmed";
@@ -224,15 +224,15 @@ export async function summaryGet(ctx: OpContext, now = Date.now()): Promise<Summ
     people: { total: people.length, leaving: people.filter((r) => r.lifecycle === "leaving").length, suspended: people.filter((r) => r.lifecycle === "suspended").length },
     noOwner,
     differences: rows.reduce((n, r) => n + r.findings.length, 0),
-    canWriteOrSend: topology ? new Set(topology.edges.filter((e) => e.crud.some((c) => c !== "read")).map((e) => e.agent)).size : null,
+    canWriteOrSend: topology && !topology.truncated ? new Set(topology.edges.filter((e) => e.crud.some((c) => c !== "read")).map((e) => e.agent)).size : null,
     stores: [
-      { product: "core", name: "Portal", state: "read", text: "Agents and their state come from the workspace copy.", at: new Date(now).toISOString() },
+      { product: "core", name: "Portal", state: "read", text: "Agents and their state come from the workspace copy.", at: null },
       { product: "rules", name: "Rules & Approvals", state: floor.state === "not_installed" ? "not_installed" : floor.state === "not_read" || floor.state === "older" ? "not_read" : "read", text: floor.text, at: rulesOn ? new Date(now).toISOString() : null },
     ],
     readiness: [
       { id: "rules", state: rulesOn ? "ok" : "missing", text: rulesOn ? "Rules & Approvals can stop a call early." : floor.text, path: null },
       { id: "consent", state: topology ? "ok" : "missing", text: topology ? "Governance can see who has access." : "Turn on 'See who has access' for Governance in Portal.", path: null },
-      { id: "owners", state: noOwner === 0 ? "ok" : "missing", text: noOwner === 0 ? "Every agent has an owner." : `${noOwner} agents have no owner.`, path: "/people-and-agents" },
+      { id: "owners", state: noOwner === 0 ? "ok" : "missing", text: noOwner === 0 ? "Every agent has an owner." : noOwner === 1 ? "1 agent has no owner." : `${noOwner} agents have no owner.`, path: "/people-and-agents" },
       { id: "alerts", state: "fallback", text: "Alerts show as a banner in Governance. No message is sent.", path: null },
     ],
     stoppedToday: stopsSince(db, now - DAY_MS),

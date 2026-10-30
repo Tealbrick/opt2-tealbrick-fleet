@@ -18,7 +18,7 @@ import type { DecodedTopology } from "../src/topology-slice.ts";
 import { AGENT_A, AGENT_B } from "./helpers.ts";
 import { OWNER, refused, set, stateOf, T0, WAIVE, world } from "./lifecycle-helpers.ts";
 
-const feedOf = (db: Db, now = T0) => directoryFeed(db, { accept: ["lifecycle"] }, undefined, now) as Extract<DirectoryFeed, { unchanged: false }>;
+const feedOf = (db: Db) => directoryFeed(db, { accept: ["lifecycle"] }) as Extract<DirectoryFeed, { unchanged: false }>;
 const contract = (name: string) => JSON.parse(readFileSync(new URL(`./contracts/${name}`, import.meta.url), "utf8"));
 const LIFECYCLE_SCHEMA = contract("fleet.directory_feed.1.lifecycle.schema.json");
 const LIFECYCLE_FIXTURE = contract("fleet.directory_feed.1.lifecycle.json") as { valid: Json[]; invalid: { why: string; doc: Json }[] };
@@ -63,8 +63,8 @@ test("the floor: blocked refuses, a closed row with no card does not, and a pers
   assert.equal(floorOf("archived", "blocked", true), true);
   assert.equal(floorOf("proposed", "unreviewed"), false);
   assert.equal(floorOf(null, "trusted"), false);
-  assert.equal(effectiveAgent({ lifecycle: "proposed", validFrom: T0 + 1, keepRunning: false }, "active", T0), "not_started");
-  assert.equal(effectiveAgent({ lifecycle: "active", validFrom: null, keepRunning: false }, null, T0), "active", "an outside owner or no owner: no cascade");
+  assert.equal(effectiveAgent({ lifecycle: "proposed", validFrom: T0 + 1, keepRunning: false }, "active"), "not_started");
+  assert.equal(effectiveAgent({ lifecycle: "active", validFrom: null, keepRunning: false }, null), "active", "an outside owner or no owner: no cascade");
   const { db, ann } = world();
   store.setPerson(db, { id: ann.id, name: "Ann", handles: ["slack:UANN00001"] }, T0);
   db.prepare("INSERT INTO fleet_agent_handles (agent_id, handle) VALUES (?, 'slack:UANN00001'), (?, 'slack:UAGENT001')").run(AGENT_A.id, AGENT_A.id);
@@ -91,7 +91,7 @@ test("dates: an end date passes on two ticks only, stops once by the system, a r
   assert.equal(tickDates(db, seen, until + 180_000).stopped, 0, "once");
   const ev = db.prepare("SELECT actor_kind, reason FROM fleet_lifecycle_events WHERE subject_id = ? AND to_state = 'suspended'").get(ann.id);
   assert.deepEqual({ ...ev }, { actor_kind: "system", reason: "contract_ended" });
-  assert.equal(feedOf(db, until + 180_000).agents.find((a) => a.id === AGENT_A.id)?.floor, true, "the person's agents follow");
+  assert.equal(feedOf(db).agents.find((a) => a.id === AGENT_A.id)?.floor, true, "the person's agents follow");
   // a changed date resets the agreement
   const p = store.setPerson(db, { name: "Pat" }, T0);
   setDates(db, { kind: "person", id: p.id, validUntil: new Date(until).toISOString(), actor: OWNER }, T0);
@@ -133,6 +133,15 @@ test("mover: members_set and an owner change write a moved event and open one sy
   assert.match(String(moved(AGENT_A.id)[0]?.note), /from Ann to Bob/);
   assert.deepEqual(JSON.parse(String(moved(AGENT_A.id)[0]?.snapshot_json)), { after: bob.id, before: ann.id });
   assert.equal(Number(db.prepare("SELECT keep_running AS k FROM fleet_agents WHERE id = ?").get(AGENT_A.id)?.k), 0, "the tick was about the old owner's key");
+  // fire on bad: taking the owner away cannot lift a stop that comes from the owner
+  const c = world();
+  set(c.db, "person", c.ann.id, "leaving");
+  assert.throws(() => setAgentMoved(c.db, { agent: AGENT_A.id, owner: null }, OWNER, T0), refused("owner_stopped", 409));
+  assert.equal(feedOf(c.db).agents.find((a) => a.id === AGENT_A.id)?.floor, true);
+  // quiet on good: an unowned agent stays unowned, and a working owner can be taken away
+  setAgentMoved(db, { agent: AGENT_B.id, owner: null }, OWNER, T0);
+  setAgentMoved(db, { agent: AGENT_A.id, owner: null }, OWNER, T0);
+  setAgentMoved(db, { agent: AGENT_A.id, owner: bob.id }, OWNER, T0);
   // fire on bad: a new owner must be active
   set(db, "person", bob.id, "leaving");
   assert.throws(() => setAgentMoved(db, { agent: AGENT_B.id, owner: bob.id }, OWNER, T0), refused("owner_inactive", 409));
@@ -154,6 +163,11 @@ test("A1b: the plan lists Portal actions and proves them from the slice; it neve
   assert.deepEqual(portalPlan([{ ...a, lifecycle: "active", effective: "active", runtime: "paused" }], null, null).steps.map((s) => s.action), ["resume"]);
   assert.deepEqual(portalPlan([{ ...a, runtime: "gone" }], null, null).steps.map((s) => [s.action, s.state]), [["remove_access", "done"]]);
   assert.ok(none.notChanged.some((t) => /Portal login/.test(t)));
+  // a plan over the output limit is cut, and says so; the count stays true
+  const many = portalPlan(Array.from({ length: 300 }, (_, i) => ({ ...a, id: `agt_${i}` })), null, null);
+  assert.equal(many.steps.length, 400);
+  assert.equal(many.openSteps, 300);
+  assert.match(String(many.note), /200 more steps/);
 });
 
 test("A23: each case has its own words from what Fleet can read; the hook switch is never claimed", async () => {
@@ -167,7 +181,8 @@ test("A23: each case has its own words from what Fleet can read; the hook switch
   const old = { ...st, lastGateAt: new Date(T0 - 3_600_000).toISOString() };
   assert.match(String(floorView(old, 10, T0, true).gateNote), /has not checked a call since/);
   assert.equal(floorView(old, 10, T0, false).gateNote, null, "no agent runs: nothing to say");
-  assert.equal(floorView({ ...st, lastGateAt: null }, 10, T0, true).gateNote, null);
+  assert.equal(floorView({ ...st, lastGateAt: null }, 10, T0, true).gateNote, "Rules has not checked a call yet.");
+  assert.equal(floorView({ ...st, lastGateAt: null }, 10, T0, false).gateNote, null);
   for (const t of Object.values(FLOOR_TEXT)) assert.doesNotMatch(t, /hook|switch/i);
   const reads = (callApp: unknown, targets = ["rules"]) => readFloorStatus({ companionTargets: () => targets, callApp } as never);
   assert.equal(await reads(async () => ({ status: "ok", output: st }), []), "not_installed");
@@ -228,4 +243,31 @@ test("Close is never automatic: 40 days of ticks close nothing", () => {
   const seen = new Set<string>();
   for (let d = 0; d < 40; d++) tickDates(db, seen, T0 + d * 86_400_000);
   assert.equal(stateOf(db, "person", ann.id), "leaving");
+});
+
+test("a date tick: a subject that fails stays for the next tick and does not stop the others; time alone never lifts a floor at one revision", () => {
+  const { db, ann } = world();
+  const pat = store.setPerson(db, { name: "Pat" }, T0);
+  const until = T0 + 1000;
+  for (const id of [ann.id, pat.id]) setDates(db, { kind: "person", id, validUntil: new Date(until).toISOString(), actor: OWNER }, T0);
+  // the first subject's row is made to fail: its owner row is not loadable through the guard
+  db.exec("CREATE TRIGGER fail_one BEFORE UPDATE OF lifecycle ON fleet_people WHEN OLD.name = 'Ann' BEGIN SELECT RAISE(ABORT, 'boom'); END");
+  const seen = new Set<string>();
+  const errors: unknown[] = [];
+  tickDates(db, seen, until + 1, (e) => errors.push(e));
+  const r = tickDates(db, seen, until + 2, (e) => errors.push(e));
+  assert.equal(r.stopped, 1, "Pat stops");
+  assert.equal(errors.length, 1);
+  assert.equal(stateOf(db, "person", pat.id), "suspended");
+  db.exec("DROP TRIGGER fail_one");
+  assert.equal(tickDates(db, seen, until + 3).stopped, 1, "Ann stops on the next tick");
+  // a stored start date reads not_started until the timer ends it, whatever the clock says
+  const late = world();
+  setDates(late.db, { kind: "agent", id: AGENT_A.id, validFrom: new Date(T0 + 5).toISOString(), actor: OWNER }, T0);
+  const rev = store.revision(late.db);
+  assert.equal(feedOf(late.db).agents.find((a) => a.id === AGENT_A.id)?.floor, true);
+  assert.equal(store.revision(late.db), rev);
+  // a start date that has passed needs no wait
+  setDates(late.db, { kind: "agent", id: AGENT_B.id, validFrom: new Date(T0 - 5).toISOString(), actor: OWNER }, T0);
+  assert.equal(feedOf(late.db).agents.find((a) => a.id === AGENT_B.id)?.floor, false);
 });
