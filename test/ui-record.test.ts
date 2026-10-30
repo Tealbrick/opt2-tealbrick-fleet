@@ -59,15 +59,45 @@ describe("Access record", () => {
     assert.doesNotMatch(m.host.textContent ?? "", /The file is ready/);
     await m.unmount();
   });
-  it("the print page escapes every value an app or the owner wrote, and says what the file says about itself", () => {
-    const html = recordHtml(FILE());
-    assert.ok(!html.includes("<script>alert(1)</script>"));
-    assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt; Mail/);
+  it("the print page escapes every value, whatever field it is in; it has a content policy and no script; and it says what the file says about itself", () => {
+    const evil = (name: string) => `<img src=x onerror=alert('${name}')>"&`;
+    const hostile = FILE({
+      header: evil("header"),
+      limits: [evil("limit")],
+      period: { from: evil("from"), to: evil("to") },
+      generatedAt: evil("made"),
+      contents: { includes: [evil("in")], excludes: [evil("out")], decision: evil("decision") },
+      approvers: { line: evil("line") },
+      sweeps: { lists: [{ startedAt: evil("start"), finishedAt: evil("finish"), listKept: true, stores: [{ store: evil("store"), readThisSweep: false, state: "x" }], items: [{ store: evil("istore"), label: evil("label"), state: evil("state"), subject: { kind: "agent", name: evil("who") } }], ended: [{ store: evil("estore"), label: evil("elabel"), endedAt: evil("ended") }] }] },
+      findings: { items: [{ text: evil("finding") }] },
+      exceptions: [{ code: evil("code"), subject: { name: evil("exwho") }, reason: evil("reason"), until: evil("until") }],
+      timeToStop: [{ subject: { name: evil("stopwho") }, markedAt: evil("marked"), stoppedAt: evil("stopped"), seconds: 1, note: evil("note"), steps: { proved: 1, total: 1 } }],
+      appsNotRead: { now: [{ name: evil("app"), text: evil("apptext") }] },
+      integrity: { chain: { ok: true }, digest: evil("digest") },
+    });
+    const html = recordHtml(hostile);
+    // outside the page's own tags no raw `<` is left: removing the escape on any field would leave one
+    const text = html.replace(/<!doctype html>|<\/?(?:html|head|body|meta|title|style|h1|h2|h3|p|ul|li|table|thead|tbody|tr|th|td)\b[^>]*>/g, "");
+    assert.ok(!text.includes("<"), "a raw < is left in a value");
+    assert.ok(!/<img/i.test(html));
+    assert.ok(html.includes("&lt;img src=x onerror=alert(&#39;header&#39;)&gt;&quot;&amp;"));
+    for (const name of ["limit", "from", "to", "made", "in", "out", "decision", "line", "finish", "store", "istore", "label", "state", "who", "estore", "elabel", "ended", "finding", "code", "exwho", "reason", "until", "stopwho", "marked", "stopped", "note", "app", "apptext", "digest"]) assert.ok(html.includes(`alert(&#39;${name}&#39;)`), `${name} is escaped and printed`);
+    assert.match(html, /Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"/);
     assert.doesNotMatch(html, /<script/i);
-    for (const t of ["Limits of this record", "Our own apps report this data", "One person approved all items", "Nobody checked this against a law", "Ended in this sweep", "Not proof of compliance", "sha256:abc"]) assert.match(html, new RegExp(t), t);
+    const plain = recordHtml(FILE());
+    for (const t of ["Limits of this record", "Our own apps report this data", "One person approved all items", "Nobody checked this against a law", "Ended in this sweep", "Not proof of compliance", "sha256:abc", "not a signature", "summary of the file"]) assert.match(plain, new RegExp(t), t);
     assert.equal(esc(`"'<&>`), "&quot;&#39;&lt;&amp;&gt;");
     assert.match(recordHtml(FILE({ integrity: { chain: { ok: false }, digest: null } })), /BROKEN/);
     assert.match(recordHtml(FILE({ sweeps: { lists: [{ startedAt: "a", finishedAt: "b", listKept: false, stores: [], items: null, ended: [] }] } })), /was not kept/);
+  });
+  it("a file the page cannot read is not offered", async () => {
+    reset();
+    stub.answers.record_export = ok({ record: { format: "other" }, digest: "x" });
+    const m = await mount(h(record.RecordPage, {}));
+    await click(button(m.host, "Make the record"));
+    assert.match(m.host.textContent ?? "", /form this page cannot read/);
+    assert.doesNotMatch(m.host.textContent ?? "", /Download the file/);
+    await m.unmount();
   });
 });
 

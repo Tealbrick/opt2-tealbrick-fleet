@@ -33,7 +33,7 @@ export function recordHtml(r: RecordFile): string {
       (s.items === null ? "<p>The list of this sweep was not kept.</p>" : table(["App", "What it reports", "State", "Whose"], s.items.map((i) => [i.store, i.label, i.state, i.subject.kind === "unlinked" ? "No person or agent" : (i.subject.name ?? "Unknown")]))) +
       (s.ended.length > 0 ? `<p>Ended in this sweep:</p>${table(["App", "What it reported", "Ended"], s.ended.map((e) => [e.store, e.label, e.endedAt]))}` : ""),
   );
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Access record</title><style>body{font:14px/1.5 system-ui,sans-serif;margin:2rem;color:CanvasText}table{border-collapse:collapse;width:100%;margin:.5rem 0}th,td{border:1px solid GrayText;padding:.25rem .5rem;text-align:left;vertical-align:top}h1,h2,h3{break-after:avoid}h2{margin-top:2rem}</style></head><body>
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>Access record</title><style>body{font:14px/1.5 system-ui,sans-serif;margin:2rem;color:CanvasText}table{border-collapse:collapse;width:100%;margin:.5rem 0}th,td{border:1px solid GrayText;padding:.25rem .5rem;text-align:left;vertical-align:top}h1,h2,h3{break-after:avoid}h2{margin-top:2rem}</style></head><body>
 <h1>Access record</h1><p>${esc(r.header)}</p><p>Period: ${esc(r.period.from)} to ${esc(r.period.to)}. Made ${esc(r.generatedAt)}.</p>
 <h2>Limits of this record</h2>${ul(r.limits)}
 <h2>Who approved</h2><p>${esc(r.approvers.line)}</p>
@@ -43,6 +43,6 @@ export function recordHtml(r: RecordFile): string {
 <h2>Accepted differences</h2>${r.exceptions.length === 0 ? "<p>None.</p>" : table(["Difference", "Whose", "Reason", "Until"], r.exceptions.map((e) => [e.code, e.subject.name ?? "Unknown", e.reason, e.until]))}
 <h2>Apps that were not read</h2>${r.appsNotRead.now.length === 0 ? "<p>Every app was read at the last check.</p>" : ul(r.appsNotRead.now.map((a) => `${a.name}: ${a.text}`))}
 <h2>What each app listed, by sweep</h2>${sweeps.join("") || "<p>No sweep in this period.</p>"}
-<h2>Integrity</h2><p>Chain of events: ${r.integrity.chain.ok ? "unbroken" : "BROKEN"}. Digest of the file: ${esc(r.integrity.digest)}</p>
+<h2>Integrity</h2><p>Chain of events: ${r.integrity.chain.ok ? "unbroken" : "BROKEN"}. This is not a signature: the owner can change the file. Digest of the file: ${esc(r.integrity.digest)}</p><p>This page is a summary of the file. The file holds every event, plan, verdict and review round.</p>
 </body></html>`;
 }

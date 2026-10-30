@@ -41,6 +41,12 @@ function printFile(file: RecordFile): void {
   document.body.appendChild(frame);
 }
 
+/** The page reads a few fields of the file. A file that lacks them is not offered, and the page says so. */
+const readable = (f: unknown): f is RecordFile => {
+  const r = f as Partial<RecordFile> | null;
+  return !!r && Array.isArray(r.limits) && Array.isArray(r.sweeps?.lists) && Array.isArray(r.timeToStop) && Array.isArray(r.findings?.items) && Array.isArray(r.exceptions) && Array.isArray(r.appsNotRead?.now) && !!r.approvers && !!r.integrity?.chain && !!r.contents && !!r.period;
+};
+
 export function RecordPage() {
   const today = Date.now();
   const [from, setFrom] = useState(ymd(today - 90 * DAY));
@@ -53,9 +59,10 @@ export function RecordPage() {
     setFailure(null);
     try {
       const out = await callOp<RecordExportOutput>("record_export", { from: `${from}T00:00:00Z`, to: `${to}T23:59:59Z` });
-      setMade({ file: out.record as unknown as RecordFile, from, to });
+      if (!readable(out.record)) throw new Error("shape");
+      setMade({ file: out.record, from, to });
     } catch (e) {
-      setFailure(recordError(e));
+      setFailure(e instanceof Error && e.message === "shape" ? "The file has a form this page cannot read. Update Governance and try again." : recordError(e));
     } finally {
       setBusy(false);
     }
@@ -63,9 +70,9 @@ export function RecordPage() {
   const file = made?.file ?? null;
   return (
     <section className="app-page" aria-label="Access record">
-      <PageHead title="Access record" lede="One file about who and what had access to your agents' apps, for a period you choose." />
+      <PageHead title="Access record" lede="One file about the access your apps reported, for a period you choose." />
       <Notice tone="neutral">
-        Our own apps report this data. The file shows what each app reported and what the Portal slice showed. It does not prove that nothing else had access, and it makes no claim about any law or standard. Governance has one owner login today, so the owner approves each item.
+        Our own apps report this data. The file shows what each app reported and what the Portal slice showed. It does not prove that nothing else had access, and it makes no claim about any law or standard. Governance has one owner login today.
       </Notice>
       {failure ? (
         <Notice tone="needs-you" role="alert">
@@ -82,9 +89,9 @@ export function RecordPage() {
               <TextInput type="date" value={to} onChange={(e) => setTo(e.target.value)} />
             </Field>
           </div>
-          <p className="tb-soft">At most one year. Making the file writes one line into the history, with the digest of the file.</p>
+          <p className="tb-soft">{from > to ? "The start is after the end." : "At most one year. Making the file writes one line into the history, with the digest of the file."}</p>
           <div className="tb-row">
-            <Button variant="primary" onClick={() => void make()} disabled={busy || !from || !to}>
+            <Button variant="primary" onClick={() => void make()} disabled={busy || !from || !to || from > to}>
               {busy ? "Making the file" : "Make the record"}
             </Button>
           </div>
@@ -94,7 +101,8 @@ export function RecordPage() {
         <Card>
           <div className="tb-stack" role="status">
             <h2 className="sub-head">The file is ready</h2>
-            <p>{`${count(file.sweeps.lists.length, "sweep", "sweeps")}, ${count(file.timeToStop.length, "stop", "stops")}, ${count(file.findings.items.length, "open difference", "open differences")}, ${file.exceptions.length} accepted. ${file.approvers.line}`}</p>
+            <p className="tb-soft">{`From ${made.from} to ${made.to}.`}</p>
+            <p>{`${count(file.sweeps.lists.length, "sweep", "sweeps")}, ${count(file.timeToStop.length, "stop request", "stop requests")}, ${count(file.findings.items.length, "open difference", "open differences")}, ${file.exceptions.length} accepted. ${file.approvers.line}`}</p>
             {file.integrity.chain.ok ? null : (
               <Notice tone="needs-you" role="alert">
                 The chain of events is broken. A row of the history was changed. The file says where.
