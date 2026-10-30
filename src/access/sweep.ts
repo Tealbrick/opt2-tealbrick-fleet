@@ -7,7 +7,7 @@
 import { ulid } from "@opt2-tealbrick/manifest";
 import type { Db, JobContext, JobOutcome, Json } from "@opt2-tealbrick/miniapp-sdk";
 import { type AccessEnv, absentAnswer, inBackoff, noteRead, noteStop, presence, readPage } from "./client.ts";
-import { noteEnded, noteSweepStores } from "./history.ts";
+import { endedWriter, noteSweepStores } from "./history.ts";
 import { ACCESS_TARGETS, type AccessItem, type AccessTarget, LIST_LIMITS, type ListSubject, type NotShown, onlyAsked, personSubject, storeItems, TARGET_KINDS } from "./items.ts";
 
 export const SWEEP_JOB = "access_sweep";
@@ -42,7 +42,8 @@ interface SweepState {
 export type SweepEnv = AccessEnv & Pick<JobContext, "db" | "job" | "checkpoint"> & { now?: () => number };
 
 /** Rows of this target not seen by this sweep, except what the rule keeps. Runs in the transaction of the last page. */
-export function deleteUnseen(db: Db, target: AccessTarget, s: Pick<SweepState, "sweepId" | "at" | "phase" | "after" | "keptAll" | "keptPeople">, endedAt = Date.now()): number {
+export function deleteUnseen(db: Db, target: AccessTarget, s: Pick<SweepState, "sweepId" | "at" | "phase" | "after" | "keptAll" | "keptPeople">, endedAt: number): number {
+  const ended = endedWriter(db, s.sweepId, endedAt, target);
   const coveredByPeople = s.phase === "people";
   const keptAll = new Set(s.keptAll.map((n) => n.kind));
   const keptPeople = new Set(s.keptPeople.map((n) => n.kind));
@@ -54,7 +55,7 @@ export function deleteUnseen(db: Db, target: AccessTarget, s: Pick<SweepState, "
     const kind = String(r.kind);
     // Not in the `all` answer: only a people answer covered it, and only for a person who was asked about.
     if (keptAll.has(kind) && (!coveredByPeople || keptPeople.has(kind) || r.subject_kind !== "person" || !people.has(String(r.subject_id)) || String(r.subject_id) > s.after)) continue;
-    noteEnded(db, s.sweepId, endedAt, target, r);
+    ended(r);
     del.run(target, r.item_id);
     n++;
   }
@@ -93,7 +94,9 @@ export async function sweepTick(_input: Json, env: SweepEnv): Promise<JobOutcome
     if (target === undefined) {
       env.checkpoint(cur as unknown as Json, (db) => {
         db.prepare("UPDATE fleet_sweeps SET finished_at = ?, calls = ?, stores_read = ? WHERE id = ?").run(now(), cur.calls, cur.read, cur.sweepId);
-        noteSweepStores(db, cur.sweepId);
+        // how far the log went: a record takes the list of this sweep from the log up to here, never from a clock
+        const mark = noteSweepStores(db, cur.sweepId);
+        if (mark !== null) db.prepare("UPDATE fleet_sweeps SET history_seq = ? WHERE id = ?").run(mark, cur.sweepId);
       });
       return { status: "done", result: { sweepId: cur.sweepId, storesRead: cur.read, calls: cur.calls } };
     }
