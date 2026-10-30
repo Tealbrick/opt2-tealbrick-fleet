@@ -53,12 +53,13 @@ export function tickDates(db: Db, seen: Seen, now = Date.now(), onError?: (e: un
     const key = `until:${r.kind}:${r.id}:${r.at}`;
     next.add(key);
     if (!seen.has(key)) continue;
+    // Checked here, by the window: there is nobody to send a confirm, and one person with many agents must still stop.
     const { used, limit } = capState(db, now);
     if (used >= limit) {
       out.waiting++;
       continue;
     }
-    if (!attempt(() => transition(db, { kind: r.kind, id: r.id, to: "suspended", reason: "contract_ended", note: "The end date passed.", actor: SYSTEM }, now), onError)) continue;
+    if (!attempt(() => transition(db, { kind: r.kind, id: r.id, to: "suspended", reason: "contract_ended", note: "The end date passed.", actor: SYSTEM, noCap: true }, now), onError)) continue;
     next.delete(key);
     out.stopped++;
   }
