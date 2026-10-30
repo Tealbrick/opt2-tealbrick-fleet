@@ -57,7 +57,10 @@ export function setAgentMoved(db: Db, input: Parameters<typeof store.setAgent>[1
     }
     if (changing && input.owner && old?.owner_id !== null && !opts.transfer) {
       const cur = db.prepare("SELECT lifecycle FROM fleet_people WHERE id = ?").get(old?.owner_id as string)?.lifecycle;
-      if (cur === "suspended" || cur === "leaving" || cur === "archived") fail("use_transfer", "The owner is stopped, and may hold this agent's key. Use Stop and remove access, and choose Move to a new owner: it replaces the key.", 409);
+      // An agent with its own stop stays stopped under any owner: this lifts nothing, and it is how such an agent finds an active owner.
+      const own = db.prepare("SELECT lifecycle FROM fleet_agents WHERE id = ?").get(input.agent)?.lifecycle;
+      const ownStop = own === "suspended" || own === "leaving" || own === "archived";
+      if (!ownStop && (cur === "suspended" || cur === "leaving" || cur === "archived")) fail("use_transfer", "The owner is stopped, and may hold this agent's key. Use Stop and remove access, and choose Move to a new owner: it replaces the key.", 409);
     }
     const agent = store.setAgent(db, input, now);
     if (changing) {

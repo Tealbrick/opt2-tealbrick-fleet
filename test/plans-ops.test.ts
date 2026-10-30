@@ -855,7 +855,7 @@ test("D2, choices at the first step: stop, transfer and keep all land in one dra
   assert.equal(w.core.data.agents[HENRY]?.keys, 0);
   assert.equal(w.core.data.agents[SALES]?.keys, 0);
   assert.equal(w.core.data.agents[kept]?.keys, 1, "keep running keeps its key, and the page says the person who left may hold it");
-  const rows = loadColleagues(w.db, Date.now()).byId;
+  const rows = loadColleagues(w.db, w.clock.t).byId;
   for (const a of [HENRY, SALES, kept]) assert.ok(!rows.get(`agent:${a}`)?.findings.some((f) => f.code === "key_not_decided"), a);
   const view = (await run("plan_get", { plan: id }, ctxOf(w))).plans[0];
   assert.doesNotMatch(String(view.note), /stay paused with the key/);
@@ -1036,4 +1036,31 @@ test("N3-3: a transferred agent's things stay, ticked or not; N3-9: bringing a p
   await run("lifecycle_set", { kind: "person", id: v.ann.id, to: "active", reason: "mistake" }, ctxOf(v));
   const d = await colleagueDetail(ctxOf(v), "person", v.ann.id);
   assert.ok(d.notices.some((n: string) => /sender bar in Connect/.test(n)));
+});
+
+test("N2-1 review: a transfer keeps the agent stopped until the owner resumes it: the floor does not lift before the new key; an agent with its own stop can find an active owner by agent_set", async () => {
+  const { directoryFeed } = await import("../src/feed.ts");
+  const w = makeWorld();
+  const bob = store.setPerson(w.db, { name: "Bob" }, w.clock.t);
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: HENRY, decision: "transfer", newOwner: bob.id }] }, ctxOf(w));
+  assert.equal(stateOf(w.db, "agent", HENRY), "suspended");
+  const feed = directoryFeed(w.db, { accept: ["lifecycle"] }) as { agents: { id: string; floor?: boolean }[] };
+  assert.equal(feed.agents.find((a) => a.id === HENRY)?.floor, true, "refused until its key is new and the owner resumes it");
+
+  const v = makeWorld();
+  const carol = store.setPerson(v.db, { name: "Carol" }, v.clock.t);
+  set(v.db, "agent", HENRY, "leaving", {}, v.clock.t);
+  set(v.db, "person", v.ann.id, "leaving", {}, v.clock.t);
+  await run("agent_set", { agent: HENRY, owner: carol.id }, ctxOf(v));
+  assert.equal(stateOf(v.db, "agent", HENRY), "leaving", "its own stop stands");
+});
+
+test("N3-3 review: an agent both offboarded and rotated is closing: its items end", async () => {
+  const w = makeWorld();
+  w.connect.add(agentItem({ id: "account_as_itself:a", kind: "account_as_itself" }));
+  leave(w);
+  const id = w.makePlan({ kind: "agent", id: HENRY, transfers: [HENRY] });
+  await w.tick(id);
+  assert.equal(w.item(id, "account_as_itself:a").state, "pending");
 });
