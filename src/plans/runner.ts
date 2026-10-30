@@ -270,7 +270,8 @@ function absorb(pc: PlanCtx, p: Row, target: string, items: readonly AccessItem[
       let code: string | null = null;
       if (!item.revocable) state = item.level === "info" ? "listed" : "manual";
       // The owner confirmed nothing in a plan the system opened: what needs a confirm waits for a plan he makes. Only what stands on his approval in Portal runs.
-      else if (!wanted || (phase === "now" && p.trigger_kind === "system")) state = "listed";
+      // A transferred agent goes on working: Portal's review says it keeps its access to apps. Its things stay, ticked or not (N3-3).
+      else if (!wanted || (phase === "now" && p.trigger_kind === "system") || (db.prepare("SELECT 1 FROM fleet_plan_steps WHERE plan_id = ? AND op = 'agents.rotate' AND agent_id = ?").get(id, subjectId) && !db.prepare("SELECT 1 FROM fleet_plan_steps WHERE plan_id = ? AND op = 'agents.offboard' AND agent_id = ?").get(id, subjectId))) state = "listed";
       else if (tick?.digest !== undefined && tick.digest !== item.digest) {
         state = "changed";
         code = "changed_since_preview";

@@ -41,7 +41,9 @@ export function applyDecisions(db: Db, s: Subject, decisions: readonly AgentDeci
     }
     if (!d.newOwner) fail("input_invalid", "Name the new owner.", 400);
     if (d.newOwner === a.owner_id) fail("input_invalid", "Name a new owner. This is the owner now.", 400);
-    setAgentMoved(db, { agent: d.agent, owner: d.newOwner as string }, { kind: "owner", id: actor.id }, now);
+    setAgentMoved(db, { agent: d.agent, owner: d.newOwner as string }, { kind: "owner", id: actor.id }, now, { transfer: true });
+    // The stop came from the old owner, and the new owner would lift it while the old key lives. So the agent holds its own stop until the owner resumes it, after the new key.
+    transition(db, { kind: "agent", id: d.agent, to: "suspended", reason: "role_changed", note: "Moved to a new owner. It stays stopped until you resume it, after its key is replaced.", actor, noCap: true }, now);
     moved.push(d.agent);
   }
   return moved;
