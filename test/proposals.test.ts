@@ -649,7 +649,7 @@ test("C88 a/b: no agent op, hook, event, review verdict or timer tick calls rule
   assert.ok(timerRules.calls.length >= 1, "the timer did poll");
   assert.deepEqual([...new Set(timerRules.ops())], ["draft_status"], "the timer reads; it never submits");
   // onStart/onStop wire it (stopped on stop)
-  await definition.onStart?.({ db, callApp: timerRules.callApp, log } as never);
+  await definition.onStart?.({ db, callApp: timerRules.callApp, log, schedule: () => {} } as never);
   await definition.onStop?.({} as never);
 });
 
