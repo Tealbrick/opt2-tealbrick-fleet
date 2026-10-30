@@ -2,6 +2,17 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
+## 0.4.0-dev.4 - 2026-10-30
+
+C380 pages for inventory and plans, DEV only. Not for stable until Martin has read C380-DECISIONS.md.
+
+- "See what would stop": a preview of Stop and remove access, per app. "Not installed", "Could not be read", "Refused" and "reports nothing" read as different facts.
+- The person or agent page shows access by app. Access has a Differences tab: what no longer matches, with Accept with a reason until a date, and "Not checked yet" apart from "No differences".
+- A stop now shows its plan live: each step in the server's words, and only a step the owner of the data proved reads "Proved". Open approval in Portal, Try again, Take the request back. The plan's note is shown.
+- The person flow gains the step "What stops" with ticks, and "Pause and transfer" with a new owner. A retry goes on from what already went through.
+- The Summary and the nav show alerts that reached nobody, with "No message was sent".
+- The "Not changed" block names the limits of the sender bar: channels and groups, tool accounts, stored messages, new handles, old edits, and email, Teams and Discord.
+
 ## 0.4.0-dev.3 - 2026-10-30
 
 C380 plan runner, DEV only. Not for stable until Martin has read C380-DECISIONS.md.
