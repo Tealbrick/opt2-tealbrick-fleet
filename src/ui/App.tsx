@@ -23,14 +23,14 @@ const STILLS = new URL("./stills/", import.meta.url).href;
 const ROUTES = { teams: "", topology: "topology", access: "access", reviews: "reviews", rules: "contact-rules", people: "people", agents: "agents", identities: "identities", holds: "holds" } as const;
 const PAGES = [
   { id: "teams", label: "Teams" },
-  { id: "topology", label: "Topology" },
+  { id: "topology", label: "Who owns what" },
   { id: "access", label: "Access" },
-  { id: "reviews", label: "Trust reviews" },
+  { id: "reviews", label: "Reviews" },
   { id: "rules", label: "Contact rules" },
   { id: "people", label: "People" },
   { id: "agents", label: "Agents" },
   { id: "identities", label: "Identities" },
-  { id: "holds", label: "Holds" },
+  { id: "holds", label: "Waiting for approval" },
 ];
 
 export function App() {
@@ -83,7 +83,7 @@ export function App() {
       }
     >
       {!signedIn ? null : nav.page === "holds" ? (
-        <HoldsPage list={holds} only={nav.hold} empty="No calls wait for your approval." />
+        <HoldsPage title="Waiting for approval" list={holds} only={nav.hold} empty="No calls wait for your approval." />
       ) : nav.page === "topology" ? (
         <TopologyPage portalHref={portalLink} />
       ) : nav.page === "access" ? (
