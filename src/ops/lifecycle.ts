@@ -21,6 +21,7 @@ import { colleagueDetail, colleaguesList, grantsOf, readTopology, summaryGet } f
 import { fail } from "../meta.ts";
 import { planCtxOf } from "../plans/context.ts";
 import { assertAllClosed, type CloseResult, closeOpenPlans } from "../plans/control.ts";
+import { kickBarRun } from "../plans/jobs.ts";
 import { openPlansOf } from "../plans/plan.ts";
 import { op } from "./op.ts";
 
@@ -116,6 +117,7 @@ export const lifecycleOps = {
         if (closed && closed.withdrawn > 0 && e instanceof TbError) throw new TbError(e.code, `${e.message} The request in Portal was taken back already, and this entry did not change.`, e.httpStatus);
         throw e;
       }
+      if (input.kind === "person" && input.to === "leaving") kickBarRun(ctx as never, now);
       return { colleague: await colleagueDetail(ctx, input.kind, input.id), transition: made ? { from: made.from, to: made.to, event: made.event } : null };
     },
   }),
