@@ -14,7 +14,8 @@ export interface FloorView {
 }
 export interface FloorStatus {
   version: string;
-  feedRevision: number;
+  /** null: Rules has not read a full feed yet */
+  feedRevision: number | null;
   entries: number;
   lastGateAt: string | null;
 }
@@ -35,7 +36,7 @@ const empty = (state: FloorState): FloorView => ({ state, text: FLOOR_TEXT[state
 /** Pure: the words for what was read. `rev` is the feed revision of the change the page is about. */
 export function floorView(read: FloorStatus | Exclude<FloorState, "confirmed" | "not_confirmed">, rev: number, now: number, agentsRun: boolean): FloorView {
   if (typeof read === "string") return empty(read);
-  const state: FloorState = read.feedRevision >= rev ? "confirmed" : "not_confirmed";
+  const state: FloorState = read.feedRevision !== null && read.feedRevision >= rev ? "confirmed" : "not_confirmed";
   const gateMs = read.lastGateAt === null ? Number.NaN : Date.parse(read.lastGateAt);
   const gateNote = !agentsRun ? null : read.lastGateAt === null ? "Rules has not checked a call yet." : Number.isFinite(gateMs) && gateMs + GATE_STALE_MS < now ? `Rules has not checked a call since ${new Date(gateMs).toISOString()}.` : null;
   return { state, text: FLOOR_TEXT[state], version: read.version, feedRevision: read.feedRevision, entries: read.entries, lastGateAt: read.lastGateAt, gateNote };
@@ -43,7 +44,7 @@ export function floorView(read: FloorStatus | Exclude<FloorState, "confirmed" | 
 
 const isStatus = (o: unknown): o is FloorStatus => {
   const r = o as Record<string, unknown> | null;
-  return !!r && typeof r.version === "string" && Number.isInteger(r.feedRevision) && Number.isInteger(r.entries) && (r.lastGateAt === null || typeof r.lastGateAt === "string");
+  return !!r && typeof r.version === "string" && (r.feedRevision === null || Number.isInteger(r.feedRevision)) && Number.isInteger(r.entries) && (r.lastGateAt === null || typeof r.lastGateAt === "string");
 };
 
 const OLDER_CODES = new Set(["unknown_tool", "unknown_op"]);
