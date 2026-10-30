@@ -981,3 +981,58 @@ test("D2 review: plan_send when the entry moves during the call to Portal: the o
   });
   assert.equal(w.plan(id).state, "replaced");
 });
+
+test("B10: a second plan_send carries the earlier new-key step: the agent already moved, so only the older plan knew; the draft asks for it again", async () => {
+  const w = makeWorld();
+  const bob = store.setPerson(w.db, { name: "Bob" }, w.clock.t);
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  const first = (await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: HENRY, decision: "transfer", newOwner: bob.id }] }, ctxOf(w))).plans[0].id;
+  await w.tick(first);
+  const out = await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: SALES, decision: "stop" }] }, ctxOf(w));
+  assert.equal(w.plan(first).state, "replaced");
+  await w.tick(out.plans[0].id);
+  const steps = w.core.open()[0]?.steps.map((s) => `${s.opId} ${s.agt}`).sort();
+  assert.deepEqual(steps, [`agents.offboard ${SALES}`, `agents.pause ${HENRY}`, `agents.rotate ${HENRY}`].sort());
+  // a rotate already done is not asked for again
+  const v = makeWorld();
+  const carol = store.setPerson(v.db, { name: "Carol" }, v.clock.t);
+  set(v.db, "person", v.ann.id, "leaving", {}, v.clock.t);
+  const p1 = (await run("plan_send", { kind: "person", id: v.ann.id, decisions: [{ agent: HENRY, decision: "transfer", newOwner: carol.id }] }, ctxOf(v))).plans[0].id;
+  await v.tick(p1);
+  approveAndDeliver(v, String(v.plan(p1).draft_key), HENRY, SALES);
+  await v.tick(p1);
+  assert.equal(v.plan(p1).state, "done");
+  const p2 = (await run("plan_send", { kind: "person", id: v.ann.id, decisions: [{ agent: SALES, decision: "stop" }] }, ctxOf(v))).plans[0].id;
+  await v.tick(p2);
+  assert.deepEqual(v.core.open()[0]?.steps, [{ opId: "agents.offboard", agt: SALES }]);
+});
+
+test("N2-2: the feed sends one epoch to a reader of the lifecycle, on full, unchanged and empty answers; a restore replaces it; a fresh install has its own; a reader that does not ask gets none", async () => {
+  const { directoryFeed } = await import("../src/feed.ts");
+  const { migratedDb } = await import("./helpers.ts");
+  const w = makeWorld();
+  const full = directoryFeed(w.db, { accept: ["lifecycle"] }) as { epoch: string; revision: number };
+  assert.match(full.epoch, /^[A-Za-z0-9_-]{1,64}$/);
+  const same = directoryFeed(w.db, { accept: ["lifecycle"], sinceRevision: full.revision }) as { epoch: string; unchanged: boolean };
+  assert.equal(same.unchanged, true);
+  assert.equal(same.epoch, full.epoch);
+  assert.equal("epoch" in directoryFeed(w.db, {}), false);
+  const other = migratedDb();
+  const empty = directoryFeed(other, { accept: ["lifecycle"] }) as { epoch: string; agents: unknown[] };
+  assert.equal(empty.agents.length, 0);
+  assert.notEqual(empty.epoch, full.epoch, "a fresh install is another origin");
+  // the output schema of the op takes it
+  const spec = manifest.operations.find((o) => o.id === "directory_feed") as unknown as { output: Parameters<typeof validateAgainstSchema>[0] };
+  assert.deepEqual(validateAgainstSchema(spec.output, full as never).ok, true);
+  assert.deepEqual(validateAgainstSchema(spec.output, same as never).ok, true);
+  // a restore: the SDK's mark is new. The first read after it, before any boot code, has a new epoch. The file's revision can be the same
+  w.db.exec("CREATE TABLE IF NOT EXISTS tb_meta (key TEXT PRIMARY KEY, value TEXT)");
+  w.db.prepare("INSERT INTO tb_meta (key, value) VALUES ('restore_applied', 'archive-1')").run();
+  const after = directoryFeed(w.db, { accept: ["lifecycle"], sinceRevision: full.revision }) as { epoch: string };
+  assert.notEqual(after.epoch, full.epoch);
+  const stable = directoryFeed(w.db, { accept: ["lifecycle"] }) as { epoch: string };
+  assert.equal(stable.epoch, after.epoch, "once per restore");
+  // restoring the same archive again brings back the older restore_seen, so it counts again
+  w.db.prepare("DELETE FROM fleet_settings WHERE key = 'restore_seen'").run();
+  assert.notEqual((directoryFeed(w.db, { accept: ["lifecycle"] }) as { epoch: string }).epoch, after.epoch);
+});
