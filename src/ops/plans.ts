@@ -6,6 +6,7 @@ import { planCtxOf } from "../plans/context.ts";
 import { assertAllClosed, closeOpenPlans, retryPlan } from "../plans/control.ts";
 import { kickPlans } from "../plans/jobs.ts";
 import { checkPlan, createPlan, getPlan, OPEN_SQL, openPlansOf, type Row } from "../plans/plan.ts";
+import { isOpenPlan } from "../plans/steps.ts";
 import { planView } from "../plans/view.ts";
 import { assertOwner } from "./lifecycle.ts";
 import { op } from "./op.ts";
@@ -62,8 +63,10 @@ export const planOps = {
     async run(input, ctx) {
       assertOwner(ctx.caller);
       const rows = groupOf(ctx.db, input.plan);
-      await closeOpenPlans(planCtxOf(ctx as never), rows.filter((p) => ["preparing", "waiting", "applying", "running", "partial"].includes(String(p.state))), "cancelled");
-      return { plans: viewAll(ctx.db, rows.map((r) => String(r.id))) };
+      const closed = await closeOpenPlans(planCtxOf(ctx as never), rows.filter((p) => isOpenPlan(String(p.state))), "cancelled");
+      // Nothing moved: an error, as for any other caller. Some parts moved: an answer, with the count and each part's state.
+      if (closed.withdrawn + closed.ended === 0) assertAllClosed(closed);
+      return { left: closed.left, plans: viewAll(ctx.db, rows.map((r) => String(r.id))) };
     },
   }),
 } satisfies Partial<Record<OpId, HandlerSpec>>;

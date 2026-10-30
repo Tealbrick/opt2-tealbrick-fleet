@@ -8,7 +8,10 @@ import { cancelUnsent, isAppliedHere, type PlanCtx } from "./runner.ts";
 import { ASK_AGAIN_STATES, isOpenPlan, REISSUE_MS } from "./steps.ts";
 
 export interface CloseResult {
-  taken: number;
+  /** parts Portal really took back */
+  withdrawn: number;
+  /** parts that ended here with no call that took anything back: past Core, or the rail is gone */
+  ended: number;
   /** parts that still stand in Portal */
   left: number;
   /** one of those: the owner approved it first */
@@ -21,7 +24,7 @@ export interface CloseResult {
  */
 export async function closeOpenPlans(pc: PlanCtx, plans: readonly Row[], to: "replaced" | "withdrawn" | "cancelled"): Promise<CloseResult> {
   const rail = pc.rail;
-  const out: CloseResult = { taken: 0, left: 0, applied: false };
+  const out: CloseResult = { withdrawn: 0, ended: 0, left: 0, applied: false };
   // Nothing is touched when these say no.
   if (plans.some((p) => p.state === "applying" || p.draft_state === "applying")) throw new TbError("plan_applying", "Portal is applying this plan. Try again in a minute.", 409);
   if (to === "replaced" && plans.some(isAppliedHere)) throw new TbError("plan_open", "A plan for this entry is past Portal and still open. Cancel it or wait for it.", 409);
@@ -29,27 +32,30 @@ export async function closeOpenPlans(pc: PlanCtx, plans: readonly Row[], to: "re
     const id = String(p.id);
     if (isAppliedHere(p)) {
       if (movePlan(pc.db, id, String(p.state), "cancelled", { code: "cancelled_after_apply" }, pc.now())) cancelUnsent(pc.db, id, pc.now());
-      out.taken++;
+      out.ended++;
       continue;
     }
     let code: string | null = null;
     // Whatever the mode says: a draft may stand in Portal since before the rail went away.
     if (rail && p.draft_key !== null) {
       const answer = await askRail(() => rail.withdraw(String(p.draft_key)));
-      if (answer.kind === "draft_state" || answer.kind === "wait" || answer.kind === "full") {
+      // Core answers draft_state with a reason for a draft that ran out: that one cannot be applied any more, so it is gone.
+      const approved = answer.kind === "draft_state" && answer.reason === null;
+      if (approved || answer.kind === "wait" || answer.kind === "full") {
         out.left++;
-        if (answer.kind === "draft_state") out.applied = true;
-        notePlan(pc.db, id, String(getPlan(pc.db, id)?.state), { code: answer.kind === "draft_state" ? "approved_first" : "not_reached" }, pc.now());
+        if (approved) out.applied = true;
+        notePlan(pc.db, id, String(getPlan(pc.db, id)?.state), { close_note: approved ? "approved_first" : "not_reached" }, pc.now());
         continue;
       }
       // The rail is gone or refused: the plan ends, and its words say the draft may stand. A later apply shows as a difference, never silently.
-      if (answer.kind === "off" || answer.kind === "refused") code = "not_taken_back";
+      if (answer.kind !== "ok" && answer.kind !== "unknown_key" && answer.kind !== "draft_state") code = "not_taken_back";
     } else if (!rail && p.draft_key !== null) code = "not_taken_back";
     const now = pc.now();
     const cur = getPlan(pc.db, id) as Row;
     const did = stepsOf(pc.db, id).some((s) => s.phase === "core" && s.output_json !== null);
-    if (isOpenPlan(String(cur.state)) && movePlan(pc.db, id, String(cur.state), to, { code: code ?? (did ? "partly_applied" : null) }, now)) cancelUnsent(pc.db, id, now);
-    out.taken++;
+    if (isOpenPlan(String(cur.state)) && movePlan(pc.db, id, String(cur.state), to, { code: code ?? (did ? "partly_applied" : null), close_note: null }, now)) cancelUnsent(pc.db, id, now);
+    if (code === null) out.withdrawn++;
+    else out.ended++;
   }
   return out;
 }
@@ -57,7 +63,7 @@ export async function closeOpenPlans(pc: PlanCtx, plans: readonly Row[], to: "re
 /** A state change does not go on while a draft can still be applied. The message says what already happened, so the owner reads the true state. */
 export function assertAllClosed(r: CloseResult): void {
   if (r.left === 0) return;
-  const before = r.taken > 0 ? ` ${r.taken} of ${r.taken + r.left} parts were taken back already. Nothing else changed.` : "";
+  const before = r.withdrawn > 0 ? ` ${r.withdrawn} of ${r.withdrawn + r.ended + r.left} open parts were taken back already. Nothing else changed.` : "";
   if (r.applied) throw new TbError("plan_applied", `You already approved this in Portal. It cannot be taken back here.${before}`, 409);
   throw new TbError("portal_unavailable", `Portal does not answer, so this request could still be applied. Try again.${before}`, 503);
 }
@@ -69,7 +75,7 @@ export function askAgain(db: Db, p: Row, now: number): void {
   db.transaction(() => {
     const id = String(p.id);
     const hasCore = stepsOf(db, id).some((s) => s.phase === "core");
-    if (!movePlan(db, id, String(p.state), "preparing", { draft_key: null, draft_id: null, draft_state: null, review_url: null, core_digest: null, expires_at: null, applying_since: null, applied_at: null, code: null, detail: null, rail: hasCore ? "draft" : "none", rail_code: null, next_at: 0, closed_at: null }, now)) return;
+    if (!movePlan(db, id, String(p.state), "preparing", { draft_key: null, draft_id: null, draft_state: null, review_url: null, core_digest: null, expires_at: null, applying_since: null, applied_at: null, code: null, close_note: null, detail: null, rail: hasCore ? "draft" : "none", rail_code: null, next_at: 0, closed_at: null }, now)) return;
     db.prepare("UPDATE fleet_plan_steps SET state = 'pending', code = NULL, detail = NULL, tries = 0, retry_at = 0, updated_at = ? WHERE plan_id = ? AND state = 'cancelled'").run(now, id);
     db.prepare("UPDATE fleet_plan_steps SET state = 'pending', code = NULL, detail = NULL, updated_at = ? WHERE plan_id = ? AND phase = 'core' AND state NOT IN ('done', 'reported')").run(now, id);
   });

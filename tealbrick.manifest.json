@@ -9285,7 +9285,7 @@
     {
       "id": "plan_cancel",
       "title": "Cancel a stop plan",
-      "description": "Take the request back from Portal and stop what has not run. What was already applied stays. Only you can do this.",
+      "description": "Take the request back from Portal and stop what has not run. What was already applied stays. Each part of a split plan answers with its own state; `left` counts the parts that still stand in Portal. Only you can do this.",
       "input": {
         "type": "object",
         "additionalProperties": false,
@@ -9304,9 +9304,14 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
+          "left",
           "plans"
         ],
         "properties": {
+          "left": {
+            "type": "integer",
+            "minimum": 0
+          },
           "plans": {
             "type": "array",
             "items": {

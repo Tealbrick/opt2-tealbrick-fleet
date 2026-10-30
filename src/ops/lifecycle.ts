@@ -20,7 +20,7 @@ import { type Actor, assertCap, loadSubject, setDates, setKeepRunning, transitio
 import { colleagueDetail, colleaguesList, grantsOf, readTopology, summaryGet } from "../lifecycle/view.ts";
 import { fail } from "../meta.ts";
 import { planCtxOf } from "../plans/context.ts";
-import { assertAllClosed, closeOpenPlans } from "../plans/control.ts";
+import { assertAllClosed, type CloseResult, closeOpenPlans } from "../plans/control.ts";
 import { openPlansOf } from "../plans/plan.ts";
 import { op } from "./op.ts";
 
@@ -95,6 +95,7 @@ export const lifecycleOps = {
       // T4, T6 (§2): the draft is taken back first, and only then the state moves. So the whole change is tried first and rolled back: what it would refuse takes nothing back, with its own dates and decisions counted. No await in the try.
       const undoing = input.to === "active" || input.to === "proposed";
       const open = undoing ? openPlansOf(db, input.kind, input.id) : [];
+      let closed: CloseResult | null = null;
       if (open.length > 0) {
         try {
           db.transaction(() => {
@@ -104,14 +105,15 @@ export const lifecycleOps = {
         } catch (e) {
           if (!(e instanceof TriedOnly)) throw e;
         }
-        assertAllClosed(await closeOpenPlans(planCtxOf(ctx as never), open, "withdrawn"));
+        closed = await closeOpenPlans(planCtxOf(ctx as never), open, "withdrawn");
+        assertAllClosed(closed);
       }
       let made: ReturnType<typeof change>;
       try {
         made = change();
       } catch (e) {
         // The entry moved during the call to Portal. The owner reads what is true: the request is gone, the entry is not changed.
-        if (open.length > 0 && e instanceof TbError) throw new TbError(e.code, `${e.message} The request in Portal was taken back already, and this entry did not change.`, e.httpStatus);
+        if (closed && closed.withdrawn > 0 && e instanceof TbError) throw new TbError(e.code, `${e.message} The request in Portal was taken back already, and this entry did not change.`, e.httpStatus);
         throw e;
       }
       return { colleague: await colleagueDetail(ctx, input.kind, input.id), transition: made ? { from: made.from, to: made.to, event: made.event } : null };

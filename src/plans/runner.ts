@@ -172,7 +172,8 @@ async function syncDraft(pc: PlanCtx, p: Row, steps: readonly Row[]): Promise<vo
     endPlan(pc, id, state, "failed", { code: "core_mismatch", detail: "Portal answered about other steps. Nothing more runs. Open Portal and check." }, now);
     return;
   }
-  const fields = { draft_id: get.draftId, draft_state: get.state, review_url: get.reviewUrl, core_digest: get.digest, expires_at: get.expiresAt ? Date.parse(get.expiresAt) : null, code: null, rail: "draft", rail_code: null };
+  // Applied after all: the note about a cancel that did not reach Portal has said what it could.
+  const fields = { ...(get.state === "applied" ? { close_note: null } : {}), draft_id: get.draftId, draft_state: get.state, review_url: get.reviewUrl, core_digest: get.digest, expires_at: get.expiresAt ? Date.parse(get.expiresAt) : null, code: null, rail: "draft", rail_code: null };
   switch (get.state) {
     case "open":
     case "submitted":
@@ -551,7 +552,14 @@ export async function runDue(pc: PlanCtx, limit = 50): Promise<number> {
   const many = Number(open?.n ?? 0) >= MANY_PLANS;
   const startSweep = pc.startSweep;
   // §4: the same pace as a tick, from the plan that moved last.
-  if (many && startSweep && now - Number(lastSweepAt(db) ?? 0) >= (now - Number(open?.newest ?? 0) < FAST_WINDOW_MS ? POLL_FAST_MS : POLL_SLOW_MS)) startSweep();
+  if (many && startSweep && now - Number(lastSweepAt(db) ?? 0) >= (now - Number(open?.newest ?? 0) < FAST_WINDOW_MS ? POLL_FAST_MS : POLL_SLOW_MS)) {
+    try {
+      startSweep();
+    } catch (e) {
+      // A read that could not start stops no plan.
+      pc.warn("plans sweep not started", { reason: e instanceof Error ? e.message.slice(0, 200) : "error" });
+    }
+  }
   const ctx: PlanCtx = many ? { ...pc, sweep: () => {} } : { ...pc, sweep: undefined };
   const due = db.prepare(`SELECT id, next_at FROM fleet_plans WHERE state IN (${OPEN_SQL}) AND next_at <= ? AND ticking_until <= ? ORDER BY next_at, id LIMIT ?`).all(now, now, limit);
   let n = 0;

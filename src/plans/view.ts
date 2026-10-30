@@ -11,8 +11,8 @@ const iso = (ms: unknown): string | null => (ms === null || ms === undefined ? n
 function noteOf(db: Db, p: Row, mode: string): string | null {
   const notes: string[] = [];
   if (p.code === "not_taken_back") notes.push(NOTE_NOT_TAKEN_BACK);
-  if (p.code === "not_reached") notes.push(NOTE_NOT_REACHED);
-  if (p.code === "approved_first") notes.push(NOTE_APPROVED_FIRST);
+  if (p.close_note === "not_reached") notes.push(NOTE_NOT_REACHED);
+  if (p.close_note === "approved_first") notes.push(NOTE_APPROVED_FIRST);
   if (p.rail_code === "topology_consent") notes.push(NOTE_CONSENT);
   else if (mode === "portal_link") notes.push(NOTE_RAIL_OFF);
   if (Number(p.parts) > 1) {
