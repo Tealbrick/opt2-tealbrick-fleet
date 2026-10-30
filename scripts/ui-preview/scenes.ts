@@ -361,7 +361,7 @@ export const scenes: Scene[] = [
     expect: ["This restores nothing"],
   },
   { name: "person", path: PERSON, personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, colleague_get: ok(personDetail()) }, ready: "History", expect: ["Their agents", "Stop this person's agents and access"] },
-  ...(["Why", "Their agents", "Confirm", "Result"] as const).map((target, i): Scene => ({
+  ...(["Why", "Confirm", "Result"] as const).map((target, i): Scene => ({
     name: `person-flow-${i + 1}-${target.toLowerCase().replace(" ", "-")}`,
     path: PERSON,
     personOps: LIFECYCLE_OPS,
@@ -375,12 +375,10 @@ export const scenes: Scene[] = [
       await pick(p, "Reason", "They left");
       await dialog.getByRole("button", { name: "Next" }).click();
       if (i < 2) return;
-      await dialog.getByRole("button", { name: "Next" }).click();
-      if (i < 3) return;
       await dialog.getByRole("button", { name: "Stop", exact: true }).click();
       await dialog.getByText("Not applied: do these in Portal").waitFor();
     },
-    expect: i === 0 ? ["The mark takes effect now"] : i === 1 ? ["Henry", "Sales helper"] : i === 2 ? ["Not changed", "Their own logins", "The next screen says"] : i === 3 ? ["Not applied: do these in Portal"] : [],
+    expect: i === 0 ? ["The mark takes effect now"] : i === 1 ? ["Not changed", "Their own logins", "The next screen says"] : i === 2 ? ["Not applied: do these in Portal"] : [],
     forbid: ["last day"],
   })),
   { name: "see-what-would-stop", path: "people-and-agents", personOps: INVENTORY_OPS, strict: true, ops: invOps, ready: "Marco Rossi", steps: (p) => button(p, "See what would stop"), expect: ["This is a preview of Stop and remove access", "Could not be read", "Not installed", "Knowledge reports nothing for Henry", "A partial app lists nothing for Henry, and it cannot list everything", "Refused", "You would do this", "3 accounts have no person", "Not changed", "Reported by Connect"], assertCalls: (calls) => (calls.some((c) => c.op === "lifecycle_set") ? ["a preview called lifecycle_set"] : []) },
@@ -408,13 +406,15 @@ export const scenes: Scene[] = [
     forbid: ["Proved", "Approve"],
     assertCalls: (calls) => (calls.findIndex((c) => c.op === "lifecycle_set") < calls.findIndex((c) => c.op === "plan_send") ? [] : ["plan_send must follow lifecycle_set"]),
   },
+  { name: "person-choose-later", path: PERSON, personOps: PLAN_OPS, strict: true, ops: { ...planOps([planOf({ subject: { kind: "person", id: ID.p, name: "Marco Rossi" } })]), colleague_get: ok(personDetail({ lifecycle: "leaving", effective: "leaving", line: "Leaving", reason: "left", actions: [] })) }, ready: "History", steps: (p) => button(p, "Choose for their agents"), expect: ["Decide later", "takes back an older request"] },
+  { name: "summary-keys", path: "", personOps: PLAN_OPS, strict: true, ops: { ...planOps([]), summary_get: ok({ ...summary, keysUndecided: [{ id: ID.a, name: "Henry", text: "Paused. The key still exists until you choose." }] }) }, ready: "Ready to stop an agent?", expect: ["Paused. The key still exists until you choose.", "Henry"] },
   { name: "plan-partial", path: AGENT, personOps: PLAN_OPS, strict: true, ops: { ...planOps([PARTIAL]), colleague_get: ok(stoppedAgent(FLOOR_CONFIRMED)) }, ready: "Part of this is done", expect: ["Proved", "Refused", "Someone must do this", "Said, not proved", "Try again", "1 proved, 1 said and not proved"] },
   { name: "plan-done", path: AGENT, personOps: PLAN_OPS, strict: true, ops: { ...planOps([planOf({ state: "done", headline: "Done: every step is proved", reviewUrl: null, closedAt: "2026-10-30T16:10:00Z", canCancel: false, counts: { proved: 1, said: 0, manual: 0, open: 0 }, steps: [pStep({ state: "done", text: "Stopped at the bridge.", final: true })] })]), colleague_get: ok(stoppedAgent(FLOOR_CONFIRMED)) }, ready: "every step is proved", forbid: ["Take the request back", "Open approval in Portal"] },
   { name: "plan-portal-link", path: AGENT, personOps: PLAN_OPS, strict: true, ops: { ...planOps([planOf({ mode: "portal_link", reviewUrl: null, headline: "Not applied: do these in Portal", note: "Portal does not take requests from Governance yet.", steps: [pStep({ text: "Not applied: do this in Portal" })] })]), colleague_get: ok(stoppedAgent(FLOOR_PENDING)) }, ready: "Not applied: do these in Portal", expect: ["Not done yet"], forbid: ["Open approval in Portal"] },
   { name: "plan-none-yet", path: AGENT, personOps: PLAN_OPS, strict: true, ops: { ...planOps([]), colleague_get: ok(stoppedAgent(FLOOR_PENDING)) }, ready: "Prepare the request" },
   { name: "plan-load-error", path: AGENT, personOps: PLAN_OPS, strict: true, ops: { ...planOps([]), plan_get: fail("internal"), colleague_get: ok(stoppedAgent(FLOOR_PENDING)) }, ready: "Try again", forbid: ["Prepare the request"] },
   { name: "summary-alert", path: "", personOps: PLAN_OPS, strict: true, ops: planOps([planOf()], [{ plan: "pln_01J00000000000000000000P1", kind: "waiting", text: "A stop request waits for your approval. No message was sent." }]), ready: "No message was sent", expect: ["Open Henry"] },
-  ...(["Why", "Their agents", "What stops", "Confirm", "Result"] as const).map((target, i): Scene => ({
+  ...(["Why", "What stops", "Confirm", "Result"] as const).map((target, i): Scene => ({
     name: `person-plan-${i + 1}-${target.toLowerCase().replace(" ", "-")}`,
     path: PERSON,
     personOps: PLAN_OPS,
@@ -426,27 +426,25 @@ export const scenes: Scene[] = [
       const dialog = p.getByRole("dialog");
       if (i < 1) return;
       await pick(p, "Reason", "They left");
-      await dialog.getByRole("button", { name: "Next" }).click();
-      if (i < 2) return;
-      await dialog.getByRole("radio", { name: /Pause and transfer/ }).first().click();
+      await dialog.getByRole("radio", { name: /Pause and move to a new owner/ }).first().click();
       await pick(p, "New owner of Henry", "Bob Bianchi");
       await dialog.getByRole("button", { name: "Next" }).click();
-      if (i < 3) return;
+      if (i < 2) return;
       await dialog.getByText("Reported by Connect").first().waitFor();
       await dialog.getByRole("button", { name: "Next" }).click();
-      if (i < 4) return;
+      if (i < 3) return;
       await dialog.getByRole("button", { name: "Stop", exact: true }).click();
       await dialog.getByText("Open approval in Portal").waitFor();
     },
-    expect: i === 1 ? ["Pause and transfer", "A new key is needed"] : i === 2 ? ["Would stop", "Could not be read"] : i === 3 ? ["Not changed", "move to a new owner"] : i === 4 ? ["Open approval in Portal"] : [],
+    expect: i === 0 ? ["Pause and move to a new owner", "A new key is needed", "Decide later", "It is only paused, when you approve in Portal"] : i === 1 ? ["Would stop", "Could not be read"] : i === 2 ? ["Not changed", "1 move to a new owner", "1 decided later"] : i === 3 ? ["Open approval in Portal"] : [],
     assertCalls:
-      i === 4
+      i === 3
         ? (calls) => {
             const order = calls.map((c) => c.op).filter((o) => ["agent_set", "lifecycle_set", "plan_send"].includes(o));
-            const send = calls.find((c) => c.op === "plan_send")?.input as { transfers?: string[]; items?: unknown[] } | undefined;
+            const send = calls.find((c) => c.op === "plan_send")?.input as { decisions?: { agent: string; decision: string; newOwner?: string }[]; items?: unknown[] } | undefined;
             const bad: string[] = [];
-            if (order.join() !== "lifecycle_set,agent_set,plan_send") bad.push(`order: ${order.join()}`);
-            if (!send?.transfers?.includes(ID.a)) bad.push("no transfer in plan_send");
+            if (order.join() !== "lifecycle_set,plan_send") bad.push(`order: ${order.join()}`);
+            if (send?.decisions?.length !== 1 || send.decisions[0]?.decision !== "transfer" || send.decisions[0]?.agent !== ID.a) bad.push(`decisions: ${JSON.stringify(send?.decisions)}`);
             if (!send?.items?.length) bad.push("no ticks in plan_send");
             return bad;
           }

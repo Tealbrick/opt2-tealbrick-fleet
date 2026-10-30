@@ -100,6 +100,18 @@ function SummaryBody({ data }: { data: SummaryGetOutput }) {
         </Notice>
       ) : null}
       <PlanAlerts />
+      {(data.keysUndecided ?? []).length ? (
+        <section className="tb-stack" aria-label="Keys to decide">
+          <h2 className="sub-head">{data.keysUndecided?.[0]?.text}</h2>
+          <ul className="ready">
+            {(data.keysUndecided ?? []).map((k) => (
+              <li key={k.id}>
+                <TextLink href={subjectHref("agent", k.id)}>{k.name}</TextLink>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       <div className="cards stats">
         <Stat label="Agents" value={String(data.agents.total)} note={`${data.agents.running} running, ${data.agents.paused} paused, ${data.agents.notReviewed} not reviewed`} href="./people-and-agents" />
         <Stat label="No owner" value={String(data.noOwner)} note={data.settings.defaultOwner ? `Default owner: ${data.settings.defaultOwner.name}` : "No default owner"} />
