@@ -2,6 +2,18 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
+## 0.4.0-dev.2 - 2026-10-30
+
+C380 inventory, DEV only. Not for stable until Martin has read C380-DECISIONS.md.
+
+- Governance reads what each app reports with `tb.access/1` (spec 0.1.89): every 6 hours and on "Check now" (`reconcile_now`), as SDK jobs that resume after a restart. It keeps a copy to compare with, never as authority. It changes nothing in any app.
+- New person ops: `plan_preview` (what a stop would do, per store; no state), `findings_list` (differences, computed on read), `exception_set` (accept one with a reason until a date; it changes no access), `reconcile_now`. No agent can call them.
+- "Not installed" and "Could not be read" are apart. With no consent `topology` or a cut picture, a store Governance has no grant for reads "Could not be read", because the absence of a grant does not prove the app is absent.
+- Companion `access_list` (read) on Knowledge, Task Board and Evolving Workflows. Connect follows when its 0.7.14 is on DEV. This version cannot be deployed or updated while one of those apps is deployed at a version before `access_list` (M-CP-2). A workspace without the app is not changed.
+- `summary_get` lists the stores that were read and no longer counts accepted differences.
+- SDK 0.1.43 drops `Retry-After`, so a 429 waits a fixed 30 s. Each read adds a row to Rules Decisions.
+- Rollback: E3 to dev.1 needs no data step. The copy, the read state and accepted differences stay in the tables of 0009; E3 to 0.3.2 drops them.
+
 ## 0.4.0-dev.1 - 2026-10-30
 
 C380 skeleton, DEV only. Not for stable until Martin has read C380-DECISIONS.md.
