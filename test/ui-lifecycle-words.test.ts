@@ -5,17 +5,31 @@ import { describe, it } from "node:test";
 import { NOT_CHANGED as SERVER_NOT_CHANGED } from "../src/plans/portal-link.ts";
 import { featuresOf } from "../src/ui/pages/features.ts";
 import { lifecycleError, stopCapOf } from "../src/ui/pages/lifecycle-errors.ts";
+import { pollDelay } from "../src/ui/pages/plan-poll.ts";
 import { subjectFromUrl, subjectHref } from "../src/ui/pages/subject-link.ts";
 import { afterChangeText, beforeChangeText, beforeChangeTone, floorTone, NOT_CHANGED, REASONS, reasonLabel, when } from "../src/ui/pages/words.ts";
 
 describe("features come from the ops of this build", () => {
   it("on when every op is there", () => {
-    assert.deepEqual(featuresOf(["summary_get", "colleagues_list", "colleague_get", "lifecycle_set", "plan_preview", "findings_list"]), { lifecycle: true, preview: true, differences: true });
+    assert.deepEqual(featuresOf(["summary_get", "colleagues_list", "colleague_get", "lifecycle_set", "plan_preview", "findings_list"]), { lifecycle: true, preview: true, differences: true, plans: false });
   });
   it("off when one op is missing", () => {
     assert.equal(featuresOf(["summary_get", "colleagues_list", "colleague_get"]).lifecycle, false);
     assert.equal(featuresOf(["summary_get"]).preview, false);
     assert.equal(featuresOf(["summary_get"]).differences, false);
+    assert.equal(featuresOf(["plan_send", "plan_get", "plan_retry"]).plans, false);
+    assert.equal(featuresOf(["plan_send", "plan_get", "plan_retry", "plan_cancel"]).plans, true);
+  });
+});
+
+describe("the plan polls only while it moves", () => {
+  const plan = (over: Record<string, unknown>) => ({ closedAt: null, reviewUrl: null, mode: "draft", ...over }) as never;
+  it("2 s until the request is ready, 30 s after, stops when all ended", () => {
+    assert.equal(pollDelay([plan({})]), 2000);
+    assert.equal(pollDelay([plan({ reviewUrl: "https://x" })]), 30000);
+    assert.equal(pollDelay([plan({ mode: "portal_link" })]), 30000);
+    assert.equal(pollDelay([plan({ closedAt: "2026-10-30T00:00:00Z" })]), null);
+    assert.equal(pollDelay([]), 2000);
   });
 });
 

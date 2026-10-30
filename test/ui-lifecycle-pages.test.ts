@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import { after, before, describe, it } from "node:test";
+import { after, afterEach, before, describe, it } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Window } from "happy-dom";
 import type { ReactElement } from "react";
@@ -95,16 +95,28 @@ const { TbProvider } = await import("@opt2-tealbrick/miniapp-sdk/client");
 async function flush() {
   for (let i = 0; i < 5; i++) await act(async () => new Promise((r) => setTimeout(r, 0)));
 }
+/** Unmounted after each test, also a failed one: a page left open keeps polling, and the run would never end. */
+const mounted: (() => Promise<void>)[] = [];
+afterEach(async () => {
+  for (const off of mounted.splice(0)) await off();
+});
 async function mount(el: ReactElement) {
   const host = document.createElement("div");
   document.body.appendChild(host);
   const r = createRoot(host);
+  let live = true;
+  mounted.push(async () => {
+    if (live) await act(async () => r.unmount());
+    live = false;
+    host.remove();
+  });
   await act(async () => r.render(h(TbProvider, { product: "fleet" }, el)));
   await flush();
   return {
     host,
     unmount: async () => {
-      await act(async () => r.unmount());
+      if (live) await act(async () => r.unmount());
+      live = false;
       host.remove();
     },
   };
@@ -145,10 +157,19 @@ before(async () => {
   changes = (await import(pathToFileURL(join(outDir, "ui", "pages", "change-dialogs.js")).href)) as Changes;
 });
 after(() => rmSync(outDir, { recursive: true, force: true }));
+const PLAN = (over: Record<string, unknown> = {}) => ({
+  id: "pln_1", groupId: "grp_1", part: 1, parts: 1, subject: { kind: "agent", id: "agt_A", name: "Henry" }, purpose: "suspend", trigger: "owner", state: "waiting",
+  headline: "Waiting for you in Portal", mode: "draft", note: null, reviewUrl: "https://portal.example/drafts/1", expiresAt: "2026-10-31T16:00:00Z", openedAt: "2026-10-30T16:00:00Z", closedAt: null, receiptId: null,
+  canRetry: false, canCancel: true, counts: { proved: 0, said: 0, manual: 0, open: 1 }, stores: [],
+  steps: [{ id: "s1", store: "core", storeName: "Portal", label: "Pause Henry", state: "pending", text: "Waiting for you in Portal", code: null, final: false, tries: 1 }],
+  notChanged: ["Their own logins, such as Slack, Google or a bank."],
+  ...over,
+});
 const reset = () => {
   stub.calls = [];
-  stub.answers = {};
+  stub.answers = { plan_send: ok({ plans: [PLAN()] }), plan_get: ok({ plans: [PLAN()], banners: [] }) };
 };
+const opsCalled = () => stub.calls.map((c) => c.op);
 
 describe("Summary", () => {
   it("shows the numbers, keeps Not installed apart from Could not be read, and turns a server path into a page link", async () => {
@@ -222,9 +243,11 @@ describe("People and agents, Stop now", () => {
     assert.deepEqual(stopInput(), [{ kind: "agent", id: "agt_A", to: "suspended", reason: "left" }]);
     const after = m.host.querySelector("dialog")?.textContent ?? "";
     assert.match(after, /Not confirmed: nothing may stop until you approve in Portal\./);
-    assert.match(after, /Not applied: do these in Portal/);
     assert.match(after, /Waiting for you in Portal/);
-    assert.doesNotMatch(after, /has stopped|calls stopped|Rules has this change/);
+    assert.match(after, /Open approval in Portal/);
+    assert.ok(opsCalled().indexOf("lifecycle_set") < opsCalled().indexOf("plan_send"), "the plan follows the mark");
+    assert.deepEqual(stub.calls.find((c) => c.op === "plan_send")?.input, { kind: "agent", id: "agt_A" });
+    assert.doesNotMatch(after, /has stopped|calls stopped|Rules has this change|Proved/);
     await m.unmount();
   });
   it("the stop cap: names the count and sends the server's number on the second press", async () => {
@@ -258,7 +281,7 @@ describe("People and agents, Stop now", () => {
     const dialog = m.host.querySelector("dialog") as Element;
     await chooseReason(dialog, "Security");
     await click(button(dialog, "Stop"));
-    assert.match(m.host.querySelector("dialog")?.textContent ?? "", /Not applied: do these in Portal/);
+    assert.match(m.host.querySelector("dialog")?.textContent ?? "", /Open approval in Portal/);
     assert.equal(m.host.querySelector('dialog [role="alert"]'), null);
     await m.unmount();
   });
@@ -290,6 +313,58 @@ describe("People and agents, Stop now", () => {
   });
 });
 
+describe("the live plan", () => {
+  type Live = typeof import("../src/ui/pages/plan-live.tsx");
+  let live: Live;
+  before(async () => {
+    live = (await import(pathToFileURL(join(outDir, "ui", "pages", "plan-live.js")).href)) as Live;
+  });
+  const STEP = (over: Record<string, unknown>) => ({ id: "s", store: "connect", storeName: "Connect", label: "Slack", state: "reported", text: "Connect says this ended.", code: null, final: true, tries: 1, ...over });
+  it("only state done reads as proved; a claim stays a claim; the note is shown", async () => {
+    reset();
+    const plan = PLAN({ state: "partial", headline: "Part of this is done", reviewUrl: null, canRetry: true, note: "Turn on the access copy to ask from here.", steps: [STEP({ id: "a", state: "done", label: "Pause Henry" }), STEP({ id: "b" })], counts: { proved: 1, said: 1, manual: 0, open: 0 } });
+    stub.answers.plan_get = ok({ plans: [plan], banners: [] });
+    const m = await mount(h(live.PlanLive, { kind: "agent", id: "agt_A" }));
+    const tags = [...m.host.querySelectorAll(".plan-steps li")].map((l) => [...l.children].at(-1)?.textContent);
+    assert.deepEqual(tags, ["Proved", "Said, not proved"]);
+    assert.match(m.host.textContent ?? "", /Turn on the access copy to ask from here\./);
+    assert.match(m.host.textContent ?? "", /1 proved, 1 said and not proved/);
+    assert.doesNotMatch(m.host.textContent ?? "", /Open approval/);
+    await m.unmount();
+  });
+  it("Try again calls plan_retry with the plan and reads again; a refusal stays on the page", async () => {
+    reset();
+    stub.answers.plan_get = ok({ plans: [PLAN({ canRetry: true })], banners: [] });
+    stub.answers.plan_retry = ok({ plans: [] });
+    const m = await mount(h(live.PlanLive, { kind: "agent", id: "agt_A" }));
+    await click(button(m.host, "Try again"));
+    assert.deepEqual(stub.calls.find((c) => c.op === "plan_retry")?.input, { plan: "pln_1" });
+    stub.answers.plan_retry = refuse(409, "plan_finished", "x");
+    await click(button(m.host, "Try again"));
+    assert.ok(m.host.querySelector('[role="alert"]'));
+    await m.unmount();
+  });
+  it("no plan yet: says so and offers to prepare it; a failed read is not that", async () => {
+    reset();
+    stub.answers.plan_get = ok({ plans: [], banners: [] });
+    let m = await mount(h(live.PlanLive, { kind: "agent", id: "agt_A" }));
+    assert.ok(button(m.host, "Prepare the request"));
+    await m.unmount();
+    stub.answers.plan_get = refuse(500, "internal", "raw");
+    m = await mount(h(live.PlanLive, { kind: "agent", id: "agt_A" }));
+    assert.doesNotMatch(m.host.textContent ?? "", /Prepare the request|raw/);
+    assert.ok(button(m.host, "Try again"));
+    await m.unmount();
+  });
+  it("a plan_send that fails says the mark stands and the request does not exist", async () => {
+    reset();
+    stub.answers.plan_send = refuse(500, "internal", "raw");
+    assert.match((await live.sendPlan({ kind: "agent", id: "agt_A" })) ?? "", /Governance marked this, but could not prepare the request in Portal/);
+    stub.answers.plan_send = refuse(409, "nothing_to_stop", "x");
+    assert.equal(await live.sendPlan({ kind: "agent", id: "agt_A" }), null);
+  });
+});
+
 describe("the person flow", () => {
   const person = (over: Record<string, unknown> = {}) =>
     DETAIL({ kind: "person", id: "per_1", name: "Marco", lifecycle: "active", effective: "active", runtime: null, owner: null, line: "Active", plan: null, agents: [ROW(), ROW({ id: "agt_L", name: "Already leaving", lifecycle: "leaving", effective: "leaving" })], rev: 7, ...over }) as never;
@@ -302,6 +377,16 @@ describe("the person flow", () => {
   it("one send: a decision for each agent that can still decide, the revision it read, then only the result", async () => {
     reset();
     stub.answers.lifecycle_set = ok({ colleague: DETAIL({ kind: "person", name: "Marco" }), transition: null });
+    stub.answers.colleagues_list = ok({ items: [], nextCursor: null, total: 0 });
+    stub.answers.plan_preview = ok({
+      subject: { kind: "person", id: "per_1", name: "Marco" },
+      asOf: "2026-10-30T16:00:00Z",
+      unlinkedAccounts: 2,
+      stores: [
+        { product: "connect", name: "Connect", state: "read", text: null, at: "2026-10-30T16:00:00Z", notShown: [], items: [{ id: "c1", kind: "account_as_itself", label: "Slack", level: "use", direction: "held_by", state: "active", effect: "stops", who: null }, { id: "c2", kind: "team_grant", label: "Team reads", level: "read", direction: "about", state: "active", effect: "about", who: null }] },
+        { product: "evolution", name: "Evolution", state: "not_read", text: "It did not answer.", at: null, notShown: [], items: [] },
+      ],
+    });
     const m = await mount(h(flow.LeaveFlow, { c: person(), onClose: () => {}, onChanged: () => {} }));
     const dlg = m.host.querySelector("dialog") as Element;
     assert.equal(button(dlg, "Next").disabled, true, "no reason, no Next");
@@ -310,13 +395,18 @@ describe("the person flow", () => {
     assert.match(dlg.textContent ?? "", /Henry/);
     assert.doesNotMatch(dlg.textContent ?? "", /Already leaving/);
     await next(dlg);
+    assert.match(dlg.textContent ?? "", /2 accounts have no person/);
+    assert.match(dlg.textContent ?? "", /Could not be read/);
+    assert.match(dlg.textContent ?? "", /Colleagues keep reading this unless you tick it/);
+    await next(dlg);
     assert.match(dlg.textContent ?? "", /Not changed/);
     assert.match(dlg.textContent ?? "", /Their own logins/);
     assert.doesNotMatch(dlg.textContent ?? "", /last day:/i);
     await next(dlg, "Stop");
     assert.deepEqual(stopInput(), [{ kind: "person", id: "per_1", to: "leaving", reason: "left", expectedRev: 7, decisions: [{ agent: "agt_A", decision: "stop" }] }]);
+    assert.deepEqual(stub.calls.find((c) => c.op === "plan_send")?.input, { kind: "person", id: "per_1", items: [{ product: "connect", id: "c1" }] }, "the stop item ticked, the about item not, nothing from the store not read");
     const after = m.host.querySelector("dialog")?.textContent ?? "";
-    assert.match(after, /Not applied: do these in Portal/);
+    assert.match(after, /Open approval in Portal/);
     assert.doesNotMatch(after, /Their agents/, "the earlier steps are gone: going back could not change what was sent");
     assert.equal(stopInput().length, 1);
     await m.unmount();
@@ -324,20 +414,25 @@ describe("the person flow", () => {
   it("a refused send stays on Confirm with the sentence; a stale page is read again", async () => {
     reset();
     stub.answers.lifecycle_set = refuse(409, "lifecycle_stale", "This entry changed since you looked. Open it again.");
+    stub.answers.colleagues_list = ok({ items: [], nextCursor: null, total: 0 });
+    stub.answers.plan_preview = refuse(500, "internal", "x");
     let reloaded = 0;
     const m = await mount(h(flow.LeaveFlow, { c: person(), onClose: () => {}, onChanged: () => void reloaded++ }));
     const dlg = m.host.querySelector("dialog") as Element;
     await chooseReason(dlg, "Security");
     await next(dlg);
     await next(dlg);
+    assert.match(dlg.textContent ?? "", /You can go on/, "a failed read does not block the stop");
+    await next(dlg);
     await next(dlg, "Stop");
-    assert.match(dlg.querySelector('[role="alert"]')?.textContent ?? "", /This entry changed since you looked/);
+    assert.match([...dlg.querySelectorAll('[role="alert"]')].map((x) => x.textContent).join(" "), /This entry changed since you looked/);
     assert.ok(button(dlg, "Stop"));
     assert.equal(reloaded, 1);
     await m.unmount();
   });
   it("Keep running needs a named reason before Next", async () => {
     reset();
+    stub.answers.colleagues_list = ok({ items: [], nextCursor: null, total: 0 });
     const m = await mount(h(flow.LeaveFlow, { c: person(), onClose: () => {}, onChanged: () => {} }));
     const dlg = m.host.querySelector("dialog") as Element;
     await chooseReason(dlg, "They left");

@@ -9,6 +9,8 @@ export type Features = {
   preview: boolean;
   /** Access > Differences */
   differences: boolean;
+  /** the live plan, Try again, the request in Portal */
+  plans: boolean;
 };
 
 export function featuresOf(ops: readonly string[]): Features {
@@ -17,6 +19,7 @@ export function featuresOf(ops: readonly string[]): Features {
     lifecycle: has("summary_get", "colleagues_list", "colleague_get", "lifecycle_set"),
     preview: has("plan_preview"),
     differences: has("findings_list"),
+    plans: has("plan_send", "plan_get", "plan_retry", "plan_cancel"),
   };
 }
 

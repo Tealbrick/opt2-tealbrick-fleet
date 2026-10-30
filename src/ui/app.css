@@ -71,3 +71,5 @@
 .store-items > summary { cursor: pointer; font-weight: var(--tb-weight-label); padding: 4px 0; }
 .store-items > .ready { margin-top: var(--tb-s2); }
 .ready > li > .store-who { flex: 1 0 100%; }
+.plan-store { font-size: var(--tb-text-label); font-weight: var(--tb-weight-head); }
+.plan-text { display: block; margin-top: 2px; }

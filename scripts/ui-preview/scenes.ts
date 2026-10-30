@@ -40,6 +40,7 @@ const ID = { a: "agt_01J0000000000000000000000A", b: "agt_01J0000000000000000000
 export const shell: Record<string, Fixture> = {
   "tb.holds_list": ok({ items: [], nextCursor: null }),
   reviews_list: ok({ reviews: [], nextCursor: null, policy: { intervalDays: 0 } }),
+  plan_get: ok({ plans: [], banners: [] }),
 };
 
 const overview = {
@@ -174,6 +175,48 @@ const findingsOut = {
   ],
 };
 const invOps = { ...pageOps, plan_preview: ok(previewOut), findings_list: ok(findingsOut), access_get: ok({ status: "unavailable", reason: "not_consented", note: "App access is not shown." }), colleague_get: ok(agentDetail()) };
+const PLAN_OPS = [...INVENTORY_OPS, "plan_send", "plan_get", "plan_retry", "plan_cancel"];
+const pStep = (over: Record<string, unknown>) => ({ id: "st_1", store: "core", storeName: "Portal", label: "Pause Henry", state: "pending", text: "Waiting for you in Portal", code: null, final: false, tries: 1, ...over });
+const planOf = (over: Record<string, unknown> = {}) => ({
+  id: "pln_01J00000000000000000000P1",
+  groupId: "grp_1",
+  part: 1,
+  parts: 1,
+  subject: { kind: "agent", id: ID.a, name: "Henry" },
+  purpose: "suspend",
+  trigger: "owner",
+  state: "waiting",
+  headline: "Waiting for you in Portal",
+  mode: "draft",
+  note: null,
+  reviewUrl: "https://portal.example.test/drafts/1",
+  expiresAt: "2026-10-31T16:00:00Z",
+  openedAt: "2026-10-30T16:00:00Z",
+  closedAt: null,
+  receiptId: null,
+  canRetry: false,
+  canCancel: true,
+  counts: { proved: 0, said: 0, manual: 0, open: 1 },
+  stores: [],
+  steps: [pStep({})],
+  notChanged: NOT_CHANGED_SERVER,
+  ...over,
+});
+const planOps = (plans: unknown[], banners: unknown[] = []) => ({ ...invOps, plan_send: ok({ plans }), plan_get: ok({ plans, banners }), plan_retry: ok({ plans }), plan_cancel: ok({ plans }), lifecycle_set: ok(stoppedAgent(FLOOR_PENDING)), agent_set: ok({}) });
+const PARTIAL = planOf({
+  state: "partial",
+  headline: "Part of this is done",
+  reviewUrl: null,
+  canRetry: true,
+  counts: { proved: 1, said: 1, manual: 1, open: 1 },
+  stores: [{ product: "evolution", name: "Evolution", text: "Could not be read.", state: "not_read" }],
+  steps: [
+    pStep({ state: "done", text: "Stopped at the bridge.", final: true }),
+    pStep({ id: "st_2", store: "connect", storeName: "Connect", label: "Slack account as itself", state: "refused", text: "Connect refused: A rule refused this.", code: "hook_denied" }),
+    pStep({ id: "st_3", store: "connect", storeName: "Connect", label: "Google account as Marco", state: "manual", text: "Governance cannot end this. Someone must do it in Connect.", final: true }),
+    pStep({ id: "st_4", store: "knowledge", storeName: "Knowledge", label: "Team grant", state: "reported", text: "Knowledge says this ended. This version cannot list it.", final: true }),
+  ],
+});
 const PERSON = `person-or-agent?kind=person&id=${ID.p}`;
 
 export const scenes: Scene[] = [
@@ -348,6 +391,67 @@ export const scenes: Scene[] = [
   { name: "differences-not-checked", path: "access", personOps: INVENTORY_OPS, strict: true, ops: { ...invOps, findings_list: ok({ lastSweepAt: null, storesRead: 0, unread: [], items: [] }) }, ready: "App access is not shown", steps: async (p) => { await p.getByRole("tab", { name: "Differences" }).click(); await p.getByText("Not checked yet").waitFor(); }, forbid: ["No differences"] },
   { name: "differences-none", path: "access", personOps: INVENTORY_OPS, strict: true, ops: { ...invOps, findings_list: ok({ lastSweepAt: "2026-10-30T15:00:00Z", storesRead: 5, unread: [], items: [] }) }, ready: "App access is not shown", steps: async (p) => { await p.getByRole("tab", { name: "Differences" }).click(); await p.getByText("No differences at").waitFor(); } },
   { name: "differences-accept", path: "access", personOps: INVENTORY_OPS, strict: true, ops: invOps, ready: "App access is not shown", steps: async (p) => { await p.getByRole("tab", { name: "Differences" }).click(); await p.getByText("Sales helper").waitFor(); await button(p, "Accept with a reason"); }, expect: ["Accepting changes no access"] },
+  {
+    name: "stop-now-plan-waiting",
+    path: "people-and-agents",
+    personOps: PLAN_OPS,
+    strict: true,
+    ops: planOps([planOf()]),
+    ready: "Marco Rossi",
+    steps: async (p) => {
+      await p.getByRole("button", { name: "Stop now" }).first().click();
+      await pick(p, "Reason", "They left");
+      await p.getByRole("dialog").getByRole("button", { name: "Stop", exact: true }).click();
+      await p.getByText("Open approval in Portal").waitFor();
+    },
+    expect: ["Open approval in Portal", "Not done yet", "Take the request back", "Not changed"],
+    forbid: ["Proved", "Approve"],
+    assertCalls: (calls) => (calls.findIndex((c) => c.op === "lifecycle_set") < calls.findIndex((c) => c.op === "plan_send") ? [] : ["plan_send must follow lifecycle_set"]),
+  },
+  { name: "plan-partial", path: AGENT, personOps: PLAN_OPS, strict: true, ops: { ...planOps([PARTIAL]), colleague_get: ok(stoppedAgent(FLOOR_CONFIRMED)) }, ready: "Part of this is done", expect: ["Proved", "Refused", "Someone must do this", "Said, not proved", "Try again", "1 proved, 1 said and not proved"] },
+  { name: "plan-done", path: AGENT, personOps: PLAN_OPS, strict: true, ops: { ...planOps([planOf({ state: "done", headline: "Done: every step is proved", reviewUrl: null, closedAt: "2026-10-30T16:10:00Z", canCancel: false, counts: { proved: 1, said: 0, manual: 0, open: 0 }, steps: [pStep({ state: "done", text: "Stopped at the bridge.", final: true })] })]), colleague_get: ok(stoppedAgent(FLOOR_CONFIRMED)) }, ready: "every step is proved", forbid: ["Take the request back", "Open approval in Portal"] },
+  { name: "plan-portal-link", path: AGENT, personOps: PLAN_OPS, strict: true, ops: { ...planOps([planOf({ mode: "portal_link", reviewUrl: null, headline: "Not applied: do these in Portal", note: "Portal does not take requests from Governance yet.", steps: [pStep({ text: "Not applied: do this in Portal" })] })]), colleague_get: ok(stoppedAgent(FLOOR_PENDING)) }, ready: "Not applied: do these in Portal", expect: ["Not done yet"], forbid: ["Open approval in Portal"] },
+  { name: "plan-none-yet", path: AGENT, personOps: PLAN_OPS, strict: true, ops: { ...planOps([]), colleague_get: ok(stoppedAgent(FLOOR_PENDING)) }, ready: "Prepare the request" },
+  { name: "plan-load-error", path: AGENT, personOps: PLAN_OPS, strict: true, ops: { ...planOps([]), plan_get: fail("internal"), colleague_get: ok(stoppedAgent(FLOOR_PENDING)) }, ready: "Try again", forbid: ["Prepare the request"] },
+  { name: "summary-alert", path: "", personOps: PLAN_OPS, strict: true, ops: planOps([planOf()], [{ plan: "pln_01J00000000000000000000P1", kind: "waiting", text: "A stop request waits for your approval. No message was sent." }]), ready: "No message was sent", expect: ["Open Henry"] },
+  ...(["Why", "Their agents", "What stops", "Confirm", "Result"] as const).map((target, i): Scene => ({
+    name: `person-plan-${i + 1}-${target.toLowerCase().replace(" ", "-")}`,
+    path: PERSON,
+    personOps: PLAN_OPS,
+    strict: true,
+    ops: { ...planOps([planOf({ subject: { kind: "person", id: ID.p, name: "Marco Rossi" } })]), colleague_get: ok(personDetail()), lifecycle_set: ok({ colleague: personDetail({ lifecycle: "leaving", effective: "leaving", line: "Leaving", reason: "left", actions: [] }).colleague, transition: null }) },
+    ready: "History",
+    steps: async (p) => {
+      await button(p, "Stop this person's agents and access");
+      const dialog = p.getByRole("dialog");
+      if (i < 1) return;
+      await pick(p, "Reason", "They left");
+      await dialog.getByRole("button", { name: "Next" }).click();
+      if (i < 2) return;
+      await dialog.getByRole("radio", { name: /Pause and transfer/ }).first().click();
+      await pick(p, "New owner of Henry", "Bob Bianchi");
+      await dialog.getByRole("button", { name: "Next" }).click();
+      if (i < 3) return;
+      await dialog.getByText("Reported by Connect").first().waitFor();
+      await dialog.getByRole("button", { name: "Next" }).click();
+      if (i < 4) return;
+      await dialog.getByRole("button", { name: "Stop", exact: true }).click();
+      await dialog.getByText("Open approval in Portal").waitFor();
+    },
+    expect: i === 1 ? ["Pause and transfer", "A new key is needed"] : i === 2 ? ["Would stop", "Could not be read"] : i === 3 ? ["Not changed", "move to a new owner"] : i === 4 ? ["Open approval in Portal"] : [],
+    assertCalls:
+      i === 4
+        ? (calls) => {
+            const order = calls.map((c) => c.op).filter((o) => ["agent_set", "lifecycle_set", "plan_send"].includes(o));
+            const send = calls.find((c) => c.op === "plan_send")?.input as { transfers?: string[]; items?: unknown[] } | undefined;
+            const bad: string[] = [];
+            if (order.join() !== "agent_set,lifecycle_set,plan_send") bad.push(`order: ${order.join()}`);
+            if (!send?.transfers?.includes(ID.a)) bad.push("no transfer in plan_send");
+            if (!send?.items?.length) bad.push("no ticks in plan_send");
+            return bad;
+          }
+        : undefined,
+  })),
   { name: "people-old", path: "people", ops: { ...shell, overview_get: ok(overview) }, ready: "Marco Rossi" },
   { name: "people-old-empty", path: "people", ops: { ...shell, overview_get: ok({ revision: 0, teams: [], people: [], agents: [] }) }, ready: "No people yet" },
   { name: "people-old-loading", path: "people", ops: { ...shell, overview_get: hang }, ready: "Loading the directory" },

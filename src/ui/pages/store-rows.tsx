@@ -1,6 +1,6 @@
 // What each app reports for one person or agent (DESIGN-C380 §3, §10). "Not installed", "Could not be read" and "reports nothing"
 // are three different facts and read as three different sentences; a store that was not read is never shown as empty.
-import { Notice, Tag } from "@opt2-tealbrick/ui";
+import { Notice, Switch, Tag } from "@opt2-tealbrick/ui";
 import type { ItemEffect, PreviewItem, PreviewStore, StoreState } from "./inventory-types.ts";
 import { when } from "./words.ts";
 
@@ -14,19 +14,23 @@ const STATE_TAG: Record<StoreState, { status: "live" | "idle" | "needs-you" | "b
 
 const EFFECT: Record<ItemEffect, string> = { stops: "Would stop", manual: "You would do this", stays: "Would stay", about: "Others would keep reading" };
 
-function Item({ item, storeName }: { item: PreviewItem; storeName: string }) {
+export type TickProps = { isOn: (product: string, id: string) => boolean; toggle: (product: string, item: PreviewItem, on: boolean) => void };
+
+function Item({ item, product, storeName, ticks }: { item: PreviewItem; product: string; storeName: string; ticks?: TickProps }) {
+  const canTick = ticks && (item.effect === "stops" || item.effect === "about");
   return (
     <li>
-      <span>{item.label}</span>
+      {canTick ? <Switch label={item.label} checked={ticks.isOn(product, item.id)} onCheckedChange={(on) => ticks.toggle(product, item, on)} /> : <span>{item.label}</span>}
       <Tag status={item.effect === "stops" ? "live" : item.effect === "manual" ? "needs-you" : "default"} title={item.who ?? undefined}>
         {EFFECT[item.effect]}
       </Tag>
       {item.effect === "manual" ? <span className="tb-hint store-who">{item.who ?? `Governance cannot end this. Someone must do it in ${storeName}.`}</span> : null}
+      {canTick && item.effect === "about" ? <span className="tb-hint store-who">Colleagues keep reading this unless you tick it.</span> : null}
     </li>
   );
 }
 
-function StoreBody({ store, subjectName }: { store: PreviewStore; subjectName: string }) {
+function StoreBody({ store, subjectName, ticks }: { store: PreviewStore; subjectName: string; ticks?: TickProps }) {
   if (store.state === "not_installed") return null;
   if (store.state !== "read") return store.text ? <p className="tb-soft">{store.text}</p> : null;
   return (
@@ -38,7 +42,7 @@ function StoreBody({ store, subjectName }: { store: PreviewStore; subjectName: s
           <summary>{store.items.length === 1 ? "1 item" : `${store.items.length} items`}</summary>
           <ul className="ready">
             {store.items.map((i) => (
-              <Item key={i.id} item={i} storeName={store.name} />
+              <Item key={i.id} item={i} product={store.product} storeName={store.name} ticks={ticks} />
             ))}
           </ul>
         </details>
@@ -53,7 +57,7 @@ function StoreBody({ store, subjectName }: { store: PreviewStore; subjectName: s
 /** Stores with a problem first: what could not be read must not sit under what could. */
 const ORDER: Record<StoreState, number> = { not_read: 0, refused: 1, waiting: 2, read: 3, not_installed: 4 };
 
-export function StoreRows({ stores, subjectName, unlinkedAccounts = 0 }: { stores: PreviewStore[]; subjectName: string; unlinkedAccounts?: number }) {
+export function StoreRows({ stores, subjectName, unlinkedAccounts = 0, ticks }: { stores: PreviewStore[]; subjectName: string; unlinkedAccounts?: number; ticks?: TickProps }) {
   const sorted = [...stores].sort((a, b) => ORDER[a.state] - ORDER[b.state]);
   return (
     <div className="tb-stack">
@@ -65,7 +69,7 @@ export function StoreRows({ stores, subjectName, unlinkedAccounts = 0 }: { store
             <Tag status={STATE_TAG[s.state].status}>{STATE_TAG[s.state].word}</Tag>
           </div>
           {s.state === "read" && s.product === "core" ? <p className="tb-hint">From the copy of Portal's records in this workspace.</p> : s.state === "read" && s.at ? <p className="tb-hint">{`Reported by ${s.name}, ${when(s.at)}. This is what the app says, not a check of it.`}</p> : null}
-          <StoreBody store={s} subjectName={subjectName} />
+          <StoreBody store={s} subjectName={subjectName} ticks={ticks} />
         </section>
       ))}
     </div>
