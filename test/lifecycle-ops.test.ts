@@ -290,3 +290,53 @@ test("a person's handle stays the person's: the agent shows a finding (S3-15)", 
   db.prepare("INSERT INTO fleet_agent_handles (agent_id, handle) VALUES (?, 'slack:UANN00001')").run(AGENT_A.id);
   assert.ok(loadColleagues(db, T0).byId.get(`agent:${AGENT_A.id}`)?.findings.some((f) => f.code === "agent_handle_conflict"));
 });
+
+test("S2-7: stop decisions with no stop of their own pass the cap; a date and a stop in one call pass it once", async () => {
+  const { db, ann } = world();
+  const c = ctxOf(db, PERSON_CALLER);
+  store.setAgent(db, { agent: AGENT_B.id, owner: ann.id }, T0);
+  const now = Date.now();
+  const fill = Array.from({ length: 5 }, (_, i) => store.setPerson(db, { name: `F${i}` }, T0).id);
+  for (const id of fill) set(db, "person", id, "suspended", {}, now);
+  await assert.rejects(run("lifecycle_set", { kind: "person", id: ann.id, reason: "left", decisions: [{ agent: AGENT_B.id, decision: "stop" }] }, c), refused("stop_cap_reached", 409));
+  assert.equal(stateOf(db, "agent", AGENT_B.id), "proposed", "nothing moved");
+  const pat = store.setPerson(db, { name: "Pat" }, T0);
+  const startsLater = new Date(now + DAY_MS).toISOString();
+  await assert.rejects(run("lifecycle_set", { kind: "person", id: pat.id, to: "suspended", reason: "left", validFrom: startsLater }, c), refused("stop_cap_reached", 409));
+  const out = await run("lifecycle_set", { kind: "person", id: pat.id, to: "suspended", reason: "left", validFrom: startsLater, confirmCount: 6 }, c);
+  validOut("lifecycle_set", out);
+  assert.equal(stateOf(db, "person", pat.id), "suspended");
+});
+
+test("lifecycle_set: a stale revision and a refusal late in the call leave nothing behind", async () => {
+  const { db, ann } = world();
+  const c = ctxOf(db, PERSON_CALLER);
+  const before = (await run("colleague_get", { kind: "person", id: ann.id }, c)).colleague;
+  store.setPerson(db, { id: ann.id, name: "Ann", status: "departed" }, T0);
+  await assert.rejects(run("lifecycle_set", { kind: "person", id: ann.id, to: "active", reason: "mistake", expectedRev: before.rev }, c), refused("lifecycle_stale", 409));
+  const b = world();
+  const bc = ctxOf(b.db, PERSON_CALLER);
+  const events = () => Number(b.db.prepare("SELECT COUNT(*) AS n FROM fleet_lifecycle_events").get()?.n);
+  const n = events();
+  const rev = store.revision(b.db);
+  await assert.rejects(run("lifecycle_set", { kind: "person", id: b.ann.id, to: "leaving", reason: "left", decisions: [{ agent: AGENT_A.id, decision: "stop" }, { agent: AGENT_B.id, decision: "stop" }] }, bc), refused("agent_not_owned", 409));
+  assert.deepEqual([stateOf(b.db, "person", b.ann.id), stateOf(b.db, "agent", AGENT_A.id), events(), store.revision(b.db)], ["active", "active", n, rev]);
+});
+
+test("A42: stop and keep decisions show nothing to an agent either", async () => {
+  const { db, ann } = world();
+  store.setAgent(db, { agent: AGENT_B.id, owner: ann.id }, T0);
+  const look = () => JSON.stringify(leanDirectory(db));
+  const open = look();
+  await run("lifecycle_set", { kind: "person", id: ann.id, to: "leaving", reason: "security", decisions: [{ agent: AGENT_A.id, decision: "stop" }, { agent: AGENT_B.id, decision: "keep", reason: "Runs payroll" }] }, ctxOf(db, PERSON_CALLER));
+  assert.equal(JSON.parse(look()).revision > JSON.parse(open).revision, true);
+  const strip = (t: string) => ({ ...JSON.parse(t), revision: 0 });
+  assert.deepEqual(strip(look()), strip(open), "the same answer apart from the revision");
+});
+
+test("the summary does not count from a cut list of access", async () => {
+  const { db } = world();
+  const topology = { v: 1, agentIds: [AGENT_A.id], instances: [["ins_k", "knowledge", "Knowledge", "1"]], edges: [[0, 0, "cr", "f", 0, 0, 0]], companions: [], connections: [], truncated: true };
+  assert.equal((await run("summary_get", {}, ctxOf(db, PERSON_CALLER, { topology: () => topology }))).canWriteOrSend, null);
+  assert.equal((await run("summary_get", {}, ctxOf(db, PERSON_CALLER, { topology: () => ({ ...topology, truncated: undefined }) }))).canWriteOrSend, 1);
+});
