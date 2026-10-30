@@ -51,7 +51,8 @@ export function coreStepsFor(db: Db, s: Subject, transfers: readonly string[]): 
     if (r.status === "removed") return;
     const effective = effectiveAgent({ lifecycle: r.lifecycle as Lifecycle, validFrom: r.valid_from === null ? null : Number(r.valid_from), keepRunning: Number(r.keep_running) === 1 }, ownerLifecycle(r.owner_id));
     if (effective === "leaving") add("agents.offboard", String(r.id));
-    else if (effective === "suspended") add("agents.pause", String(r.id));
+    // Already paused, by an earlier approval or in Portal: a second draft asks only for what is new.
+    else if (effective === "suspended" && r.status !== "paused") add("agents.pause", String(r.id));
   };
   if (s.kind === "agent") {
     const r = agentRow(s.id);
@@ -65,7 +66,7 @@ export function coreStepsFor(db: Db, s: Subject, transfers: readonly string[]): 
   for (const agt of transfers) {
     const r = agentRow(agt) ?? fail("agent_not_found", "No such agent.", 404);
     if (r.lifecycle === "archived" || r.status === "removed") fail("agent_closed", "This agent is closed. It cannot move to a new owner.", 409);
-    add("agents.pause", agt);
+    if (r.status !== "paused") add("agents.pause", agt);
     add("agents.rotate", agt);
   }
   return steps;

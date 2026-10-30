@@ -26,7 +26,12 @@ export interface FindingInput {
   planState?: string | null | undefined;
   /** a leaving person: Connect accounts tied to nobody that nobody has checked for this person */
   unnamedAccounts?: number | undefined;
+  /** Core says this agent's key is gone */
+  keyEnded?: boolean | undefined;
 }
+
+/** D2: one approval stops access, and a paused agent's key is refused. The key itself stays until the owner chooses. Said the same on the row, the plan and the finding. */
+export const KEY_STILL_EXISTS = "Paused. The key still exists until you choose.";
 
 const f = (code: string, text: string): Finding => ({ code, text });
 
@@ -44,6 +49,7 @@ export function findingsOf(r: FindingInput, now: number): Finding[] {
   if (agent && r.hasOwner && r.lifecycle !== "archived" && r.ownerLifecycle !== null && r.ownerLifecycle !== "active") out.push(f("owner_inactive", "The owner of this agent is not active. Name another owner."));
   if (r.lifecycle === "leaving" && !r.planState) out.push(f("leaving_no_plan", r.reason === "migrated" ? "This entry was marked as departed before plans existed. Open it and make a plan." : "This entry is leaving, and no plan was made. Open it and make a plan."));
   if (r.kind === "person" && r.lifecycle === "leaving" && (r.unnamedAccounts ?? 0) > 0) out.push(f("unlinked_account", `${r.unnamedAccounts} accounts in Connect have no person. Check them. If none is this person's, accept this with a reason.`));
+  if (agent && r.effective === "suspended" && r.runtime === "paused" && !r.keyEnded) out.push(f("key_not_decided", KEY_STILL_EXISTS));
   if (r.planState === "expired" && (r.lifecycle === "suspended" || r.lifecycle === "leaving")) out.push(f("plan_expired", "A stop request ran out of time before you approved it. Nothing in it was applied. Ask again."));
   if (r.lifecycle === "suspended" && r.at + SUSPENDED_TOO_LONG_MS < now) out.push(f("suspended_too_long", "This entry has been stopped for more than 30 days. Decide what comes next."));
   if ((r.lifecycle === "active" || r.lifecycle === "proposed") && r.validUntil !== null && r.validUntil <= now) out.push(f("date_passed", "The end date has passed. The stop waits for the next check, or for the limit on stops to clear."));
