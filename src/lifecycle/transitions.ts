@@ -105,14 +105,13 @@ export function guardOf(db: Db, s: Subject, to: Lifecycle, opts: { waive?: strin
     return no("archived_terminal", "A closed agent stays closed. Reinstate it in Portal within 30 days, or add a new agent.");
   }
   if (!NEXT[s.lifecycle].includes(to)) return no("transition_not_allowed", `It cannot move from ${s.lifecycle} to ${to}.`);
-  const toActive = to === "active" && (s.lifecycle === "proposed" || s.lifecycle === "suspended");
-  if (toActive) {
+  if (to === "active") {
     if (s.trust === "blocked") return no("trust_blocked", "It is blocked. Record a new review first.");
     if (s.kind === "agent") {
       if (s.ownerId === null) return no("owner_required", "Name an owner first.");
       if (personLifecycle(db, s.ownerId) !== "active") return no("owner_inactive", "The owner is not active. Name an active owner first.");
     }
-    if (s.lifecycle === "suspended" && s.validUntil !== null && s.validUntil <= now) return no("date_passed", "The end date has passed. Change the end date first.");
+    if (s.validUntil !== null && s.validUntil <= now) return no("date_passed", "The end date has passed. Change the end date first.");
   }
   if (to === "archived") {
     const days = coolingDays(db);
@@ -131,6 +130,11 @@ export function guardOf(db: Db, s: Subject, to: Lifecycle, opts: { waive?: strin
 /** Stops in the last 10 minutes and the limit (S2-7). */
 export function capState(db: Db, now: number): { used: number; limit: number } {
   return { used: stopsSince(db, now - CAP_WINDOW_MS), limit: stopCap(db) };
+}
+
+function assertCap(db: Db, confirmCount: number | undefined, now: number): void {
+  const { used, limit } = capState(db, now);
+  if (used >= limit && confirmCount !== used + 1) throw new TbError("stop_cap_reached", `You stopped ${used} in the last 10 minutes. Confirm stop number ${used + 1}.`, 409, { count: used + 1 });
 }
 
 export interface Grant {
@@ -191,16 +195,13 @@ export function transition(db: Db, input: TransitionInput, now = Date.now()): { 
     if (input.expectedRev !== undefined && input.expectedRev !== s.rev) fail("lifecycle_stale", "This entry changed since you looked. Open it again.", 409);
     const problem = guardOf(db, s, input.to, { waive: input.waive }, now);
     if (problem) throw new TbError(problem.code, problem.message, problem.status);
-    if (STOP_STATES.includes(input.to) && !input.noCap) {
-      const { used, limit } = capState(db, now);
-      if (used >= limit && input.confirmCount !== used + 1) throw new TbError("stop_cap_reached", `You stopped ${used} in the last 10 minutes. Confirm stop number ${used + 1}.`, 409, { count: used + 1 });
-    }
+    if (STOP_STATES.includes(input.to) && !input.noCap) assertCap(db, input.confirmCount, now);
     const note = cleanText(input.note ?? "").slice(0, 500) || null;
     const waive = cleanText(input.waive ?? "").slice(0, 200);
     const from = s.lifecycle;
     const closing = input.to === "archived";
-    // T5 keeps a picture of what to grant again. T7 keeps the picture after the close: see below.
-    const before = input.to === "leaving" ? snapshotOf(db, s, input.grants ?? []) : undefined;
+    // T5 keeps a picture of what to grant again, T2 what was reviewed. T7 keeps the picture after the close: see below.
+    const before = input.to === "leaving" || (from === "proposed" && input.to === "active") ? snapshotOf(db, s, input.grants ?? []) : undefined;
     const rev = writeState(db, s, input.to, input.reason, note, now);
     const backToWork = input.to === "active" && s.kind === "person";
     if (backToWork) clearKeepRunning(db, s.id);
@@ -259,7 +260,7 @@ export function kindChanged(db: Db, id: string, name: string, from: string, to: 
   if (from === to) return;
   if (to === "person") {
     const l: Lifecycle = status === "active" ? "active" : "leaving";
-    db.prepare("UPDATE fleet_people SET lifecycle = ?, lifecycle_rev = ?, lifecycle_at = ? WHERE id = ?").run(l, revision(db), now, id);
+    db.prepare("UPDATE fleet_people SET lifecycle = ?, status = ?, lifecycle_rev = ?, lifecycle_at = ? WHERE id = ?").run(l, personStatusOf(l), revision(db), now, id);
     appendEvent(db, { subject: { kind: "person", id, name }, kind: "transition", from: null, to: l, actor: { kind: "owner", id: null }, reason: "other", note: "Changed from outside agent to person.", at: now });
     return;
   }
@@ -282,11 +283,11 @@ export function statusRequested(db: Db, id: string, want: "active" | "departed",
   transition(db, { kind: "person", id, to: "leaving", reason: "other", note: "Marked as departed on the People page.", actor }, now);
 }
 
-/** person_delete: an open stop must end first, because the delete would remove the floor on this person's handles and lift the owned agents' stop. */
+/** person_delete: a stop must end first, by the owner's named step, because the delete would remove the floor on this person's handles and lift the owned agents' stop. Handles stay on a closed row (T7). */
 export function beforePersonDelete(db: Db, id: string, actor: Actor, now: number): void {
   const r = db.prepare("SELECT name, kind, lifecycle FROM fleet_people WHERE id = ?").get(id);
   if (!r) return;
-  if (r.lifecycle === "suspended" || r.lifecycle === "leaving") fail("lifecycle_open", "This person is stopped or leaving. Close the entry or bring the person back first.", 409);
+  if (r.lifecycle === "suspended" || r.lifecycle === "leaving" || r.lifecycle === "archived") fail("lifecycle_open", "This person is stopped, leaving or closed. Undo that or bring the person back first. A delete would end the refusal on this person's handles.", 409);
   appendEvent(db, { subject: { kind: r.kind === "person" ? "person" : "outside_agent", id, name: String(r.name) }, kind: "changed", from: r.lifecycle === null ? null : String(r.lifecycle), to: null, actor, note: "Deleted from the directory.", at: now });
 }
 
@@ -299,18 +300,21 @@ function parseDate(raw: string | null, what: string): number | null {
 }
 
 /** Start and end dates. An end date in the past needs a confirm: it stops the entry at the next timer ticks. */
-export function setDates(db: Db, input: { kind: SubjectKind; id: string; validFrom?: string | null | undefined; validUntil?: string | null | undefined; confirmPastDate?: boolean | undefined; actor: Actor }, now = Date.now()): void {
+export function setDates(db: Db, input: { kind: SubjectKind; id: string; validFrom?: string | null | undefined; validUntil?: string | null | undefined; confirmPastDate?: boolean | undefined; confirmCount?: number | undefined; actor: Actor }, now = Date.now()): void {
   db.transaction(() => {
     const s = loadSubject(db, input.kind, input.id) ?? fail(input.kind === "agent" ? "agent_not_found" : "person_not_found", "No such entry.", 404);
     const from = input.validFrom === undefined ? s.validFrom : parseDate(input.validFrom, "validFrom");
     const until = input.validUntil === undefined ? s.validUntil : parseDate(input.validUntil, "validUntil");
     if (from !== null && until !== null && from >= until) fail("input_invalid", "The start date must be before the end date.", 400);
     if (input.validUntil !== undefined && until !== null && until <= now && !input.confirmPastDate) fail("date_in_past", "This end date has passed. Confirm that you want to stop this entry.", 409);
+    // S2-7: a start date in the future stops a working entry at once (floor, not_started), so it counts as a stop. A later date on an entry that already waits does not.
+    const startsLater = from !== null && from > now && (s.validFrom === null || s.validFrom <= now) && (s.lifecycle === "active" || s.lifecycle === "proposed");
+    if (startsLater) assertCap(db, input.confirmCount, now);
     bump(db);
     const table = s.kind === "agent" ? "fleet_agents" : "fleet_people";
     db.prepare(`UPDATE ${table} SET valid_from = ?, valid_until = ?, lifecycle_rev = ?, updated_at = ? WHERE id = ?`).run(from, until, revision(db), now, s.id);
     const iso = (ms: number | null) => (ms === null ? "none" : new Date(ms).toISOString().slice(0, 10));
-    appendEvent(db, { subject: { kind: s.kind, id: s.id, name: s.name }, kind: "changed", from: s.lifecycle, to: s.lifecycle, actor: input.actor, note: `Start date ${iso(from)}. End date ${iso(until)}.`, at: now });
+    appendEvent(db, { subject: { kind: s.kind, id: s.id, name: s.name }, kind: "changed", from: s.lifecycle, to: startsLater ? "not_started" : s.lifecycle, actor: input.actor, note: `Start date ${iso(from)}. End date ${iso(until)}.`, at: now });
   });
 }
 
