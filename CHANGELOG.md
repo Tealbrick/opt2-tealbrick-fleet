@@ -2,6 +2,18 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
+## 0.4.0-dev.1 - 2026-10-30
+
+C380 skeleton, DEV only. Not for stable until Martin has read C380-DECISIONS.md.
+
+- One lifecycle per person and agent: `proposed`, `active`, `suspended`, `leaving`, `archived`, with reasons, dates, cooling and a record with a hash chain. Migration 0008 carries 0.3.2 data: `removed` becomes `archived` (no card), `departed` becomes `leaving`, everything else `active`.
+- `directory_feed` with `accept: ["lifecycle"]` carries `lifecycle` and `floor` (spec 0.1.89). Rules 0.7.0 refuses a stopped entry before any rule, so each entry that is blocked or departed starts to refuse: read the list before any promotion.
+- New person ops: `summary_get`, `colleagues_list`, `colleague_get`, `lifecycle_set`, `settings_set`. No agent can call them. An agent can only ask (`review_request`), and never about itself (`no_self_request`).
+- A plan is "Portal link" mode only: Governance applies nothing and lists the steps to do in Portal, with proof from the slice.
+- Agent views say `departed` from `archived` only. `person_set` with `departed` is now a stop; `active` on a departed person is refused. `person_delete` is refused while stopped, leaving or closed.
+- Companion `rules.floor_status` (read). `requires.bridge` 0.2.13. A Rules older than 0.7.0 cannot serve it: the Rules companion entry stops working, and with it contact-rule drafts, until Rules is updated.
+- Rollback: E3 to 0.3.2 restores the data and drops later events. Stops already applied in Core stay. Rules dev keeps its entries: clear them on the Rules page.
+
 ## 0.3.2 - 2026-10-28
 
 - `requires.bridge` 0.2.12 (new). The bridge validates each app manifest; bridge 0.2.11 (manifest 0.1.32) refuses
