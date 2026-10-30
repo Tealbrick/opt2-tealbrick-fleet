@@ -2,7 +2,7 @@
 // and the moves that fit. "See what would stop" appears only when the app has `plan_preview`. Outside agents stay on the
 // People page: they have no lifecycle.
 import { callOp } from "@opt2-tealbrick/miniapp-sdk/client";
-import { Button, ButtonLink, EmptyState, Segmented, Table, Tag } from "@opt2-tealbrick/ui";
+import { Button, ButtonLink, EmptyState, Segmented, Table } from "@opt2-tealbrick/ui";
 import { useCallback, useState } from "react";
 import type { ColleaguesListOutput } from "#kit";
 import { LoadFailed, Loading, PageHead, useLoad } from "../common.tsx";
@@ -33,7 +33,7 @@ const FILTERS: { value: Filter; label: string }[] = [
   { value: "agent", label: "Agents" },
 ];
 
-const canStop = (r: Row) => r.kind === "agent" && (r.lifecycle === "active" || r.lifecycle === "proposed");
+const canStop = (r: Row) => r.kind === "agent" && r.runtime !== "gone" && (r.lifecycle === "active" || r.lifecycle === "proposed");
 
 export function EveryonePage({ portalHref }: { portalHref?: string }) {
   const { data, error, loading, reload } = useLoad(useCallback(loadAll, []));
@@ -87,11 +87,7 @@ export function EveryonePage({ portalHref }: { portalHref?: string }) {
                   <td>
                     {r.line}
                     {r.findings.length ? (
-                      <span className="row-tag">
-                        <Tag status="needs-you" title={r.findings.map((f) => f.text).join(" ")}>
-                          {r.findings.length === 1 ? "1 difference" : `${r.findings.length} differences`}
-                        </Tag>
-                      </span>
+                      <span className="row-tag tb-hint">{r.findings.length === 1 ? (r.findings[0]?.text ?? "") : `${r.findings[0]?.text ?? ""} And ${r.findings.length - 1} more.`}</span>
                     ) : null}
                   </td>
                   <td className={r.kind === "agent" ? undefined : "is-empty"}>{r.kind === "agent" ? (r.owner?.name ?? "No owner") : ""}</td>

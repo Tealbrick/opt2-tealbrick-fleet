@@ -5,7 +5,7 @@ import { describe, it } from "node:test";
 import { featuresOf } from "../src/ui/pages/features.ts";
 import { lifecycleError, stopCapOf } from "../src/ui/pages/lifecycle-errors.ts";
 import { subjectFromUrl, subjectHref } from "../src/ui/pages/subject-link.ts";
-import { beforeChangeText, beforeChangeTone, floorTone, NOT_CHANGED, REASONS, reasonLabel, when } from "../src/ui/pages/words.ts";
+import { afterChangeText, beforeChangeText, beforeChangeTone, floorTone, NOT_CHANGED, REASONS, reasonLabel, when } from "../src/ui/pages/words.ts";
 
 describe("features come from the ops of this build", () => {
   it("on when every op is there", () => {
@@ -43,6 +43,24 @@ describe("words before a change", () => {
     assert.ok(NOT_CHANGED.some((t) => /own logins/.test(t)));
     assert.ok(NOT_CHANGED.some((t) => /machine/.test(t)));
     assert.ok(NOT_CHANGED.some((t) => /shared Portal login/.test(t)));
+  });
+});
+
+describe("words after a change", () => {
+  const floor = (over: Record<string, unknown>) => ({ state: "confirmed", text: "Rules has this change.", version: "0.7.0", feedRevision: 2, entries: 1, lastGateAt: null, gateNote: null, ...over }) as Parameters<typeof afterChangeText>[0];
+  it("a confirmed change still says what Governance cannot see, and not that calls stopped", () => {
+    const t = afterChangeText(floor({}));
+    assert.match(t, /^Rules has this change\. If its hook is on/);
+    assert.match(t, /cannot see that switch/);
+    assert.doesNotMatch(t, /calls (have )?stopped/);
+  });
+  it("a change that is not confirmed gets no hook sentence", () => {
+    assert.doesNotMatch(afterChangeText(floor({ state: "not_confirmed", text: "Not confirmed." })), /hook/);
+  });
+  it("the gate note reads as a time, never as a raw timestamp", () => {
+    const t = afterChangeText(floor({ lastGateAt: "2026-10-29T08:00:00Z", gateNote: "Rules has not checked a call since 2026-10-29T08:00:00.000Z." }));
+    assert.match(t, /since 29 Oct 2026, 08:00 UTC/);
+    assert.doesNotMatch(t, /2026-10-29T/);
   });
 });
 

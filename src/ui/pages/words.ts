@@ -57,6 +57,14 @@ export function beforeChangeText(floor: Pick<Floor, "state">): string {
 /** The tone before a change: a warning only when Rules cannot help. */
 export const beforeChangeTone = (floor: Pick<Floor, "state">): "needs-you" | "neutral" => (floor.state === "older" || floor.state === "not_read" ? "needs-you" : "neutral");
 
+/** After a change: what the server says Rules has, plus what Governance cannot see. The gate note gets a readable time. */
+export function afterChangeText(floor: Floor): string {
+  const parts = [floor.text];
+  if (floor.state === "confirmed") parts.push("If its hook is on, calls stop in about 2 minutes. Governance cannot see that switch: check it in Portal.");
+  if (floor.gateNote && floor.lastGateAt) parts.push(`Rules has not checked a call since ${when(floor.lastGateAt)}.`);
+  return parts.join(" ");
+}
+
 /** A stop's Notice tone: only a change Rules confirmed reads as live, and even that is not "stopped". */
 export const floorTone = (floor: Pick<Floor, "state">): "live" | "needs-you" | "neutral" => (floor.state === "confirmed" ? "live" : floor.state === "not_installed" ? "neutral" : "needs-you");
 

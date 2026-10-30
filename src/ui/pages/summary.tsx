@@ -6,7 +6,7 @@ import { useState } from "react";
 import type { SummaryGetOutput } from "#kit";
 import { LoadFailed, Loading, PageHead, useLoad } from "../common.tsx";
 import { SettingsDialog } from "./settings-dialog.tsx";
-import { floorTone, when } from "./words.ts";
+import { afterChangeText, floorTone, when } from "./words.ts";
 
 const load = () => callOp<SummaryGetOutput>("summary_get", {});
 
@@ -34,13 +34,29 @@ export function SummaryPage() {
     <section className="app-page" aria-label="Summary">
       <PageHead
         title="Summary"
-        lede="See who can do what, and what no longer matches. Governance records this. Core and Rules enforce it."
+        lede="See who can do what, and what no longer matches."
         action={data ? <Button onClick={() => setSettings(true)}>Settings</Button> : null}
       />
       {error ? <LoadFailed message={data ? `This page may be old. ${error}` : error} retrying={loading} onRetry={() => void reload()} /> : null}
       {data === null ? error ? null : <Loading what="the summary" /> : <SummaryBody data={data} />}
       {settings && data ? <SettingsDialog settings={data.settings} onClose={() => setSettings(false)} onChanged={reload} /> : null}
     </section>
+  );
+}
+
+/**
+ * What Rules has, only when a stop is open: with no stop there is no change that Rules could have, and "Rules has this change"
+ * would mean nothing. A stale gate and an unreadable or absent Rules are worth saying at any time.
+ */
+function RulesNotice({ data }: { data: SummaryGetOutput }) {
+  const stopping = data.agents.stopping + data.people.leaving + data.people.suspended > 0;
+  const { floor } = data;
+  if (!stopping && (floor.state === "confirmed" || floor.state === "not_confirmed") && !floor.gateNote) return null;
+  const text = stopping ? afterChangeText(floor) : floor.gateNote && floor.lastGateAt ? `Rules has not checked a call since ${when(floor.lastGateAt)}.` : floor.text;
+  return (
+    <Notice tone={stopping ? floorTone(floor) : "neutral"} role="status">
+      {text}
+    </Notice>
   );
 }
 
@@ -75,10 +91,7 @@ function SummaryBody({ data }: { data: SummaryGetOutput }) {
             </li>
           ))}
         </ul>
-        <Notice tone={floorTone(data.floor)} role="status">
-          {data.floor.text}
-          {data.floor.gateNote ? ` ${data.floor.gateNote}` : ""}
-        </Notice>
+        <RulesNotice data={data} />
       </section>
       <section className="tb-stack" aria-label="What was read">
         <h2 className="sub-head">What was read</h2>

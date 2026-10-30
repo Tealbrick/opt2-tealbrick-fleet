@@ -3,7 +3,7 @@
 import { callOp } from "@opt2-tealbrick/miniapp-sdk/client";
 import { Button, Dialog, Field, Notice, Select, Textarea } from "@opt2-tealbrick/ui";
 import { useState } from "react";
-import type { LifecycleSetInput, LifecycleSetOutput } from "#kit";
+import type { ColleagueGetOutput, LifecycleSetInput, LifecycleSetOutput } from "#kit";
 import { changeError } from "../common.tsx";
 import { type LifecycleErrorInfo, lifecycleError, stopCapOf } from "./lifecycle-errors.ts";
 import { NotChanged, PlanResult } from "./plan-result.tsx";
@@ -28,6 +28,17 @@ export function StopNow({ subject, portalHref, onClose, onChanged }: { subject: 
       setResult(out.colleague);
       await onChanged();
     } catch (e) {
+      // an earlier try went through and its answer was lost: show what the server has, not an error
+      if ((e as { code?: unknown } | null)?.code === "already_in_state") {
+        try {
+          const now = await callOp<ColleagueGetOutput>("colleague_get", { kind: subject.kind, id: subject.id });
+          setResult(now.colleague);
+          await onChanged();
+          return;
+        } catch {
+          // fall through to the plain message
+        }
+      }
       const cap = stopCapOf(e);
       if (cap !== null) setCapUsed(cap);
       setFailure(lifecycleError(e, changeError));

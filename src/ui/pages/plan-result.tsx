@@ -3,7 +3,7 @@
 // done only from what Core reports.
 import { ButtonLink, Notice, Tag } from "@opt2-tealbrick/ui";
 import type { LifecycleSetOutput } from "#kit";
-import { floorTone, NOT_CHANGED } from "./words.ts";
+import { afterChangeText, floorTone, NOT_CHANGED } from "./words.ts";
 
 export function NotChanged({ items = NOT_CHANGED }: { items?: readonly string[] }) {
   return (
@@ -28,8 +28,7 @@ export function PlanResult({ colleague, portalHref, showLine = true, showNotChan
     <div className="tb-stack">
       {showLine ? <p>{colleague.line}</p> : null}
       <Notice tone={floorTone(floor)} role="status">
-        {floor.text}
-        {floor.gateNote ? ` ${floor.gateNote}` : ""}
+        {afterChangeText(floor)}
       </Notice>
       {notices.map((n) => (
         <Notice key={n} tone="neutral">
@@ -38,8 +37,7 @@ export function PlanResult({ colleague, portalHref, showLine = true, showNotChan
       ))}
       {plan ? (
         <section className="tb-stack plan" aria-label="Steps in Portal">
-          <h3>Not applied: do these in Portal</h3>
-          <p className="tb-soft">{plan.headline}</p>
+          <h3>{plan.headline}</h3>
           <ol className="plan-steps">
             {plan.steps.map((s) => (
               <li key={s.id}>
