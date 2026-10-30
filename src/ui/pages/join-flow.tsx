@@ -8,7 +8,7 @@ import { Choices, Field, type FlowStep, Notice, Select, StepFlow, Textarea, Text
 import { useCallback, useRef, useState } from "react";
 import type { OverviewGetOutput } from "#kit";
 import { changeError, useLoad } from "../common.tsx";
-import { checkAgainst, type Known, LIMITS, lastDayInstant, parsePastedList, problemOf, type Row } from "./join-input.ts";
+import { checkAgainst, type Known, LIMITS, lastDayInstant, parsePastedList, problemOf, type Row, untilToSend } from "./join-input.ts";
 import { JoinResult, PasteCheck } from "./join-parts.tsx";
 import { counts, type Deps, newRun, type Options, type Run, sendPeople, sendTeam } from "./join-run.ts";
 
@@ -43,6 +43,8 @@ export function JoinFlow({ mode, portalHref, onClose, onChanged }: { mode: JoinM
   const [sent, setSent] = useState(false);
   const [, setTick] = useState(0);
   const run = useRef<Run | null>(null);
+  /** what the first send used: a repeat sends the same, so a clock that moves on cannot turn a contractor into a person with no last day */
+  const frozen = useRef<Options | null>(null);
   const known = dir.data ? knownOf(dir.data) : null;
 
   // the people to add: the one in the form, or the checked rows of the paste
@@ -70,12 +72,21 @@ export function JoinFlow({ mode, portalHref, onClose, onChanged }: { mode: JoinM
 
   const send = async (): Promise<boolean | undefined> => {
     if (ready.length === 0) return false;
+    if (!frozen.current) {
+      const end = untilToSend(contractor, day);
+      if (!end.ok) {
+        setFailure(`${end.text} Nothing was added.`);
+        return false;
+      }
+      frozen.current = { ...options, until: end.until };
+    }
+    const sending = frozen.current;
     setBusy(true);
     setFailure(null);
     try {
       run.current ??= newRun(globalThis.crypto.randomUUID());
-      await sendPeople(run.current, ready, options, deps, () => setTick((t) => t + 1));
-      await sendTeam(run.current, options, deps);
+      await sendPeople(run.current, ready, sending, deps, () => setTick((t) => t + 1));
+      await sendTeam(run.current, sending, deps);
       setSent(true);
       await Promise.resolve(onChanged());
       return undefined;
@@ -88,11 +99,11 @@ export function JoinFlow({ mode, portalHref, onClose, onChanged }: { mode: JoinM
   };
   // after a partial run: only what did not go through, and only the team when that is what failed
   const again = async (what: "people" | "team") => {
-    if (!run.current) return;
+    if (!run.current || !frozen.current) return;
     setBusy(true);
     try {
-      if (what === "people") await sendPeople(run.current, ready, options, deps, () => setTick((t) => t + 1));
-      await sendTeam(run.current, options, deps);
+      if (what === "people") await sendPeople(run.current, ready, frozen.current, deps, () => setTick((t) => t + 1));
+      await sendTeam(run.current, frozen.current, deps);
       await Promise.resolve(onChanged());
     } finally {
       setBusy(false);
@@ -185,7 +196,7 @@ export function JoinFlow({ mode, portalHref, onClose, onChanged }: { mode: JoinM
             { value: "contractor", title: "A contractor", body: "Has a last day. Governance marks them as stopped at the end of that day." },
           ]}
         />
-        <Field label={contractor ? "Last day" : "Last day (optional)"} hint="Access ends at the end of this day, UTC." error={dayText ?? undefined}>
+        <Field label={contractor ? "Last day" : "Last day (optional)"} hint="Governance marks the person as stopped at the end of this day, UTC." error={dayText ?? undefined}>
           <TextInput type="date" value={day} onChange={(e) => setDay(e.target.value)} />
         </Field>
         <Field label="Team" hint="Optional. Team members are read by apps that use teams, for example Knowledge and Rules.">
@@ -199,7 +210,7 @@ export function JoinFlow({ mode, portalHref, onClose, onChanged }: { mode: JoinM
   const confirmStep: FlowStep = {
     name: "Confirm",
     nextLabel: list ? `Add ${ready.length} ${ready.length === 1 ? "person" : "people"}` : "Add person",
-    canNext: ready.length > 0,
+    canNext: ready.length > 0 && dayOk,
     onNext: send,
     render: () => (
       <div className="tb-stack">
@@ -229,7 +240,7 @@ export function JoinFlow({ mode, portalHref, onClose, onChanged }: { mode: JoinM
         <Notice tone="neutral">This adds directory entries. It gives no access in any app and changes nothing in Portal.</Notice>
         {until ? (
           <Notice tone="neutral">
-            {`At the end of ${day}, Governance marks ${list ? "each of these people" : "this person"} as stopped. Their agents are then treated as stopped, and the steps to stop them in Portal wait for you. This needs Governance to be running then. Governance stops only a few people in 10 minutes on its own: if more end on one day, the rest wait for you. It does not end their own logins.`}
+            {`At the end of ${day} (UTC), Governance marks ${list ? "each of these people" : "this person"} as stopped. Their agents are then treated as stopped, and the steps to stop them in Portal wait for you. This needs Governance to be running then. Governance stops only a few people in 10 minutes on its own: if more end on one day, the others follow a little later. It does not end their own logins.`}
           </Notice>
         ) : null}
       </div>

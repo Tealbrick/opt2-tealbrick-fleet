@@ -92,7 +92,7 @@ export function JoinResult({ run, rows, list, busy, portalHref, until, teamName,
           </span>
         </Notice>
       ) : null}
-      {until && c.added > 0 ? <p>{`Last day saved: ${until.slice(0, 10)}. It ends at the end of that day, UTC.`}</p> : null}
+      {until && c.added > 0 ? <p>{`Last day saved: ${until.slice(0, 10)} (UTC).`}</p> : null}
       {c.added > 0 ? (
         <section className="tb-stack" aria-label="What they can reach now">
           <h3 className="sub-head">What they can reach now</h3>

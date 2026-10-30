@@ -156,7 +156,7 @@ describe("Join: one person", () => {
     await next();
     const text = dialog().textContent ?? "";
     assert.match(text, /This adds directory entries\. It gives no access in any app and changes nothing in Portal\./);
-    assert.match(text, /At the end of 2099-12-31, Governance marks this person as stopped\./);
+    assert.match(text, /At the end of 2099-12-31 \(UTC\), Governance marks this person as stopped\./);
     assert.match(text, /does not end their own logins/);
     assert.deepEqual(ops(), ["overview_get"], "nothing is sent before Confirm");
     await next("Add person");
@@ -167,11 +167,31 @@ describe("Join: one person", () => {
     assert.equal(changed, 1);
     const after = dialog().textContent ?? "";
     assert.match(after, /Dana Lee is added\./);
-    assert.match(after, /Last day saved: 2099-12-31/);
+    assert.match(after, /Last day saved: 2099-12-31 \(UTC\)/);
     assert.match(after, /Joining gives no access/);
     assert.ok([...dialog().querySelectorAll("a")].some((a) => a.textContent?.includes("See what apps report for Dana Lee")));
     assert.equal([...dialog().querySelectorAll("a")].find((a) => a.textContent === "Open Portal")?.getAttribute("href"), "https://portal.tealbrick.com/");
     assert.equal(ops().includes("members_set"), false, "no team chosen");
+  });
+
+  it("a contractor whose last day ends while the dialog is open is refused at the send: nothing is added, and never as a person with no end date", async () => {
+    reset();
+    await open("one");
+    await type(field("Name"), "Dana Lee");
+    await next();
+    await choose("A contractor");
+    const day = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+    await type(field("Last day"), day);
+    await next();
+    const realNow = Date.now;
+    Date.now = () => realNow() + 3 * 86_400_000;
+    try {
+      await next("Add person");
+    } finally {
+      Date.now = realNow;
+    }
+    assert.match(alerts().join(" "), /The last day is not right\. This day has passed in UTC\. Choose a later day\. Nothing was added\./);
+    assert.equal(ops().includes("person_set"), false);
   });
 
   it("a person who is in the directory already is not added again: the sentence says so and Next stays off", async () => {
@@ -193,7 +213,7 @@ describe("Join: one person", () => {
     await next();
     await choose("A contractor");
     await type(field("Last day"), "2020-01-01");
-    assert.match(dialog().textContent ?? "", /This day has passed\. Choose today or a later day\./);
+    assert.match(dialog().textContent ?? "", /This day has passed in UTC\. Choose a later day\./);
     assert.equal(button("Next").disabled, true);
     assert.deepEqual(ops(), ["overview_get"]);
   });

@@ -253,7 +253,7 @@ function joinScenes(): Scene[] {
       name: "join-one-confirm",
       ready: "Add a person",
       steps: joinOneToConfirm,
-      expect: ["At the end of 2099-12-31", "It gives no access in any app", "does not end their own logins"],
+      expect: ["At the end of 2099-12-31 (UTC)", "It gives no access in any app", "does not end their own logins"],
       forbid: ["have stopped"],
     },
     {
@@ -264,7 +264,7 @@ function joinScenes(): Scene[] {
         await joinOneToConfirm(p);
         await joinNext(p, "Add person");
       },
-      expect: ["Dana Lee is added.", "Last day saved: 2099-12-31", "Joining gives no access", "grant it in Portal"],
+      expect: ["Dana Lee is added.", "Last day saved: 2099-12-31 (UTC)", "Joining gives no access", "grant it in Portal"],
     },
     {
       ...base,

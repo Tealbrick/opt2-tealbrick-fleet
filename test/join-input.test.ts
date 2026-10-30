@@ -1,7 +1,8 @@
 // C380 T2-d (PR 2): the pasted list and the last day, checked before anything is sent. Each guard: one quiet-on-good, one fire-on-bad.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { checkAgainst, LIMITS, lastDayInstant, parsePastedList, problemOf } from "../src/ui/pages/join-input.ts";
+import { cleanText } from "../src/text.ts";
+import { checkAgainst, cleanCell, LIMITS, lastDayInstant, parsePastedList, problemOf, splitCells, untilToSend } from "../src/ui/pages/join-input.ts";
 
 const NOW = Date.UTC(2026, 9, 30, 12);
 
@@ -75,9 +76,64 @@ test("quiet on good: the last day ends at the END of that day, UTC; today is all
 });
 
 test("fire on bad: a day that has gone, a date that does not exist, no date, a wrong year", () => {
-  assert.deepEqual(lastDayInstant("2026-10-29", NOW), { ok: false, text: "This day has passed. Choose today or a later day." });
+  assert.deepEqual(lastDayInstant("2026-10-29", NOW), { ok: false, text: "This day has passed in UTC. Choose a later day." });
   assert.deepEqual(lastDayInstant("2026-02-30", NOW), { ok: false, text: "This date does not exist." });
   assert.deepEqual(lastDayInstant("", NOW), { ok: false, text: "Choose a date." });
   assert.deepEqual(lastDayInstant("31/12/2026", NOW), { ok: false, text: "Choose a date." });
   assert.deepEqual(lastDayInstant("2999-01-01", NOW), { ok: false, text: "Check the year." });
+  assert.deepEqual(lastDayInstant("2100-06-01", NOW), { ok: false, text: "Check the year." }, "the server refuses a date from 2100-01-01 on");
+  assert.equal(lastDayInstant("2099-12-31", NOW).ok, true);
+});
+
+test("the browser copy of cleanText gives the server's answer on the edge of every range, so a name is compared as it will be stored", () => {
+  const edges = [0x00, 0x1f, 0x7f, 0x9f, 0xad, 0x61c, 0x180e, 0x200b, 0x200f, 0x2028, 0x202e, 0x2060, 0x206f, 0xfeff, 0xfff9, 0xfffb, 0xe0000, 0xe007f, 0xe0100, 0xe01ef];
+  for (const c of [...edges, ...edges.map((e) => e - 1), ...edges.map((e) => e + 1)].filter((c) => c >= 0)) {
+    const sample = `  A${String.fromCodePoint(c)}b  c\td\n `;
+    assert.equal(cleanCell(sample), cleanText(sample), `U+${c.toString(16)}`);
+  }
+  assert.equal(cleanCell("Ann\u200B"), "Ann");
+  assert.equal(cleanCell("\u202Eevil"), "evil");
+});
+
+test("fire on bad: an invisible character does not hide a duplicate (the server removes it before it stores the name)", () => {
+  const rows = checkAgainst(parsePastedList("Ann\u200B\nBo\u202E Bell\nBo Bell").rows, [{ name: "Ann", email: null, handles: [] }]);
+  assert.match(String(rows[0]?.already), /Ann is in the directory already/);
+  assert.equal(rows[0]?.name, "Ann", "and the preview shows the cleaned name");
+  assert.equal(rows[1]?.name, "Bo Bell");
+  assert.equal(rows[2]?.problem, "Same person as line 2.");
+});
+
+test("two people may share a name when each has an email of their own; a name alone, or one email, still says the same person", () => {
+  const known = [{ name: "John Smith", email: "john1@acme.test", handles: [] }, { name: "Cy Cole", email: null, handles: [] }];
+  const rows = checkAgainst(parsePastedList(["John Smith, john2@acme.test", "John Smith, john2b@acme.test", "John Smith, john1@acme.test", "Cy Cole, cy@acme.test", "Jo Jay", "Jo Jay, jo@acme.test", "Jo Jay"].join("\n")).rows, known);
+  assert.deepEqual(rows.map((r) => [r.already ? "already" : r.problem ? "problem" : "ready"]), [["ready"], ["ready"], ["already"], ["already"], ["ready"], ["problem"], ["problem"]]);
+  assert.match(String(rows[5]?.problem), /Same person as line 5/);
+});
+
+test("quiet on good: common spreadsheet shapes: a quoted name with a comma, a semicolon file, Name <email>", () => {
+  const rows = parsePastedList(['"Rossi, Marco",marco@acme.test', "Marco Rossi;marco2@acme.test;CTO", "Marco Three <marco3@acme.test>", '"Four, Marco" <m4@acme.test>'].join("\n")).rows;
+  assert.deepEqual(rows.map((r) => [r.name, r.email, r.title, r.problem]), [["Rossi, Marco", "marco@acme.test", "", null], ["Marco Rossi", "marco2@acme.test", "CTO", null], ["Marco Three", "marco3@acme.test", "", null], ["Four, Marco", "m4@acme.test", "", null]]);
+  assert.deepEqual(splitCells('a,"b,c",d'), ["a", '"b,c"', "d"]);
+  assert.deepEqual(splitCells("a;b"), ["a", "b"]);
+});
+
+test("fire on bad: an email in the name, an empty name column, and a handle with no channel are problems", () => {
+  const rows = parsePastedList(["Marco Rossi marco@x.test extra", "\tmarco@acme.test\tSupport lead", "Ann, slack:U1AAAAAAA, buzz:"].join("\n")).rows;
+  assert.equal(rows[0]?.problem === null, false);
+  assert.equal(rows[1]?.problem, "There is no name.");
+  assert.equal(rows[1]?.title, "Support lead", "the title stays a title");
+  assert.match(String(rows[2]?.problem), /handle has a space or no value/);
+  assert.match(String(problemOf({ name: "Ann", email: null, title: "", handles: ["U1234"] })), /needs buzz:, slack: or telegram: in front/);
+  assert.match(String(problemOf({ name: "Ann marco@x.test", email: null, title: "", handles: [] })), /name has an email address in it/);
+});
+
+test("a contractor never goes out with no end date: the day is read again when it is sent, and a day that ended in between is refused", () => {
+  assert.deepEqual(untilToSend(true, "2026-10-30", NOW), { ok: true, until: "2026-10-30T23:59:59.000Z" });
+  const late = Date.UTC(2026, 9, 31, 0, 0, 1);
+  const out = untilToSend(true, "2026-10-30", late);
+  assert.equal(out.ok, false);
+  assert.match(out.ok ? "" : out.text, /The last day is not right\. This day has passed in UTC/);
+  assert.equal(untilToSend(true, "", NOW).ok, false, "a contractor with no day");
+  assert.deepEqual(untilToSend(false, "", NOW), { ok: true, until: null }, "a person who stays may have none");
+  assert.equal(untilToSend(false, "2026-10-30", late).ok, false, "a day typed and gone is never dropped quietly");
 });
