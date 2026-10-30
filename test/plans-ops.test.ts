@@ -191,19 +191,30 @@ test("A7: refused, then Try again: new attempt after a list, ok, no double actio
   assert.equal(w.plan(id).state, "done");
 });
 
-test("Try again on `changed`: the next list makes the step from what the store shows now; the digest the owner saw no longer binds", async () => {
+test("Try again leaves `changed` alone: the owner did not see the new row, so only a new plan ends it", async () => {
   const w = makeWorld();
   const row = w.connect.add(agentItem({ id: "account_as_itself:a", kind: "account_as_itself" }));
   leave(w);
   const id = w.makePlan({ kind: "agent", id: HENRY, items: [{ product: "connect", id: row.id, digest: "sha256:old" }] });
   await w.tick(id);
   assert.equal(w.item(id, row.id).state, "changed");
-  await run("plan_retry", { plan: id }, ctxOf(w));
-  await w.tick(id);
-  assert.equal(w.item(id, row.id).state, "pending");
   approveAndDeliver(w, String(w.plan(id).draft_key), HENRY);
   await w.tick(id);
-  assert.equal(w.plan(id).state, "done");
+  assert.equal(w.plan(id).state, "partial");
+  const view = (await run("plan_get", { plan: id }, ctxOf(w))).plans[0];
+  assert.equal(view.canRetry, false, "nothing Try again could do");
+  assert.match(view.steps.find((s: { store: string }) => s.store === "connect").text, /Make a new plan/);
+  await run("plan_retry", { plan: id }, ctxOf(w));
+  await w.tick(id);
+  assert.equal(w.item(id, row.id).state, "changed");
+  assert.equal(w.connect.data.ended.length, 0);
+  // the way out: cancel, new plan, new look
+  await run("plan_cancel", { plan: id }, ctxOf(w));
+  const next = (await run("plan_send", { kind: "agent", id: HENRY, items: [{ product: "connect", id: row.id, digest: w.connect.digestOf(row) }] }, ctxOf(w))).plans[0].id;
+  await w.tick(next);
+  approveAndDeliver(w, String(w.plan(next).draft_key), HENRY);
+  await w.tick(next);
+  assert.equal(w.plan(next).state, "done");
 });
 
 test("Try again: a failed Core step is for Portal; a finished plan and a moved entry are refused", async () => {
@@ -528,4 +539,73 @@ test("Try again in link mode asks Portal again: consent may be on now", async ()
   assert.equal(w.plan(id).rail, "draft");
   assert.equal(w.plan(id).state, "waiting");
   assert.equal(w.core.open().length, 1);
+});
+
+test("a stale, withdrawn or replaced plan cannot ask again; nor one with a newer plan open; nor a Core that lied", async () => {
+  const w = makeWorld();
+  leave(w);
+  const id = w.makePlan({ kind: "agent", id: HENRY });
+  await w.tick(id);
+  const out = await run("plan_send", { kind: "agent", id: HENRY }, ctxOf(w));
+  assert.equal(w.plan(id).state, "replaced");
+  await assert.rejects(run("plan_retry", { plan: id }, ctxOf(w)), refused("plan_ended", 409));
+  await w.tick(out.plans[0].id);
+  assert.equal(w.core.open().length, 1);
+
+  const v = makeWorld();
+  leave(v);
+  const pid = v.makePlan({ kind: "agent", id: HENRY });
+  await v.tick(pid);
+  await v.tick(pid);
+  v.core.lieGet = "digest";
+  await v.tick(pid);
+  assert.equal(v.plan(pid).code, "core_mismatch");
+  await assert.rejects(run("plan_retry", { plan: pid }, ctxOf(v)), refused("plan_ended", 409));
+});
+
+test("a system plan that expired while the owner made his own, or while the entry moved: it does not come back as a second plan", async () => {
+  const w = makeWorld();
+  set(w.db, "agent", HENRY, "suspended", { actor: SYSTEM }, w.clock.t);
+  scanPlans(w.db, w.clock.t, () => {});
+  const sys = String(w.db.prepare("SELECT id FROM fleet_plans").get()?.id);
+  await w.tick(sys);
+  w.clock.t += DAY_MS + 1000;
+  await w.tick(sys);
+  assert.equal(w.plan(sys).state, "expired");
+  const own = w.makePlan({ kind: "agent", id: HENRY });
+  await w.tick(own);
+  w.clock.t += DAY_MS + 1000;
+  scanPlans(w.db, w.clock.t, () => {});
+  assert.equal(w.plan(sys).state, "replaced");
+
+  const v = makeWorld();
+  set(v.db, "agent", HENRY, "suspended", { actor: SYSTEM }, v.clock.t);
+  scanPlans(v.db, v.clock.t, () => {});
+  const s2 = String(v.db.prepare("SELECT id FROM fleet_plans").get()?.id);
+  await v.tick(s2);
+  v.clock.t += DAY_MS + 1000;
+  await v.tick(s2);
+  v.db.prepare("UPDATE fleet_agents SET lifecycle_rev = lifecycle_rev + 1 WHERE id = ?").run(HENRY);
+  v.clock.t += DAY_MS + 1000;
+  scanPlans(v.db, v.clock.t, () => {});
+  assert.equal(v.plan(s2).state, "stale");
+});
+
+test("a new plan refuses as a whole when any part is past Core: no part is taken back first", async () => {
+  const w = makeWorld();
+  leave(w);
+  const id = w.makePlan({ kind: "agent", id: HENRY });
+  await w.tick(id);
+  w.core.apply(String(w.plan(id).draft_key));
+  await w.tick(id);
+  assert.notEqual(w.plan(id).state, "done");
+  await assert.rejects(run("plan_send", { kind: "agent", id: HENRY }, ctxOf(w)), refused("plan_open", 409));
+  assert.ok(!["replaced", "withdrawn"].includes(String(w.plan(id).state)));
+});
+
+test("T7 reads each part of a split plan: part 1 done and part 2 rejected is not finished", async () => {
+  const w = makeWorld();
+  const { lastPlanUnfinished } = await import("../src/plans/guards.ts");
+  w.db.prepare("INSERT INTO fleet_plans (id, group_id, part, parts, subject_kind, subject_id, subject_name, purpose, trigger_kind, lifecycle_rev, state, plan_digest, expires_in_sec, opened_at, updated_at) VALUES ('pln_a', 'pln_a', 1, 2, 'person', ?, 'Ann', 'leave', 'owner', 1, 'done', 'd', 60, 5, 5), ('pln_b', 'pln_a', 2, 2, 'person', ?, 'Ann', 'leave', 'owner', 1, 'rejected', 'd', 60, 5, 5)").run(w.ann.id, w.ann.id);
+  assert.equal(lastPlanUnfinished(w.db, "person", w.ann.id), true);
 });
