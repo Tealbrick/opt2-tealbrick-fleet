@@ -100,7 +100,7 @@ describe("refusals of lifecycle_set", () => {
 describe("the subject link", () => {
   it("round trip", () => {
     const href = subjectHref("agent", "agt_1");
-    assert.deepEqual(subjectFromUrl(href.slice(href.indexOf("?"))), { kind: "agent", id: "agt_1", open: null });
+    assert.deepEqual(subjectFromUrl(href.slice(href.indexOf("?"))), { kind: "agent", id: "agt_1" });
   });
   it("refuses a bad kind or no id", () => {
     assert.equal(subjectFromUrl("?kind=team&id=x"), null);

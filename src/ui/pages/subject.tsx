@@ -6,10 +6,13 @@ import { useCallback, useEffect, useState } from "react";
 import type { ColleagueGetOutput } from "#kit";
 import { LoadFailed, Loading, PageHead, useLoad } from "../common.tsx";
 import { ChangeDialog, CloseDialog } from "./change-dialogs.tsx";
+import { FEATURES } from "./features.ts";
 import { LeaveFlow } from "./leave-flow.tsx";
 import { PlanResult } from "./plan-result.tsx";
 import { StopNow } from "./stop-now.tsx";
+import { StoreRows } from "./store-rows.tsx";
 import { openSubject, type SubjectKind, subjectFromUrl, subjectHref } from "./subject-link.ts";
+import { loadPreview } from "./what-would-stop.tsx";
 import { type Lifecycle, reasonLabel, when } from "./words.ts";
 
 type Colleague = ColleagueGetOutput["colleague"];
@@ -72,6 +75,7 @@ function Subject({ kind, id, portalHref }: { kind: SubjectKind; id: string; port
               <PlanResult colleague={c} portalHref={portalHref} showLine={false} />
             </section>
           ) : null}
+          {FEATURES.preview ? <AccessByStore kind={c.kind} id={c.id} name={c.name} /> : null}
           {c.kind === "person" && c.agents.length ? <OwnedAgents agents={c.agents} /> : null}
           {c.grantsBefore?.length ? <GrantsBefore c={c} grants={c.grantsBefore} /> : null}
           <History items={c.history} />
@@ -150,6 +154,19 @@ function Facts({ c }: { c: Colleague }) {
         </div>
       ))}
     </dl>
+  );
+}
+
+/** A5: what each app reports for this entry, by store, with who reported it and when. */
+function AccessByStore({ kind, id, name }: { kind: SubjectKind; id: string; name: string }) {
+  const { data, error, loading, reload } = useLoad(useCallback(() => loadPreview(kind, id), [kind, id]));
+  return (
+    <section className="tb-stack" aria-label="Access">
+      <h2 className="sub-head">Access</h2>
+      <p className="tb-soft">What each app reports now, and what Stop and remove access would do to it. Stop now ends less.</p>
+      {error ? <LoadFailed message={error} retrying={loading} onRetry={() => void reload()} /> : null}
+      {data === null ? error ? null : <Loading what="what each app reports" /> : <StoreRows stores={data.stores} subjectName={name} unlinkedAccounts={data.unlinkedAccounts} />}
+    </section>
   );
 }
 
