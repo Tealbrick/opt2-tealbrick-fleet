@@ -48,8 +48,8 @@ test("update path: every image admits 0.2.3 (stable) and 0.2.x; the range check 
   assert.equal(admits("^0.2.0", from), false, "a form it cannot read fails closed");
 });
 
-test("migrations are forward-only and numbered without gaps (0005 agent handles, 0006 team template, 0007 outside agent fields, 0008 lifecycle)", () => {
+test("migrations are forward-only and numbered without gaps (0005 agent handles, 0006 team template, 0007 outside agent fields, 0008 lifecycle, 0009 access)", () => {
   const names = migrationFiles().map((m) => m.name);
-  assert.deepEqual(names, ["0001_init.sql", "0002_governance.sql", "0003_reviews.sql", "0004_proposals.sql", "0005_agent_handles.sql", "0006_proposal_team_template.sql", "0007_outside_agent_fields.sql", "0008_lifecycle.sql"]);
+  assert.deepEqual(names, ["0001_init.sql", "0002_governance.sql", "0003_reviews.sql", "0004_proposals.sql", "0005_agent_handles.sql", "0006_proposal_team_template.sql", "0007_outside_agent_fields.sql", "0008_lifecycle.sql", "0009_access.sql"]);
   for (const m of migrationFiles()) assert.doesNotMatch(m.sql, /^\s*DROP TABLE (?!fleet_proposals;)/im, `${m.name}: no table is dropped except the 0006 rebuild`);
 });
