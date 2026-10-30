@@ -45,12 +45,12 @@ const NEW_PAGES = [
   { id: "summary", label: "Summary" },
   { id: "everyone", label: "People and agents" },
   { id: "access", label: "Access" },
-  { id: "reviews", label: "Trust reviews" },
+  { id: "reviews", label: "Reviews" },
   { id: "teams", label: "Teams" },
-  { id: "topology", label: "Topology" },
+  { id: "topology", label: "Who owns what" },
   { id: "rules", label: "Contact rules" },
   { id: "identities", label: "Identities" },
-  { id: "holds", label: "Holds" },
+  { id: "holds", label: "Waiting for approval" },
 ];
 const PAGES = FEATURES.lifecycle ? NEW_PAGES : OLD_PAGES;
 
