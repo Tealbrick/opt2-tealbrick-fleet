@@ -2,10 +2,9 @@
 import type { Db } from "@opt2-tealbrick/miniapp-sdk";
 import { getPlan, type Row, stepsOf } from "./plan.ts";
 import { NOT_CHANGED } from "./portal-link.ts";
-import { isFinalStep, isOpenPlan, stuckStep } from "./steps.ts";
-import { coreLabel, coreStepText, headlineOf, itemStepText, NOTE_CONSENT, NOTE_RAIL_OFF, readText, storeName } from "./words.ts";
+import { ASK_AGAIN_STATES, isFinalStep, isOpenPlan, stuckStep } from "./steps.ts";
+import { coreLabel, coreStepText, headlineOf, itemStepText, NOTE_CONSENT, NOTE_NOT_TAKEN_BACK, NOTE_RAIL_OFF, readText, storeName } from "./words.ts";
 
-const ASK_AGAIN: readonly string[] = ["expired", "rejected", "lost", "failed", "cancelled"];
 const iso = (ms: unknown): string | null => (ms === null || ms === undefined ? null : new Date(Number(ms)).toISOString());
 
 export function planView(db: Db, id: string) {
@@ -21,7 +20,8 @@ export function planView(db: Db, id: string) {
   };
   const mode = String(p.rail);
   const open = isOpenPlan(String(p.state));
-  const stuck = steps.some((s) => stuckStep(s as never));
+  // `changed` waits for a new plan: Try again does not touch it.
+  const retriable = steps.some((s) => s.state !== "changed" && stuckStep(s as never));
   const coreFailed = steps.some((s) => s.phase === "core" && s.state === "failed");
   return {
     id: String(p.id),
@@ -34,13 +34,13 @@ export function planView(db: Db, id: string) {
     state: String(p.state),
     headline: headlineOf(p, counts),
     mode,
-    note: p.rail_code === "topology_consent" ? NOTE_CONSENT : mode === "portal_link" ? NOTE_RAIL_OFF : null,
+    note: p.code === "not_taken_back" ? NOTE_NOT_TAKEN_BACK : p.rail_code === "topology_consent" ? NOTE_CONSENT : mode === "portal_link" ? NOTE_RAIL_OFF : null,
     reviewUrl: p.review_url === null ? null : String(p.review_url),
     expiresAt: iso(p.expires_at),
     openedAt: iso(p.opened_at) as string,
     closedAt: iso(p.closed_at),
     receiptId: p.receipt_id === null ? null : String(p.receipt_id),
-    canRetry: open ? (stuck && !coreFailed) || (mode === "portal_link" && p.draft_state === null) : ASK_AGAIN.includes(String(p.state)),
+    canRetry: open ? (retriable && !coreFailed) || (mode === "portal_link" && p.draft_state === null) : ASK_AGAIN_STATES.includes(String(p.state)) && p.code !== "core_mismatch",
     canCancel: open,
     counts,
     stores: steps.filter((s) => s.phase === "read").map((s) => ({ product: String(s.target), name: storeName(String(s.target)), text: readText(s), state: String(s.state) })),
