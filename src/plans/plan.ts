@@ -132,7 +132,7 @@ export function createPlan(db: Db, input: PlanInput, now = Date.now()): Made {
       for (const t of ACCESS_TARGETS) addStep(db, id, n++, { phase: "read", target: t, op: "access_list" }, now);
       ids.push(id);
     }
-    appendEvent(db, { subject: { kind: s.kind, id: s.id, name: s.name }, kind: "changed", from: s.lifecycle, to: s.lifecycle, actor: input.actor, note: `A plan was made: ${steps.length} steps in Portal.`, plan: { id: groupId, draftId: null, receiptId: null }, at: now });
+    appendEvent(db, { subject: { kind: s.kind, id: s.id, name: s.name }, kind: "changed", actor: input.actor, note: `A plan was made: ${steps.length} steps in Portal.`, plan: { id: groupId, draftId: null, receiptId: null }, at: now });
     return { ids };
   });
 }

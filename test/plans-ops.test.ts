@@ -176,7 +176,7 @@ async function splitWorld() {
     store.setAgent(w.db, { agent: id, owner: w.ann.id }, w.clock.t);
     w.core.addAgent(id, 0, 0);
   }
-  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  set(w.db, "person", w.ann.id, "leaving", { noCap: true }, w.clock.t);
   const first = w.makePlan({ kind: "person", id: w.ann.id });
   const parts = w.db.prepare("SELECT id FROM fleet_plans WHERE group_id = ? ORDER BY part").all(first).map((r) => String(r.id));
   for (const id of parts) await w.tick(id);
@@ -952,12 +952,14 @@ test("D2 review: a transfer to the current owner is refused; a plan with no Core
   assert.match(view.note, /2 agents stay paused with the key/);
   assert.doesNotMatch(view.headline, /^Done/);
 
+  // only an entry new in this window needs the confirm: the owner stopped an hour ago, two others just now, the cap is 2
   const v = makeWorld();
-  set(v.db, "person", v.ann.id, "suspended", {}, Date.now());
-  v.db.prepare("INSERT INTO fleet_settings (key, value) VALUES ('stop_cap', '1') ON CONFLICT (key) DO UPDATE SET value = '1'").run();
+  set(v.db, "person", v.ann.id, "suspended", {}, Date.now() - 3_600_000);
+  for (const name of ["P1", "P2"]) set(v.db, "person", store.setPerson(v.db, { name }, v.clock.t).id, "suspended", {}, Date.now());
+  v.db.prepare("INSERT INTO fleet_settings (key, value) VALUES ('stop_cap', '2') ON CONFLICT (key) DO UPDATE SET value = '2'").run();
   await assert.rejects(run("plan_send", { kind: "person", id: v.ann.id, decisions: [{ agent: HENRY, decision: "stop" }] }, ctxOf(v)), refused("stop_cap_reached", 409));
   assert.equal(stateOf(v.db, "agent", HENRY), "active");
-  const ok = await run("plan_send", { kind: "person", id: v.ann.id, decisions: [{ agent: HENRY, decision: "stop" }], confirmCount: 2 }, ctxOf(v));
+  const ok = await run("plan_send", { kind: "person", id: v.ann.id, decisions: [{ agent: HENRY, decision: "stop" }], confirmCount: 3 }, ctxOf(v));
   assert.equal(ok.plans.length, 1);
   assert.equal(stateOf(v.db, "agent", HENRY), "leaving");
 });
@@ -980,4 +982,69 @@ test("D2 review: plan_send when the entry moves during the call to Portal: the o
     return true;
   });
   assert.equal(w.plan(id).state, "replaced");
+});
+
+test("N2-3: the cap counts a person's agents with the person; a blocked verdict counts and needs the same confirm; the banner counts them; each entry once", async () => {
+  const { stopsSince } = await import("../src/lifecycle/events.ts");
+  const { recordReview } = await import("../src/reviews.ts");
+  const w = makeWorld();
+  const { agentId } = await import("./plans-world.ts");
+  const many = Array.from({ length: 6 }, (_, i) => agentId(i + 50));
+  store.syncAgents(w.db, [...w.db.prepare("SELECT id, name, mode, status FROM fleet_agents").all(), ...many.map((id) => ({ id, name: id, mode: "free", status: "active" }))] as never, w.clock.t);
+  for (const id of many) store.setAgent(w.db, { agent: id, owner: w.ann.id }, w.clock.t);
+  // Ann, Henry, Sales and six more: 9 entries, cap 5. Counted once before: one stop with six agents went through with no word
+  assert.throws(() => set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t), (e: TbError) => e.code === "stop_cap_reached" && e.details?.count === 9);
+  assert.equal(stateOf(w.db, "person", w.ann.id), "active");
+  set(w.db, "person", w.ann.id, "leaving", { confirmCount: 9 }, w.clock.t);
+  assert.equal(stopsSince(w.db, w.clock.t - 1000), 9);
+  // the agents' own stop in the same window adds nothing: each entry once
+  set(w.db, "agent", HENRY, "leaving", {}, w.clock.t);
+  assert.equal(stopsSince(w.db, w.clock.t - 1000), 9);
+  // keep-running is not stopped by the cascade
+  const v = makeWorld();
+  v.db.prepare("UPDATE fleet_agents SET keep_running = 1, keep_reason = 'x' WHERE id = ?").run(SALES);
+  set(v.db, "person", v.ann.id, "leaving", {}, v.clock.t);
+  assert.equal(stopsSince(v.db, v.clock.t - 1000), 2);
+  // a blocked verdict is a stop in the floor
+  const b = makeWorld();
+  const people = Array.from({ length: 5 }, (_, i) => store.setPerson(b.db, { name: `P${i}` }, b.clock.t));
+  for (const p of people) set(b.db, "person", p.id, "suspended", {}, b.clock.t);
+  const digestOf = async (c: OpContext, id: string): Promise<string> => (await run("review_get", { subject: { kind: "agent", id } }, c)).current.digest;
+  const input = { subject: { kind: "agent" as const, id: HENRY }, verdict: "blocked" as const, reason: "Security", snapshotDigest: await digestOf(ctxOf(b), HENRY) };
+  assert.throws(() => recordReview(b.db, "per_owner", input, b.clock.t), (e: TbError) => e.code === "stop_cap_reached" && e.details?.count === 6);
+  assert.notEqual(b.db.prepare("SELECT trust FROM fleet_agents WHERE id = ?").get(HENRY)?.trust, "blocked");
+  recordReview(b.db, "per_owner", { ...input, confirmCount: 6 }, b.clock.t);
+  assert.equal(b.db.prepare("SELECT trust FROM fleet_agents WHERE id = ?").get(HENRY)?.trust, "blocked");
+  assert.equal(stopsSince(b.db, b.clock.t - 1000), 6);
+  // a trusted verdict is no stop
+  const c = makeWorld();
+  recordReview(c.db, "per_owner", { subject: { kind: "agent", id: SALES }, verdict: "trusted", reason: "ok", snapshotDigest: await digestOf(ctxOf(c), SALES) }, c.clock.t);
+  assert.equal(stopsSince(c.db, c.clock.t - 1000), 0);
+});
+
+test("N2-3: nobody can confirm for the timer or the old form: a person with many agents still stops while the window has room; past it the timer waits and the form names the page", async () => {
+  const { tickDates } = await import("../src/lifecycle/validity.ts");
+  const { agentId } = await import("./plans-world.ts");
+  const w = makeWorld();
+  const many = Array.from({ length: 6 }, (_, i) => agentId(i + 60));
+  store.syncAgents(w.db, [...w.db.prepare("SELECT id, name, mode, status FROM fleet_agents").all(), ...many.map((id) => ({ id, name: id, mode: "free", status: "active" }))] as never, w.clock.t);
+  for (const id of many) store.setAgent(w.db, { agent: id, owner: w.ann.id }, w.clock.t);
+  w.db.prepare("UPDATE fleet_people SET valid_until = ? WHERE id = ?").run(w.clock.t - 1000, w.ann.id);
+  const seen = new Set<string>();
+  tickDates(w.db, seen, w.clock.t);
+  assert.equal(tickDates(w.db, seen, w.clock.t + 60_000).stopped, 1);
+  assert.equal(stateOf(w.db, "person", w.ann.id), "suspended");
+
+  const v = makeWorld();
+  for (const id of many) {
+    store.syncAgents(v.db, [...v.db.prepare("SELECT id, name, mode, status FROM fleet_agents").all(), { id, name: id, mode: "free", status: "active" }] as never, v.clock.t);
+    store.setAgent(v.db, { agent: id, owner: v.ann.id }, v.clock.t);
+  }
+  store.setPerson(v.db, { id: v.ann.id, name: "Ann", status: "departed" }, v.clock.t);
+  assert.equal(stateOf(v.db, "person", v.ann.id), "leaving");
+
+  const full = makeWorld();
+  for (const name of ["A", "B", "C", "D", "E"]) set(full.db, "person", store.setPerson(full.db, { name }, full.clock.t).id, "suspended", {}, full.clock.t);
+  assert.throws(() => store.setPerson(full.db, { id: full.ann.id, name: "Ann", status: "departed" }, full.clock.t), (e: TbError) => e.code === "stop_cap_reached" && /this person's page/.test(e.message));
+  assert.equal(stateOf(full.db, "person", full.ann.id), "active");
 });
