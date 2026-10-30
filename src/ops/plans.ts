@@ -6,6 +6,7 @@ import { bannerAlerts } from "../plans/alerts.ts";
 import { planCtxOf } from "../plans/context.ts";
 import { assertAllClosed, closeOpenPlans, retryPlan } from "../plans/control.ts";
 import { applyDecisions, subjectAt } from "../plans/decisions.ts";
+import { owedRotations } from "../plans/guards.ts";
 import { kickPlans } from "../plans/jobs.ts";
 import { checkPlan, createPlan, getPlan, OPEN_SQL, openPlansOf, type Row } from "../plans/plan.ts";
 import { isOpenPlan } from "../plans/steps.ts";
@@ -32,7 +33,9 @@ export const planOps = {
       const topology = readTopology(ctx);
       const grants = (agent: string) => grantsOf(db, topology, "agent", agent);
       const asked = { kind: input.kind, id: input.id, items: input.items, expiresInSec: input.expiresInSec, actor };
-      const choose = () => [...(input.transfers ?? []), ...applyDecisions(db, subjectAt(db, input.kind, input.id, input.expectedRev), input.decisions ?? [], actor, grants, now, input.confirmCount)];
+      // A new plan takes the old draft back, with any new key it asked for; an older plan may have ended without it. That key is still owed: the agent may no longer be this entry's, so only here can it be carried over.
+      const owed = owedRotations(db, input.kind, input.id);
+      const choose = () => [...new Set([...owed, ...(input.transfers ?? [])])].concat(applyDecisions(db, subjectAt(db, input.kind, input.id, input.expectedRev), input.decisions ?? [], actor, grants, now, input.confirmCount));
       // Tried first and rolled back: what would refuse takes no older draft back. No await in the try.
       try {
         db.transaction(() => {

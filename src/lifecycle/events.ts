@@ -116,6 +116,21 @@ export function stoppedSince(db: Db, since: number): Set<string> {
 }
 export const stopsSince = (db: Db, since: number): number => stoppedSince(db, since).size;
 
+const newEpoch = (now: number): string => `fep_${ulid(now)}`;
+
+/**
+ * The feed's origin (N2-2, Rules reads it). Made once; a new one after a restore; a fresh install has none yet, so it gets its own. Each read checks for a restore first, because a feed read can come before onStart:
+ * no answer goes out with the old value. A file put back outside the SDK's restore sets no mark, and only Rules' lower-revision check sees that.
+ */
+export function feedEpoch(db: Db, now = Date.now()): string {
+  noteRestore(db, now);
+  const cur = db.prepare("SELECT value FROM fleet_settings WHERE key = 'feed_epoch'").get()?.value;
+  if (typeof cur === "string") return cur;
+  const made = newEpoch(now);
+  db.prepare("INSERT INTO fleet_settings (key, value) VALUES ('feed_epoch', ?) ON CONFLICT (key) DO NOTHING").run(made);
+  return String(db.prepare("SELECT value FROM fleet_settings WHERE key = 'feed_epoch'").get()?.value);
+}
+
 /**
  * A restore brings back an older file and drops later rows. The SDK marks the archive in tb_meta (`restore_applied`). When that mark
  * is new, this writes one `restored` row at boot, so the record says that rows can be missing.
@@ -132,6 +147,8 @@ export function noteRestore(db: Db, now: number): boolean {
   if (seen === mark) return false;
   return db.transaction(() => {
     db.prepare("INSERT INTO fleet_settings (key, value) VALUES ('restore_seen', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(mark as string);
+    // N2-2: the file is an older one. A reader must not take it for the same origin: the revision alone can climb back to where it was.
+    db.prepare("INSERT INTO fleet_settings (key, value) VALUES ('feed_epoch', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(newEpoch(now));
     appendEvent(db, { subject: { kind: "workspace", id: "", name: "Governance" }, kind: "restored", actor: { kind: "system", id: null }, note: "Data was restored from a backup. Rows after that backup are not in this record.", at: now });
     return true;
   });

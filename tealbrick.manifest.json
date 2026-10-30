@@ -1114,6 +1114,10 @@
                     }
                   }
                 }
+              },
+              "epoch": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,64}$"
               }
             }
           },
@@ -1135,6 +1139,10 @@
               },
               "unchanged": {
                 "const": true
+              },
+              "epoch": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,64}$"
               }
             }
           }
@@ -5671,6 +5679,16 @@
                     "type": "null"
                   }
                 ]
+              },
+              "rulesHolds": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             }
           },
@@ -6682,6 +6700,16 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "rulesHolds": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 }
               },
@@ -7601,6 +7629,16 @@
                     ]
                   },
                   "gateNote": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "rulesHolds": {
                     "anyOf": [
                       {
                         "type": "string"

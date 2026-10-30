@@ -68,6 +68,7 @@ export const beforeChangeTone = (floor: Pick<Floor, "state">): "needs-you" | "ne
 export function afterChangeText(floor: Floor): string {
   const parts = [floor.text];
   if (floor.state === "confirmed") parts.push("If its hook is on, calls stop in about 2 minutes. Governance cannot see that switch: check it in Portal.");
+  if (floor.rulesHolds) parts.push(floor.rulesHolds);
   if (floor.gateNote && floor.lastGateAt) parts.push(`Rules has not checked a call since ${when(floor.lastGateAt)}.`);
   return parts.join(" ");
 }
