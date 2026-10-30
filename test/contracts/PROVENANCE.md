@@ -75,3 +75,6 @@ copy of this file for its contract test (Rules lead, 2026-10-27). It replaces no
 ## tb.access/1 revoke (C380 B9c, spec 0.1.89)
 
 `access.revoke_in.1.schema.json`, `access.revoke_out.1.schema.json`, `access.revoke_in.1.json` and `access.revoke_out.1.json` are byte copies from tag `spec-v0.1.89`. Do not edit them. `test/plans-contract.test.ts` checks the sha256 of the schemas against specs `docs/ACCESS.md`; the fake store in `test/plans-fakes.ts` validates each call against them.
+## Rules & Approvals 0.7.0-dev.1 manifest (companion target, `floor_status`)
+
+`rules.0.7.0-dev.1.manifest.json` is a byte copy. Do not edit it. Source: `Tealbrick/opt2-tealbrick-rules`, tag `v0.7.0-dev.1`, commit `615ea6b759dfaaec772918f09e2f8de4f9f5aa36`, file `tealbrick.manifest.json`. sha256: `575922776539e9eae8bb4ac957ee95cc05c137251fe62ff835d5409a5a8b0fcf`. Use: the M-CP-2 check against the deployed Rules, and the output shape of `floor_status` that `src/lifecycle/floor.ts` reads.

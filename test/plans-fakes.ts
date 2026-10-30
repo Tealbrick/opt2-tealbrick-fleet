@@ -56,6 +56,9 @@ export class FakeCore implements OwnerDraftsApi {
   /** the draft is stored, and the answer is lost */
   loseNextAnswer = false;
   failStep: string | null = null;
+  failAgent: string | null = null;
+  /** what a future SDK read of slice.rev would answer */
+  revisionRead: number | null = null;
   /** the next body of get lies about its steps */
   lieGet: "digest" | "steps" | null = null;
   /** called at named points; a test's child process dies there */
@@ -94,7 +97,8 @@ export class FakeCore implements OwnerDraftsApi {
     if (!this.flag) throw new TbError("not_found", "not found", 404);
   }
   private state(d: Draft): OwnerDraftState {
-    return d.state !== "applied" && d.state !== "applying" && d.state !== "failed" && this.now() >= d.expiresAt ? "expired" : d.state;
+    // core drafts.ts expiredAt: open, submitted and failed run out; a stop that was applied or is applying does not.
+    return d.state !== "applied" && d.state !== "applying" && d.state !== "rejected" && this.now() >= d.expiresAt ? "expired" : d.state;
   }
   private status(d: Draft): OwnerDraftStatus {
     return { draftId: d.id, state: this.state(d), reviewUrl: `https://portal.test/drafts/${d.id}` };
@@ -169,16 +173,18 @@ export class FakeCore implements OwnerDraftsApi {
     d.appliedSince = this.now();
     this.save();
     if (opts.stopMidWay) return; // Core restarted here: `applying` stays until the sweep
+    // Core: "An app's stop steps do not depend on each other: one agent that fails never leaves the others running". keptStatus: a re-apply skips what ran.
+    let failed = false;
     for (const [n, s] of d.steps.entries()) {
       const st = d.status[n] as Draft["status"][number];
-      if (st.status === "ok") continue; // keptStatus: a re-apply skips what ran
-      if (this.failStep === s.opId) {
+      if (st.status === "ok") continue;
+      if (this.failStep === s.opId || this.failAgent === s.agt) {
         st.status = "failed";
         st.error = { code: "agent_offboarded", message: "This agent was removed." };
-        d.state = "failed";
-        this.save();
-        return;
+        failed = true;
+        continue;
       }
+      delete st.error;
       const a = this.data.agents[s.agt] as CoreData["agents"][string];
       this.data.rev++;
       if (s.opId === "agents.pause") {
@@ -196,8 +202,8 @@ export class FakeCore implements OwnerDraftsApi {
       }
       st.status = "ok";
     }
-    d.state = "applied";
-    d.receiptId = `rcp_${d.id}`;
+    d.state = failed ? "failed" : "applied";
+    if (!failed) d.receiptId = `rcp_${d.id}`;
     this.save();
   }
   reject(key: string): void {
@@ -214,7 +220,7 @@ export class FakeCore implements OwnerDraftsApi {
         const d = this.data.delivered[a];
         return !d || d.status === "paused";
       },
-      revision: () => null,
+      revision: () => this.revisionRead,
       topology: (): DecodedTopology | null => {
         if (!this.topologyOn) return null;
         const edges: DecodedTopology["edges"] = [];
@@ -257,7 +263,7 @@ export class FakeStore {
   data: StoreData = { rows: [], agentStatus: {}, idem: {}, holds: {}, handled: [], ended: [], lists: 0 };
   /** one injected answer per call, first in, first out */
   listScript: (() => void)[] = [];
-  revokeScript: { kind: "deny" | "hold" | "lie" | "fail_item" | "crash_before" | "crash_after" | "lose_answer" | "throw"; code?: string; status?: number; details?: Record<string, unknown> }[] = [];
+  revokeScript: { kind: "deny" | "hold" | "lie" | "fail_item" | "crash_before" | "crash_after" | "lose_answer" | "throw" | "handler_throw"; code?: string; status?: number; details?: Record<string, unknown> }[] = [];
   notShown: { kind: string; reason: string }[] = [{ kind: "held_calls", reason: "Calls that wait are kept outside." }];
   crashPoint: (name: string) => void = () => {};
   save: () => void = () => {};
@@ -329,6 +335,12 @@ export class FakeStore {
     this.data.idem[key] = { digest: inputDigest, kind: "unknown" };
     this.save();
     this.data.handled.push(key);
+    if (inj?.kind === "handler_throw") {
+      // SDK: a handler that throws frees the key. `unknown` is only for a process that died.
+      this.revokeScript.shift();
+      delete this.data.idem[key];
+      throw new TbError(inj.code ?? "app_error", "the handler failed", inj.status ?? 500);
+    }
     if (inj?.kind === "crash_before") {
       this.revokeScript.shift();
       this.save();

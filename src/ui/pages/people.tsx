@@ -6,6 +6,7 @@ import type { PersonSetInput } from "#kit";
 import { EditDialog, PageHead } from "../common.tsx";
 import { OutsideAgentDialog } from "../outside-agent.tsx";
 import { TrustTag } from "../reviews.tsx";
+import { FEATURES } from "./features.ts";
 import { csv, DeleteButton, type Dir, type Person, type Reload, shortHandle } from "./shared.tsx";
 
 function PersonDialog({ person, onClose, reload }: { person: Person | "new"; onClose: () => void; reload: Reload }) {
@@ -50,16 +51,22 @@ function PersonDialog({ person, onClose, reload }: { person: Person | "new"; onC
           </Field>
         </>
       ) : null}
-      <Field label="Status" hint="A departed person keeps the entry but gives no team facts.">
-        <Select
-          options={[
-            { value: "active", label: "Active" },
-            { value: "departed", label: "Departed" },
-          ]}
-          value={status}
-          onValueChange={(v) => setStatus(v as "active" | "departed")}
-        />
-      </Field>
+      {FEATURES.lifecycle ? (
+        p && !outside ? (
+          <p className="tb-hint">To stop this person's agents or bring the person back, open the person in People and agents.</p>
+        ) : null
+      ) : (
+        <Field label="Status" hint="A departed person keeps the entry but gives no team facts.">
+          <Select
+            options={[
+              { value: "active", label: "Active" },
+              { value: "departed", label: "Departed" },
+            ]}
+            value={status}
+            onValueChange={(v) => setStatus(v as "active" | "departed")}
+          />
+        </Field>
+      )}
       <Field label="Tags" hint="Comma separated, lowercase.">
         <TextInput value={tags} onChange={(e) => setTags(e.target.value)} />
       </Field>

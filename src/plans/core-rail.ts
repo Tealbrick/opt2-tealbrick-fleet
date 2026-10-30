@@ -53,6 +53,8 @@ export function railAnswerOf(e: unknown): RailAnswer<never> {
   if (!(e instanceof TbError)) return { kind: "wait", code: "no_answer", afterMs: null };
   const d = detailsOf(e);
   const afterMs = typeof d.retryAfterMs === "number" ? d.retryAfterMs : null;
+  // A stale slice shows no caps. That says nothing about the bridge, and a draft may be open: try again, do not fall back.
+  if (e.code === "bridge_cap_missing" && d.reason !== undefined) return { kind: "wait", code: String(d.reason), afterMs };
   if (OFF_CODES.has(e.code)) return { kind: "off", code: e.code };
   if (e.httpStatus === 404 && e.code === "not_found") {
     if (d.pointer === undefined) return { kind: "off", code: "rail_off" };
@@ -77,7 +79,8 @@ const KNOWN_STATES: readonly string[] = ["open", "submitted", "applying", "appli
 /** A body with another shape is no answer: a plan never moves on a body it cannot read. */
 export function readableDraft(v: unknown): v is OwnerDraftGetResult {
   const r = v as Record<string, unknown> | null;
-  return !!r && typeof r.draftId === "string" && typeof r.digest === "string" && KNOWN_STATES.includes(String(r.state)) && Array.isArray(r.steps);
+  if (!r || typeof r.draftId !== "string" || typeof r.digest !== "string" || !KNOWN_STATES.includes(String(r.state)) || !Array.isArray(r.steps)) return false;
+  return r.steps.every((s: { opId?: unknown; agt?: unknown; status?: unknown } | null) => typeof s?.opId === "string" && typeof s.agt === "string" && typeof s.status === "string");
 }
 
 /** What the slice this app holds shows. `paused` counts an agent the slice does not list as stopped: the card is gone. No slice: false. */

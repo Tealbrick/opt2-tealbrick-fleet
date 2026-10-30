@@ -2,7 +2,7 @@
 // one branch per row of that map, and "could not read" can never become "nothing there".
 import { type Json, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { type AccessEnv, presence, readPage, sharedPacer } from "../access/client.ts";
-import { type AccessItem, type AccessTarget, type ListSubject, onlyAsked } from "../access/items.ts";
+import { type AccessItem, type AccessTarget, LIST_LIMITS, type ListSubject, onlyAsked } from "../access/items.ts";
 import { cleanText } from "../text.ts";
 
 export type { AccessItem, ListSubject };
@@ -75,23 +75,29 @@ export function clientPort(env: AccessEnv): AccessPort {
       if (here !== "present") return { kind: "not_read", code: here };
       const items: AccessItem[] = [];
       const notShown = new Set<string>();
-      let cursor: string | undefined;
-      // A lying store cannot answer `nextCursor` for ever: a read that does not end is not a read.
-      for (let page = 0; page < PAGE_CAP; page++) {
-        if (signal?.aborted) return { kind: "not_read", code: "aborted" };
-        const a = await readPage(env, product, { v: 1, subjects, ...(cursor ? { cursor } : {}) });
-        if (!a.ok) {
-          if (a.state === "refused") return { kind: "refused", code: a.code, reason: a.text };
-          if (a.state === "waiting") return { kind: "held" };
-          if (a.state === "not_installed") return { kind: "not_installed" };
-          return a.waitMs > 0 ? { kind: "wait", afterMs: a.waitMs } : { kind: "not_read", code: a.code };
+      // The contract takes 32 subjects per call. One sweep of pages per chunk.
+      for (let at = 0; at < subjects.length; at += LIST_LIMITS.subjects) {
+        const chunk = subjects.slice(at, at + LIST_LIMITS.subjects);
+        let cursor: string | undefined;
+        let ended = false;
+        // A lying store cannot answer `nextCursor` for ever: a read that does not end is not a read.
+        for (let page = 0; page < PAGE_CAP && !ended; page++) {
+          if (signal?.aborted) return { kind: "not_read", code: "aborted" };
+          const a = await readPage(env, product, { v: 1, subjects: chunk, ...(cursor ? { cursor } : {}) });
+          if (!a.ok) {
+            if (a.state === "refused") return { kind: "refused", code: a.code, reason: a.text };
+            if (a.state === "waiting") return { kind: "held" };
+            if (a.state === "not_installed") return { kind: "not_installed" };
+            return a.waitMs > 0 ? { kind: "wait", afterMs: a.waitMs } : { kind: "not_read", code: a.code };
+          }
+          items.push(...onlyAsked(a.page.items, chunk));
+          for (const n of a.page.notShown) notShown.add(n.kind);
+          if (a.page.nextCursor === null) ended = true;
+          else cursor = a.page.nextCursor;
         }
-        items.push(...onlyAsked(a.page.items, subjects));
-        for (const n of a.page.notShown) notShown.add(n.kind);
-        if (a.page.nextCursor === null) return { kind: "ok", items, notShown: [...notShown] };
-        cursor = a.page.nextCursor;
+        if (!ended) return { kind: "not_read", code: "too_many_pages" };
       }
-      return { kind: "not_read", code: "too_many_pages" };
+      return { kind: "ok", items, notShown: [...notShown] };
     },
     async revoke(product, input, key) {
       let out: { status: string; output?: unknown; holdId?: string; receiptId?: string };

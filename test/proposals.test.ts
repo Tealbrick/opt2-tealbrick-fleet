@@ -653,10 +653,10 @@ test("C88 a/b: no agent op, hook, event, review verdict or timer tick calls rule
   await definition.onStop?.({} as never);
 });
 
-test("C88 b: Governance calls only rule_draft_submit and draft_status, and the companion lists exactly those two (create, read)", async () => {
+test("C88 b: the proposal path calls only rule_draft_submit and draft_status; the companion lists those and the read floor_status (C380) (create, read)", async () => {
   const rulesCompanion = (manifest.companions ?? []).filter((c) => c.product === "rules");
-  assert.deepEqual(rulesCompanion.map((c) => [c.product, c.operations, c.crud]), [["rules", ["rule_draft_submit", "draft_status"], ["create", "read"]]]);
-  assert.deepEqual([...p.RULES_OPS], rulesCompanion[0]?.operations);
+  assert.deepEqual(rulesCompanion.map((c) => [c.product, c.operations, c.crud]), [["rules", ["rule_draft_submit", "draft_status", "floor_status"], ["create", "read"]]]);
+  assert.deepEqual([...p.RULES_OPS], rulesCompanion[0]?.operations.filter((o) => o !== "floor_status"));
   assert.deepEqual((manifest.companions ?? []).map((c) => c.product).sort(), ["connect", "inbox", "rules"]);
   // a whole scenario: send, retry, poll, list
   const { db } = fresh();
@@ -688,12 +688,14 @@ test("C88 c: Governance has no approve path: no operation approves, rejects or e
 test("M-CP-2: the companion matches Rules 0.4.1; an older Rules without draft_status fails the check; an absent Rules is not checked", () => {
   const v = validateManifest(manifest);
   assert.equal(v.ok, true, v.ok ? "" : JSON.stringify(v.errors));
-  const targets = (ops: string[]) => [{ id: "rules", operations: rulesManifest.operations.filter((o) => ops.includes(o.id)).map((o) => ({ id: o.id, audience: o.audience, crud: o.crud })) }];
+  // floor_status arrived in Rules 0.7.0 (its own test: lifecycle-wiring.test.ts); the two proposal ops are checked from the 0.4.1 copy
+  const FLOOR_STATUS = { id: "floor_status", audience: "agent", crud: ["read"] };
+  const targets = (ops: string[]) => [{ id: "rules", operations: [...rulesManifest.operations.filter((o) => ops.includes(o.id)).map((o) => ({ id: o.id, audience: o.audience, crud: o.crud })), FLOOR_STATUS] }];
   const ok = validateCompanions(manifest as never, targets(["rule_draft_submit", "draft_status"]) as never);
   assert.equal(ok.ok, true, ok.ok ? "" : JSON.stringify(ok.errors));
   const old = validateCompanions(manifest as never, targets(["rule_draft_submit"]) as never);
   assert.equal(old.ok, false);
-  assert.deepEqual(old.ok ? [] : old.errors.map((e) => [e.rule, e.code]), [["M-CP-2", "companion_op_invalid"], ["M-CP-2", "companion_op_invalid"]]);
+  assert.deepEqual(old.ok ? [] : old.errors.map((e) => [e.rule, e.code]), [["M-CP-2", "companion_op_invalid"]]);
   assert.equal(validateCompanions(manifest as never, []).ok, true, "no Rules deployed: nothing to check");
   // Rules 0.4.1 has both as agent operations with the crud the companion asks for
   assert.deepEqual([rulesOp("rule_draft_submit").crud, rulesOp("draft_status").crud, rulesOp("rule_draft_submit").idempotency], [["create"], ["read"], "required"]);

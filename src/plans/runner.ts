@@ -6,13 +6,13 @@
 // - Everything lives in the tables, so a tick that dies anywhere is resumed by the next tick, in this process or the next one.
 import type { Db } from "@opt2-tealbrick/miniapp-sdk";
 import type { AccessTarget } from "../access/items.ts";
-import { personSubject } from "../access/items.ts";
+import { LIST_LIMITS, personSubject } from "../access/items.ts";
 import { loadSubject } from "../lifecycle/transitions.ts";
 import { type AccessItem, type AccessPort, type ListSubject, revokeBatchMax } from "./access-port.ts";
 import { type AlertPort, alertOnce, retryPendingAlerts } from "./alerts.ts";
 import { askRail, type OwnerDraftGetResult, type OwnerDraftsApi, proveCoreStep, readableDraft, type SliceView } from "./core-rail.ts";
 import { addStep, type CoreOp, getPlan, movePlan, moveStep, notePlan, OPEN_SQL, type Row, recordPlan, stepsOf, type Tick } from "./plan.ts";
-import { APPLYING_STUCK_MS, DRAFT_TITLE, ENDS_BY_PAUSE, FAST_WINDOW_MS, HOLD_RECHECK_MS, isFinalStep, isOpenPlan, LIST_BACKOFF_MS, MAX_TRIES, POLL_FAST_MS, POLL_SLOW_MS, stateFromSteps, stuckStep } from "./steps.ts";
+import { APPLYING_STUCK_MS, DRAFT_TITLE, ENDS_BY_PAUSE, FAST_WINDOW_MS, HOLD_RECHECK_MS, isFinalStep, isOpenPlan, LIST_BACKOFF_MS, MAX_TRIES, POLL_FAST_MS, POLL_SLOW_MS, stateFromSteps, stuckStep, TICK_LEASE_MS } from "./steps.ts";
 
 export interface PlanCtx {
   db: Db;
@@ -85,7 +85,8 @@ async function askForDraft(pc: PlanCtx, p: Row, steps: readonly Row[]): Promise<
       notePlan(pc.db, id, "preparing", { code: "owner_drafts_full" }, at);
       return;
     case "wait":
-      notePlan(pc.db, id, "preparing", { code: answer.code }, at);
+      // The owner cancelled while this call ran, and its answer was lost: the draft may stand in Portal with no plan behind it.
+      if (!notePlan(pc.db, id, "preparing", { code: answer.code }, at)) await askRail(() => rail.withdraw(key as string));
       return;
     case "draft_state":
       movePlan(pc.db, id, "preparing", "failed", { code: "draft_state" }, at);
@@ -115,7 +116,10 @@ function applyCoreSteps(pc: PlanCtx, get: OwnerDraftGetResult, steps: readonly R
       const proof = proveCoreStep(String(s.op), String(s.agent_id), output, pc.slice);
       const cfg = typeof output.configRevision === "number" ? output.configRevision : null;
       const state = proof.state === "pending" ? "pending_bridge" : proof.state;
-      if (s.state !== state || s.code !== null) moveStep(pc.db, s, state, { output_json: JSON.stringify(output).slice(0, 2000), config_revision: cfg, detail: proof.detail, code: null, tries: 0 }, now);
+      // A new key may pair on the agent before the slice shows the old one gone. Past the window, Core's word stays what it is: said, not seen.
+      const late = s.op === "agents.rotate" && state === "pending_bridge" && s.state === "pending_bridge" && now - Number(s.updated_at) > FAST_WINDOW_MS;
+      if (late) moveStep(pc.db, s, "reported", { detail: `Core says removed ${Number(output.revokedConnections ?? 0)} connections. The agent may have a new key already, so Governance cannot tell.` }, now);
+      else if (s.state !== state || s.code !== null) moveStep(pc.db, s, state, { output_json: JSON.stringify(output).slice(0, 2000), config_revision: cfg, detail: proof.detail, code: null, tries: 0 }, now);
     } else if (g.status === "failed") {
       // Only the owner re-applies a failed draft: the job does not retry it.
       moveStep(pc.db, s, "failed", { code: (g.error?.code ?? "core_failed").slice(0, 64), detail: (g.error?.message ?? "").slice(0, 200), tries: MAX_TRIES }, now);
@@ -172,11 +176,13 @@ async function syncDraft(pc: PlanCtx, p: Row, steps: readonly Row[]): Promise<vo
       applyCoreSteps(pc, get, steps);
       return;
     case "rejected":
-      if (movePlan(pc.db, id, state, "rejected", fields, now)) cancelUnsent(pc.db, id, now);
+    case "expired": {
+      // A draft that failed part-way can end like this. What Core did stays on the record, and the page does not say "nothing was applied".
+      applyCoreSteps(pc, get, steps);
+      const partly = get.steps.some((g) => g.status === "ok");
+      if (movePlan(pc.db, id, state, get.state, { ...fields, code: partly ? "partly_applied" : null }, now)) cancelUnsent(pc.db, id, now);
       return;
-    case "expired":
-      if (movePlan(pc.db, id, state, "expired", fields, now)) cancelUnsent(pc.db, id, now);
-      return;
+    }
   }
 }
 
@@ -191,15 +197,27 @@ function proveFromSlice(pc: PlanCtx, steps: readonly Row[]): void {
     const proof = proveCoreStep(String(s.op), String(s.agent_id), undefined, pc.slice);
     if (proof.state !== s.state) moveStep(pc.db, s, proof.state, { detail: proof.detail }, now);
   }
+  // A pause in Portal is not an approval to end what the agent holds, when Governance cannot see that the owner removed its access: someone acts by hand.
+  const unseen = new Set(stepsOf(pc.db, String(steps[0]?.plan_id)).filter((s) => s.phase === "core" && s.state === "not_provable").map((s) => String(s.agent_id)));
+  for (const s of steps) if (s.phase === "after" && s.state === "pending" && unseen.has(String(s.agent_id))) moveStep(pc.db, s, "manual", { code: "not_approved" }, now);
 }
 
 // ── Stores ──────────────────────────────────────────────────────────────────
 
 const coreAgents = (steps: readonly Row[]): string[] => [...new Set(steps.filter((s) => s.phase === "core").map((s) => String(s.agent_id)))];
 
+/** A person with more handles than one subject may carry is asked about in several: a handle left out would keep its bar off. */
+function personSubjects(db: Db, id: string): ListSubject[] {
+  const all = db.prepare("SELECT handle FROM fleet_handles WHERE person_id = ? ORDER BY handle").all(id).map((r) => String(r.handle));
+  if (all.length <= LIST_LIMITS.handles) return [personSubject(db, id)];
+  const out: ListSubject[] = [];
+  for (let i = 0; i < all.length; i += LIST_LIMITS.handles) out.push({ kind: "person", id, handles: all.slice(i, i + LIST_LIMITS.handles) });
+  return out;
+}
+
 function subjectsOf(db: Db, p: Row, steps: readonly Row[]): ListSubject[] {
   const out: ListSubject[] = coreAgents(steps).map((id) => ({ kind: "agent", id }));
-  if (p.subject_kind === "person" && Number(p.part) === 1) out.push(personSubject(db, String(p.subject_id)));
+  if (p.subject_kind === "person" && Number(p.part) === 1) out.push(...personSubjects(db, String(p.subject_id)));
   if (p.subject_kind === "agent" && !out.some((s) => s.kind === "agent" && s.id === p.subject_id)) out.push({ kind: "agent", id: String(p.subject_id) });
   return out;
 }
@@ -271,7 +289,7 @@ function prove(pc: PlanCtx, steps: readonly Row[], items: readonly AccessItem[],
   }
 }
 
-const sendable = (s: Row, now: number): boolean => (s.state === "pending" || s.state === "not_revocable" || (s.state === "failed" && !stuckStep(s as never))) && Number(s.retry_at) <= now;
+const sendable = (s: Row, now: number): boolean => (s.state === "pending" || s.state === "not_revocable" || s.state === "failed") && !stuckStep(s as never) && Number(s.retry_at) <= now;
 
 /** Persist first, in one transaction: `sending`, attempt, key. A step that moved meanwhile cancels this batch. */
 function claimBatch(pc: PlanCtx, p: Row, target: string, batch: readonly Row[], now: number): { key: string; attempt: number } | null {
@@ -293,15 +311,15 @@ function claimBatch(pc: PlanCtx, p: Row, target: string, batch: readonly Row[], 
   return { key, attempt };
 }
 
-async function sendBatch(pc: PlanCtx, p: Row, target: string, rows: readonly Row[], key: string, attempt: number): Promise<void> {
+async function sendBatch(pc: PlanCtx, p: Row, target: string, rows: readonly Row[], key: string, attempt: number, from: "sending" | "waiting" = "sending"): Promise<void> {
   const first = rows[0] as Row;
   const answer = await pc.access.revoke(target as AccessTarget, { v: 1, plan: String(p.id), attempt, subject: { kind: first.subject_kind as "agent" | "person", id: String(first.subject_id) }, items: rows.map((s) => ({ id: String(s.item_id), digest: String(s.item_digest) })) }, key);
   const now = pc.now();
   // Compare-and-set on what was claimed: a step an op moved during the call stays as the op left it.
-  const cur = (s: Row): Row => ({ id: s.id, state: "sending", attempt });
+  const cur = (s: Row): Row => ({ id: s.id, state: from, attempt });
   switch (answer.kind) {
     case "held":
-      for (const s of rows) moveStep(pc.db, cur(s), "waiting", { hold_id: answer.holdId, retry_at: now + HOLD_RECHECK_MS }, now);
+      for (const s of rows) moveStep(pc.db, cur(s), "waiting", { hold_id: answer.holdId, retry_at: now + HOLD_RECHECK_MS, code: null }, now);
       return;
     case "refused":
       for (const s of rows) moveStep(pc.db, cur(s), "refused", { code: answer.code, detail: answer.reason }, now);
@@ -311,7 +329,7 @@ async function sendBatch(pc: PlanCtx, p: Row, target: string, rows: readonly Row
       return;
     case "unknown":
       // The call may have run. `sending` stays: the next fresh list tells, and only then a new attempt.
-      for (const s of rows) pc.db.prepare("UPDATE fleet_plan_steps SET code = ?, retry_at = ?, updated_at = ? WHERE id = ? AND state = 'sending' AND attempt = ?").run(answer.code, answer.afterMs === null ? 0 : now + answer.afterMs, now, String(s.id), attempt);
+      for (const s of rows) pc.db.prepare("UPDATE fleet_plan_steps SET code = ?, retry_at = ?, updated_at = ? WHERE id = ? AND state = ? AND attempt = ?").run(answer.code, answer.afterMs === null ? (from === "waiting" ? now + HOLD_RECHECK_MS : 0) : now + answer.afterMs, now, String(s.id), from, attempt);
       return;
     case "ok": {
       const byId = new Map(answer.results.map((r) => [r.id, r]));
@@ -331,14 +349,16 @@ async function sendBatch(pc: PlanCtx, p: Row, target: string, rows: readonly Row
   }
 }
 
-function openToSend(pc: PlanCtx, steps: readonly Row[], phases: readonly string[], target: string): Row[] {
+function openToSend(pc: PlanCtx, p: Row, steps: readonly Row[], phases: readonly string[], target: string): Row[] {
   const now = pc.now();
   const core = steps.filter((s) => s.phase === "core");
+  const approved = isAppliedHere(p);
   return steps.filter((s) => {
     if (s.target !== target || !phases.includes(String(s.phase)) || s.op !== "access_revoke" || !sendable(s, now)) return false;
-    if (s.phase !== "after" || s.agent_id === null) return true;
-    // Only for an agent the slice shows stopped. The store's own check is the second line.
-    return core.filter((c) => c.agent_id === s.agent_id).every((c) => isFinalStep(String(c.state)));
+    if (s.phase !== "after") return true;
+    // Only for an agent the slice shows stopped. The store's own check is the second line. With no draft applied, only what the slice proved counts.
+    const own = core.filter((c) => c.agent_id === s.agent_id);
+    return own.length > 0 && own.every((c) => (approved ? isFinalStep(String(c.state)) : c.state === "done"));
   });
 }
 
@@ -354,15 +374,16 @@ async function runTarget(pc: PlanCtx, p: Row, target: string, phases: readonly s
   // A held step keeps its key: ask again with the same key and input. Never a new hold.
   const held = live.filter((s) => s.state === "waiting");
   for (const key of new Set(held.filter((s) => Number(s.retry_at) <= now).map((s) => String(s.key)))) {
-    const rows = held.filter((s) => s.key === key);
-    const a = pc.db.transaction(() => rows.every((s) => moveStep(db, s, "sending", {}, now)));
-    if (a) await sendBatch(pc, p, target, rows.map((s) => ({ ...s, state: "sending" })), key, Number((rows[0] as Row).attempt));
+    const fresh = getPlan(db, id);
+    if (!fresh || !isOpenPlan(String(fresh.state)) || moved(db, fresh)) return;
+    // It stays `waiting` during the call: a crash here changes nothing, and the key is not lost to a new attempt.
+    await sendBatch(pc, p, target, held.filter((s) => s.key === key), key, Number((held.find((s) => s.key === key) as Row).attempt), "waiting");
   }
   // A list costs a Decisions row in Rules: only when it can decide something now. While a step waits for the owner there is nothing to read.
   const after = stepsOf(db, id);
   // Once when Core applied: what an agent gained while the draft waited is part of this stop. The read step's `batch` keeps that this was done.
   const firstAfterCore = phases.includes("after") && Number(read.batch) === 0;
-  const needsList = firstAfterCore || !isFinalStep(String(read.state)) || openToSend(pc, after, phases, target).length > 0 || after.some((s) => s.target === target && (s.state === "sending" || s.state === "claimed"));
+  const needsList = firstAfterCore || !isFinalStep(String(read.state)) || openToSend(pc, p, after, phases, target).length > 0 || after.some((s) => s.target === target && (s.state === "sending" || s.state === "claimed"));
   if (!needsList || Number(read.retry_at) > now) return;
   for (let pass = 0; pass < 2; pass++) {
     const asked = subjectsOf(db, p, steps);
@@ -389,7 +410,7 @@ async function runTarget(pc: PlanCtx, p: Row, target: string, phases: readonly s
     const open = stepsOf(db, id).filter((s) => s.target === target && s.op === "access_revoke" && ["pending", "sending", "claimed", "failed", "not_revocable"].includes(String(s.state)) && !stuckStep(s as never));
     prove(pc, open, answer.items, answer.notShown);
     if (pass === 1) return;
-    const toSend = openToSend(pc, stepsOf(db, id), phases, target);
+    const toSend = openToSend(pc, getPlan(db, id) as Row, stepsOf(db, id), phases, target);
     if (toSend.length === 0) return;
     const bySubject = new Map<string, Row[]>();
     for (const s of toSend) bySubject.set(`${String(s.subject_kind)}:${String(s.subject_id)}`, [...(bySubject.get(`${String(s.subject_kind)}:${String(s.subject_id)}`) ?? []), s]);
@@ -473,7 +494,8 @@ export async function tick(pc: PlanCtx, id: string): Promise<TickResult> {
 async function staleEnd(pc: PlanCtx, p: Row): Promise<void> {
   const id = String(p.id);
   const rail = pc.rail;
-  if (rail && p.rail === "draft" && p.draft_key !== null && !isAppliedHere(p)) await askRail(() => rail.withdraw(String(p.draft_key)));
+  // Whatever the mode says: a draft may stand in Portal since before the rail went away.
+  if (rail && p.draft_key !== null && !isAppliedHere(p)) await askRail(() => rail.withdraw(String(p.draft_key)));
   const now = pc.now();
   if (movePlan(pc.db, id, String(p.state), "stale", { code: "lifecycle_moved" }, now)) cancelUnsent(pc.db, id, now);
 }
@@ -485,23 +507,30 @@ async function alerts(pc: PlanCtx, p: Row): Promise<void> {
   if (p.trigger_kind === "system" && p.rail === "none") await alertOnce(pc, p, "date_passed");
 }
 
-/** Takes one tick slot of each due plan, and ticks it. A second run finds the slot taken. */
+/** Boot: no tick of this process runs yet, so no lease is alive. A plan cut off by a crash goes on at once. */
+export function releaseTicks(db: Db): void {
+  db.prepare("UPDATE fleet_plans SET ticking_until = 0 WHERE ticking_until > 0").run();
+}
+
+/** Takes the lease of each due plan, and ticks it. A second run finds it taken. */
 export async function runDue(pc: PlanCtx, limit = 50): Promise<number> {
   const db = pc.db;
   const now = pc.now();
-  const due = db.prepare(`SELECT id, next_at FROM fleet_plans WHERE state IN (${OPEN_SQL}) AND next_at <= ? ORDER BY next_at, id LIMIT ?`).all(now, limit);
+  const due = db.prepare(`SELECT id, next_at FROM fleet_plans WHERE state IN (${OPEN_SQL}) AND next_at <= ? AND ticking_until <= ? ORDER BY next_at, id LIMIT ?`).all(now, now, limit);
   let n = 0;
   for (const r of due) {
     if (pc.signal?.aborted) break;
     const id = String(r.id);
-    // A crash holds the slot one minute at most: the next run takes it again.
-    const took = db.prepare("UPDATE fleet_plans SET next_at = ? WHERE id = ? AND next_at = ?").run(now + POLL_FAST_MS, id, Number(r.next_at));
+    // The lease outlives a job's timeout. A crash holds it until the next boot clears it: there is one process.
+    const took = db.prepare("UPDATE fleet_plans SET next_at = ?, ticking_until = ? WHERE id = ? AND next_at = ? AND ticking_until <= ?").run(now + POLL_FAST_MS, now + TICK_LEASE_MS, id, Number(r.next_at), now);
     if (took.changes !== 1) continue;
     try {
       const res = await tick(pc, id);
-      if (res.open) db.prepare("UPDATE fleet_plans SET next_at = ? WHERE id = ?").run(pc.now() + res.afterMs, id);
+      // A wake during this tick set `next_at` to 0: it stays, so the next run looks again.
+      db.prepare("UPDATE fleet_plans SET next_at = CASE WHEN next_at = 0 THEN 0 ELSE ? END, ticking_until = 0 WHERE id = ?").run(res.open ? pc.now() + res.afterMs : 0, id);
       n++;
     } catch (e) {
+      db.prepare("UPDATE fleet_plans SET ticking_until = 0 WHERE id = ?").run(id);
       pc.warn("plan tick failed", { plan: id, reason: e instanceof Error ? e.message.slice(0, 200) : "error" });
     }
   }
