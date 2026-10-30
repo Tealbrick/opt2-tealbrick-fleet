@@ -31,7 +31,8 @@ CREATE TABLE fleet_plans (
   expires_at INTEGER,
   applying_since INTEGER,
   applied_at INTEGER,
-  next_at INTEGER NOT NULL DEFAULT 0,  -- the next tick; taking it is the per-plan claim, so two runs never tick one plan at once
+  next_at INTEGER NOT NULL DEFAULT 0,  -- the next tick; a wake sets it to 0
+  ticking_until INTEGER NOT NULL DEFAULT 0,  -- the lease of a running tick, so two runs never tick one plan at once
   wanted_json TEXT,                    -- the owner's ticks, until the first read turned them into steps
   code TEXT,
   detail TEXT,

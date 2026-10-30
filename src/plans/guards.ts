@@ -12,9 +12,15 @@ export const hasAppliedStop = (db: Db, kind: string, id: string): boolean =>
   !!db
     .prepare(
       `SELECT 1 FROM fleet_plans p WHERE p.subject_kind = ? AND p.subject_id = ?
-         AND (p.draft_state IN ('applying', 'applied') OR EXISTS (SELECT 1 FROM fleet_plan_steps s WHERE s.plan_id = p.id AND s.phase = 'core' AND s.output_json IS NOT NULL)) LIMIT 1`,
+         AND (p.draft_state IN ('applying', 'applied') OR EXISTS (SELECT 1 FROM fleet_plan_steps s WHERE s.plan_id = p.id AND s.phase = 'core' AND (s.output_json IS NOT NULL OR (s.op <> 'agents.pause' AND s.state IN ('done', 'reported', 'not_provable'))))) LIMIT 1`,
     )
     .get(kind, id);
+
+/** T7: the last plan of this entry did not finish, and nobody said why. Close needs a new plan or a named reason. */
+export function lastPlanUnfinished(db: Db, kind: string, id: string): boolean {
+  const last = db.prepare("SELECT state FROM fleet_plans WHERE subject_kind = ? AND subject_id = ? AND state <> 'replaced' ORDER BY opened_at DESC, part LIMIT 1").get(kind, id);
+  return !!last && ["expired", "rejected", "lost", "failed", "stale", "withdrawn"].includes(String(last.state));
+}
 
 /** T7 (Domain 6): Connect accounts tied to nobody. A person cannot close while one is unnamed: it may be theirs. The owner names one with an exception: code `unlinked_account`, subject `item`, id `<target>:<item>`. */
 export const unnamedAccounts = (db: Db, now: number): number =>

@@ -40,7 +40,7 @@ export function planView(db: Db, id: string) {
     openedAt: iso(p.opened_at) as string,
     closedAt: iso(p.closed_at),
     receiptId: p.receipt_id === null ? null : String(p.receipt_id),
-    canRetry: open ? stuck && !coreFailed : ASK_AGAIN.includes(String(p.state)),
+    canRetry: open ? (stuck && !coreFailed) || (mode === "portal_link" && p.draft_state === null) : ASK_AGAIN.includes(String(p.state)),
     canCancel: open,
     counts,
     stores: steps.filter((s) => s.phase === "read").map((s) => ({ product: String(s.target), name: storeName(String(s.target)), text: readText(s), state: String(s.state) })),

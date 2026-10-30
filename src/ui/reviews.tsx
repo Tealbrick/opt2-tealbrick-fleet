@@ -56,7 +56,7 @@ export const TrustTag = ({ trust }: { trust: Trust }) => <Tag status={TRUST_STAT
 const VERDICTS = [
   { value: "trusted" as const, title: "Trusted", body: "Agents may deal with it like a known contact. Approval rules you set still apply." },
   { value: "limited" as const, title: "Limited", body: "Agents may answer it, but you approve what they do for it." },
-  { value: "blocked" as const, title: "Blocked", body: "Agents refuse what it asks. Its messages stay unread by your agents." },
+  { value: "blocked" as const, title: "Blocked", body: "Agents refuse what it asks. Its messages stay unread by your agents. If the Rules hook is on, Rules refuses its calls too." },
 ];
 
 /** What Governance knows of a subject now, from the owner's directory view (names, handles; the owner sees these). */
