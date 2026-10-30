@@ -163,6 +163,11 @@ test("A1b: the plan lists Portal actions and proves them from the slice; it neve
   assert.deepEqual(portalPlan([{ ...a, lifecycle: "active", effective: "active", runtime: "paused" }], null, null).steps.map((s) => s.action), ["resume"]);
   assert.deepEqual(portalPlan([{ ...a, runtime: "gone" }], null, null).steps.map((s) => [s.action, s.state]), [["remove_access", "done"]]);
   assert.ok(none.notChanged.some((t) => /Portal login/.test(t)));
+  // a plan over the output limit is cut, and says so; the count stays true
+  const many = portalPlan(Array.from({ length: 300 }, (_, i) => ({ ...a, id: `agt_${i}` })), null, null);
+  assert.equal(many.steps.length, 400);
+  assert.equal(many.openSteps, 300);
+  assert.match(String(many.note), /200 more steps/);
 });
 
 test("A23: each case has its own words from what Fleet can read; the hook switch is never claimed", async () => {

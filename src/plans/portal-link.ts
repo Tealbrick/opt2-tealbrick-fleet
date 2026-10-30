@@ -25,6 +25,8 @@ export interface PortalPlan {
 }
 
 export const NOT_APPLIED = "Not applied: do these in Portal";
+/** The manifest's maxItems of `plan.steps`. */
+export const MAX_STEPS = 400;
 
 /** The Confirm screen's "Not changed" block (DESIGN-C380 §9). On the screen, not only in docs. */
 export const NOT_CHANGED: readonly string[] = [
@@ -79,5 +81,6 @@ function stepsFor(a: PlanAgent, topology: DecodedTopology | null): PortalStep[] 
 
 export function portalPlan(agents: readonly PlanAgent[], topology: DecodedTopology | null, portalUrl: string | null, note: string | null = null): PortalPlan {
   const steps = agents.flatMap((a) => stepsFor(a, topology));
-  return { mode: "portal_link", applied: false, headline: NOT_APPLIED, portalUrl, steps, openSteps: steps.filter((s) => s.state === "open").length, notChanged: [...NOT_CHANGED], note };
+  const more = steps.length > MAX_STEPS ? `${steps.length - MAX_STEPS} more steps are not shown. Do these first, then open this page again.` : null;
+  return { mode: "portal_link", applied: false, headline: NOT_APPLIED, portalUrl, steps: steps.slice(0, MAX_STEPS), openSteps: steps.filter((s) => s.state === "open").length, notChanged: [...NOT_CHANGED], note: more ?? note };
 }

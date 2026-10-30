@@ -4,7 +4,7 @@
   "id": "fleet",
   "name": "Governance",
   "summary": "Governance: who is who in your workspace, who owns which agent, and how far each person, outside agent and agent is trusted.",
-  "description": "Governance is the workspace directory and its trust record.\n\n- **Directory:** teams, people and outside agents with their Buzz, Slack and Telegram handles, and every workspace agent with its owner, role and teams.\n- **Trust:** every person, outside agent and agent has a trust state (unreviewed, trusted, limited or blocked). People you add start trusted; entries that an agent adds start unreviewed.\n- **Trust reviews:** an agent can ask for a review and say why; only you decide. Each verdict is kept with a copy of what the subject could do at that time, and it sets the trust state.\n- **Topology:** who owns which agent and who is in which team, as a table you can print for a security review. Contacts and app access appear when Connect and Core give apps that data.\n- **Contact rules:** you can propose a rule from a fixed template (hold or refuse an agent's outward actions, or the actions done for one sender, or hold the outward actions of a team's agents). It is sent to Rules & Approvals as a draft; you approve it there.\n- **Feed for apps:** Rules & Approvals and Knowledge read a small, versioned directory feed. It has no email addresses and no job titles.\n\nGovernance never grants access, never decides a hold and holds no credentials. People are directory entries, not sign-ins.",
+  "description": "Governance is the workspace's record of who should have access: one state per person and agent, with reasons and dates, and what no longer matches. It holds no grant and no credential, and it decides no call: Portal and Rules & Approvals do that.\n\n- **Summary:** how many agents you have, which have no owner, which can write or send, what no longer matches, and if you are ready to stop an agent.\n- **People and agents:** one line per person and agent: working, not reviewed, stop asked, paused. Each change has a reason and stays in the history.\n- **Stop an agent, or a person's agents:** one dialog for one agent, or a short flow for a person. Governance records the stop and lists what to do in Portal. Each screen says what does not change: their own logins, the agent's machine, copies already made.\n- **Reviews:** an agent can ask for a review and say why; only you decide. Each verdict is kept with a copy of what the subject could do at that time.\n- **Who owns what:** who owns which agent and who is in which team, as a table you can print for a security review.\n- **Contact rules:** you can propose a rule from a fixed template. It is sent to Rules & Approvals as a draft; you approve it there.\n- **Feed for apps:** Rules & Approvals and Knowledge read a small, versioned directory feed. It has no email addresses and no job titles.\n\nGovernance finds no agent you do not know about. People are directory entries, not sign-ins. This is a record for your own review, not proof of compliance.",
   "version": "0.3.2",
   "sdkMajor": 1,
   "requires": {
@@ -29,7 +29,12 @@
       "which team is this person in",
       "map a Buzz or Slack sender to a person",
       "is this sender trusted",
-      "review whether we trust this agent"
+      "review whether we trust this agent",
+      "someone left",
+      "who has access",
+      "stop this agent now",
+      "which agents have no owner",
+      "what no longer matches"
     ],
     "keywords": [
       "directory",
@@ -2302,7 +2307,7 @@
     },
     {
       "id": "topology_get",
-      "title": "Topology",
+      "title": "Who owns what",
       "description": "The workspace network for the owner, from Governance own data: people, outside agents and agents, who owns which agent, and teams with roles. Each node carries its trust, status, review due date and whether it changed since the last review. Channel contacts (Connect) and app access (a read-only copy from Portal) are not available to apps yet: their layers answer with an explicit unavailable state and no edges. Owner only; names, kinds, trust, roles and owner links only (no email, handles or review reasons). Change access in Portal.",
       "input": {
         "type": "object",
@@ -3178,7 +3183,7 @@
     },
     {
       "id": "reviews_list",
-      "title": "Trust reviews",
+      "title": "Reviews",
       "description": "Open review requests (one per requester and subject), the review history (newest first), what is due, and the review schedule. Reviews of status `done` are the verdicts; `due` lists subjects whose next review date has passed (or that were never reviewed).",
       "input": {
         "type": "object",
@@ -5348,6 +5353,2487 @@
                 "type": "boolean"
               }
             }
+          }
+        }
+      },
+      "crud": [
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "supported",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "summary_get",
+      "title": "Governance summary",
+      "description": "The landing page: how many agents and people, how many have no owner, how many agents can write or send, the differences, what was read and when, and the list 'Ready to stop an agent?'. Owner only. Read only.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {}
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "generatedAt",
+          "revision",
+          "agents",
+          "people",
+          "noOwner",
+          "differences",
+          "canWriteOrSend",
+          "stores",
+          "readiness",
+          "stoppedToday",
+          "stopCap",
+          "floor",
+          "settings"
+        ],
+        "properties": {
+          "generatedAt": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "agents": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "total",
+              "running",
+              "paused",
+              "stopping",
+              "notReviewed"
+            ],
+            "properties": {
+              "total": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "running": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "paused": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "stopping": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "notReviewed": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "people": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "total",
+              "leaving",
+              "suspended"
+            ],
+            "properties": {
+              "total": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "leaving": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "suspended": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "noOwner": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "differences": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "canWriteOrSend": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stores": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "product",
+                "name",
+                "state",
+                "text",
+                "at"
+              ],
+              "properties": {
+                "product": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "state": {
+                  "enum": [
+                    "read",
+                    "not_installed",
+                    "not_read"
+                  ]
+                },
+                "text": {
+                  "type": "string"
+                },
+                "at": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            "maxItems": 32
+          },
+          "readiness": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "state",
+                "text",
+                "path"
+              ],
+              "properties": {
+                "id": {
+                  "enum": [
+                    "rules",
+                    "consent",
+                    "owners",
+                    "alerts"
+                  ]
+                },
+                "state": {
+                  "enum": [
+                    "ok",
+                    "missing",
+                    "fallback"
+                  ]
+                },
+                "text": {
+                  "type": "string"
+                },
+                "path": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            "maxItems": 8
+          },
+          "stoppedToday": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "stopCap": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "limit",
+              "windowMinutes",
+              "used"
+            ],
+            "properties": {
+              "limit": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "windowMinutes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "used": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "floor": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "state",
+              "text",
+              "version",
+              "feedRevision",
+              "entries",
+              "lastGateAt",
+              "gateNote"
+            ],
+            "properties": {
+              "state": {
+                "enum": [
+                  "confirmed",
+                  "not_confirmed",
+                  "not_installed",
+                  "older",
+                  "not_read"
+                ]
+              },
+              "text": {
+                "type": "string"
+              },
+              "version": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "feedRevision": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "entries": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "lastGateAt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "gateNote": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          },
+          "settings": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "coolingDays",
+              "defaultOwner",
+              "stopCap"
+            ],
+            "properties": {
+              "coolingDays": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "defaultOwner": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "name"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "stopCap": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "colleagues_list",
+      "title": "List people and agents",
+      "description": "Each person and workspace agent with one line that says its state, its owner and its differences. Outside agents have no lifecycle and are not listed here. Owner only. Read only.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "kind": {
+            "enum": [
+              "person",
+              "agent"
+            ]
+          },
+          "lifecycle": {
+            "enum": [
+              "not_started",
+              "proposed",
+              "active",
+              "suspended",
+              "leaving",
+              "archived"
+            ]
+          },
+          "finding": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "cursor": {
+            "type": "string",
+            "maxLength": 16,
+            "pattern": "^[0-9]{1,16}$"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "id",
+                "name",
+                "lifecycle",
+                "effective",
+                "runtime",
+                "trust",
+                "owner",
+                "line",
+                "findings",
+                "validFrom",
+                "validUntil",
+                "keepRunning",
+                "at"
+              ],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "person",
+                    "agent"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "lifecycle": {
+                  "enum": [
+                    "proposed",
+                    "active",
+                    "suspended",
+                    "leaving",
+                    "archived"
+                  ]
+                },
+                "effective": {
+                  "enum": [
+                    "not_started",
+                    "proposed",
+                    "active",
+                    "suspended",
+                    "leaving",
+                    "archived"
+                  ]
+                },
+                "runtime": {
+                  "anyOf": [
+                    {
+                      "enum": [
+                        "running",
+                        "paused",
+                        "gone"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "trust": {
+                  "enum": [
+                    "unreviewed",
+                    "trusted",
+                    "limited",
+                    "blocked"
+                  ]
+                },
+                "owner": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "name"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "line": {
+                  "type": "string"
+                },
+                "findings": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "code",
+                      "text"
+                    ],
+                    "properties": {
+                      "code": {
+                        "type": "string"
+                      },
+                      "text": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "maxItems": 16
+                },
+                "validFrom": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "validUntil": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "keepRunning": {
+                  "type": "boolean"
+                },
+                "at": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            "maxItems": 200
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "colleague_get",
+      "title": "One person or agent",
+      "description": "One person or agent: state, reason, dates, owned agents, the actions you can take and why one is blocked, the steps to do in Portal, what Rules has confirmed, what was not changed, and the history. Owner only. Read only.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "id"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "person",
+              "agent"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "colleague"
+        ],
+        "properties": {
+          "colleague": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "id",
+              "name",
+              "lifecycle",
+              "effective",
+              "runtime",
+              "trust",
+              "owner",
+              "line",
+              "findings",
+              "validFrom",
+              "validUntil",
+              "keepRunning",
+              "at",
+              "title",
+              "rev",
+              "reason",
+              "note",
+              "keepReason",
+              "teams",
+              "agents",
+              "actions",
+              "close",
+              "plan",
+              "floor",
+              "grantsBefore",
+              "notices",
+              "history"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "person",
+                  "agent"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "lifecycle": {
+                "enum": [
+                  "proposed",
+                  "active",
+                  "suspended",
+                  "leaving",
+                  "archived"
+                ]
+              },
+              "effective": {
+                "enum": [
+                  "not_started",
+                  "proposed",
+                  "active",
+                  "suspended",
+                  "leaving",
+                  "archived"
+                ]
+              },
+              "runtime": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "running",
+                      "paused",
+                      "gone"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "trust": {
+                "enum": [
+                  "unreviewed",
+                  "trusted",
+                  "limited",
+                  "blocked"
+                ]
+              },
+              "owner": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "name"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "line": {
+                "type": "string"
+              },
+              "findings": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "text"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "maxItems": 16
+              },
+              "validFrom": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "validUntil": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "keepRunning": {
+                "type": "boolean"
+              },
+              "at": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "title": {
+                "type": "string"
+              },
+              "rev": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "reason": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "note": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "keepReason": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "teams": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "name",
+                    "role"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "enum": [
+                        "member",
+                        "lead"
+                      ]
+                    }
+                  }
+                },
+                "maxItems": 50
+              },
+              "agents": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "id",
+                    "name",
+                    "lifecycle",
+                    "effective",
+                    "runtime",
+                    "trust",
+                    "owner",
+                    "line",
+                    "findings",
+                    "validFrom",
+                    "validUntil",
+                    "keepRunning",
+                    "at"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "person",
+                        "agent"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "lifecycle": {
+                      "enum": [
+                        "proposed",
+                        "active",
+                        "suspended",
+                        "leaving",
+                        "archived"
+                      ]
+                    },
+                    "effective": {
+                      "enum": [
+                        "not_started",
+                        "proposed",
+                        "active",
+                        "suspended",
+                        "leaving",
+                        "archived"
+                      ]
+                    },
+                    "runtime": {
+                      "anyOf": [
+                        {
+                          "enum": [
+                            "running",
+                            "paused",
+                            "gone"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "trust": {
+                      "enum": [
+                        "unreviewed",
+                        "trusted",
+                        "limited",
+                        "blocked"
+                      ]
+                    },
+                    "owner": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "id",
+                            "name"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "line": {
+                      "type": "string"
+                    },
+                    "findings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "code",
+                          "text"
+                        ],
+                        "properties": {
+                          "code": {
+                            "type": "string"
+                          },
+                          "text": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "maxItems": 16
+                    },
+                    "validFrom": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "validUntil": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "keepRunning": {
+                      "type": "boolean"
+                    },
+                    "at": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "maxItems": 400
+              },
+              "actions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "to",
+                    "label",
+                    "blocked",
+                    "needsWaive"
+                  ],
+                  "properties": {
+                    "to": {
+                      "enum": [
+                        "proposed",
+                        "active",
+                        "suspended",
+                        "leaving",
+                        "archived"
+                      ]
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "blocked": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "needsWaive": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "maxItems": 8
+              },
+              "close": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "coolingDays",
+                      "coolingEndsAt",
+                      "coolingOver",
+                      "limits"
+                    ],
+                    "properties": {
+                      "coolingDays": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "coolingEndsAt": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "coolingOver": {
+                        "type": "boolean"
+                      },
+                      "limits": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "maxItems": 16
+                      }
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "plan": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "mode",
+                      "applied",
+                      "headline",
+                      "portalUrl",
+                      "steps",
+                      "openSteps",
+                      "notChanged",
+                      "note"
+                    ],
+                    "properties": {
+                      "mode": {
+                        "const": "portal_link"
+                      },
+                      "applied": {
+                        "const": false
+                      },
+                      "headline": {
+                        "type": "string"
+                      },
+                      "portalUrl": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "steps": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "id",
+                            "agent",
+                            "action",
+                            "text",
+                            "state",
+                            "proof"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "agent": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "id",
+                                "name"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "action": {
+                              "enum": [
+                                "pause",
+                                "remove_access",
+                                "resume",
+                                "reinstate"
+                              ]
+                            },
+                            "text": {
+                              "type": "string"
+                            },
+                            "state": {
+                              "enum": [
+                                "open",
+                                "done",
+                                "not_provable"
+                              ]
+                            },
+                            "proof": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "maxItems": 400
+                      },
+                      "openSteps": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "notChanged": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "maxItems": 16
+                      },
+                      "note": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "floor": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "state",
+                  "text",
+                  "version",
+                  "feedRevision",
+                  "entries",
+                  "lastGateAt",
+                  "gateNote"
+                ],
+                "properties": {
+                  "state": {
+                    "enum": [
+                      "confirmed",
+                      "not_confirmed",
+                      "not_installed",
+                      "older",
+                      "not_read"
+                    ]
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "feedRevision": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "entries": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "lastGateAt": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "gateNote": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              },
+              "grantsBefore": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "agent",
+                        "product",
+                        "crud"
+                      ],
+                      "properties": {
+                        "agent": {
+                          "type": "string"
+                        },
+                        "product": {
+                          "type": "string"
+                        },
+                        "crud": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "maxItems": 4
+                        }
+                      }
+                    },
+                    "maxItems": 200
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "notices": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 8
+              },
+              "history": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "kind",
+                    "from",
+                    "to",
+                    "actor",
+                    "reason",
+                    "note",
+                    "at"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "from": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "to": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "actor": {
+                      "enum": [
+                        "owner",
+                        "system"
+                      ]
+                    },
+                    "reason": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "note": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "at": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "maxItems": 100
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "lifecycle_set",
+      "title": "Change a lifecycle",
+      "description": "Mark a person or agent as reviewed, stopped, leaving, closed or back, and set start and end dates. Governance records your intent. It removes no access: the answer lists what to do in Portal, and says if Rules has confirmed the change. Only you can do this. No agent can call it. Give `expectedRev` from colleague_get; if the entry changed since, the answer is lifecycle_stale (409). More than a few stops in 10 minutes need `confirmCount` (stop_cap_reached, 409).",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "id"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "person",
+              "agent"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "to": {
+            "enum": [
+              "proposed",
+              "active",
+              "suspended",
+              "leaving",
+              "archived"
+            ]
+          },
+          "reason": {
+            "enum": [
+              "left",
+              "contract_ended",
+              "role_changed",
+              "security",
+              "mistake",
+              "reviewed",
+              "returned",
+              "other"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "expectedRev": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "validFrom": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 40
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "validUntil": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 40
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confirmPastDate": {
+            "type": "boolean"
+          },
+          "confirmCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "waive": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "decisions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "agent",
+                "decision"
+              ],
+              "properties": {
+                "agent": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "decision": {
+                  "enum": [
+                    "stop",
+                    "keep"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "maxLength": 200
+                }
+              }
+            },
+            "maxItems": 400
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "colleague",
+          "transition"
+        ],
+        "properties": {
+          "colleague": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "id",
+              "name",
+              "lifecycle",
+              "effective",
+              "runtime",
+              "trust",
+              "owner",
+              "line",
+              "findings",
+              "validFrom",
+              "validUntil",
+              "keepRunning",
+              "at",
+              "title",
+              "rev",
+              "reason",
+              "note",
+              "keepReason",
+              "teams",
+              "agents",
+              "actions",
+              "close",
+              "plan",
+              "floor",
+              "grantsBefore",
+              "notices",
+              "history"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "person",
+                  "agent"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "lifecycle": {
+                "enum": [
+                  "proposed",
+                  "active",
+                  "suspended",
+                  "leaving",
+                  "archived"
+                ]
+              },
+              "effective": {
+                "enum": [
+                  "not_started",
+                  "proposed",
+                  "active",
+                  "suspended",
+                  "leaving",
+                  "archived"
+                ]
+              },
+              "runtime": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "running",
+                      "paused",
+                      "gone"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "trust": {
+                "enum": [
+                  "unreviewed",
+                  "trusted",
+                  "limited",
+                  "blocked"
+                ]
+              },
+              "owner": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "name"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "line": {
+                "type": "string"
+              },
+              "findings": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "text"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "maxItems": 16
+              },
+              "validFrom": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "validUntil": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "keepRunning": {
+                "type": "boolean"
+              },
+              "at": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "title": {
+                "type": "string"
+              },
+              "rev": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "reason": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "note": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "keepReason": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "teams": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "name",
+                    "role"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "enum": [
+                        "member",
+                        "lead"
+                      ]
+                    }
+                  }
+                },
+                "maxItems": 50
+              },
+              "agents": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "id",
+                    "name",
+                    "lifecycle",
+                    "effective",
+                    "runtime",
+                    "trust",
+                    "owner",
+                    "line",
+                    "findings",
+                    "validFrom",
+                    "validUntil",
+                    "keepRunning",
+                    "at"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "person",
+                        "agent"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "lifecycle": {
+                      "enum": [
+                        "proposed",
+                        "active",
+                        "suspended",
+                        "leaving",
+                        "archived"
+                      ]
+                    },
+                    "effective": {
+                      "enum": [
+                        "not_started",
+                        "proposed",
+                        "active",
+                        "suspended",
+                        "leaving",
+                        "archived"
+                      ]
+                    },
+                    "runtime": {
+                      "anyOf": [
+                        {
+                          "enum": [
+                            "running",
+                            "paused",
+                            "gone"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "trust": {
+                      "enum": [
+                        "unreviewed",
+                        "trusted",
+                        "limited",
+                        "blocked"
+                      ]
+                    },
+                    "owner": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "id",
+                            "name"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "line": {
+                      "type": "string"
+                    },
+                    "findings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "code",
+                          "text"
+                        ],
+                        "properties": {
+                          "code": {
+                            "type": "string"
+                          },
+                          "text": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "maxItems": 16
+                    },
+                    "validFrom": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "validUntil": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "keepRunning": {
+                      "type": "boolean"
+                    },
+                    "at": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "maxItems": 400
+              },
+              "actions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "to",
+                    "label",
+                    "blocked",
+                    "needsWaive"
+                  ],
+                  "properties": {
+                    "to": {
+                      "enum": [
+                        "proposed",
+                        "active",
+                        "suspended",
+                        "leaving",
+                        "archived"
+                      ]
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "blocked": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "needsWaive": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "maxItems": 8
+              },
+              "close": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "coolingDays",
+                      "coolingEndsAt",
+                      "coolingOver",
+                      "limits"
+                    ],
+                    "properties": {
+                      "coolingDays": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "coolingEndsAt": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "coolingOver": {
+                        "type": "boolean"
+                      },
+                      "limits": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "maxItems": 16
+                      }
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "plan": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "mode",
+                      "applied",
+                      "headline",
+                      "portalUrl",
+                      "steps",
+                      "openSteps",
+                      "notChanged",
+                      "note"
+                    ],
+                    "properties": {
+                      "mode": {
+                        "const": "portal_link"
+                      },
+                      "applied": {
+                        "const": false
+                      },
+                      "headline": {
+                        "type": "string"
+                      },
+                      "portalUrl": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "steps": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "id",
+                            "agent",
+                            "action",
+                            "text",
+                            "state",
+                            "proof"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "agent": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "id",
+                                "name"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "action": {
+                              "enum": [
+                                "pause",
+                                "remove_access",
+                                "resume",
+                                "reinstate"
+                              ]
+                            },
+                            "text": {
+                              "type": "string"
+                            },
+                            "state": {
+                              "enum": [
+                                "open",
+                                "done",
+                                "not_provable"
+                              ]
+                            },
+                            "proof": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "maxItems": 400
+                      },
+                      "openSteps": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "notChanged": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "maxItems": 16
+                      },
+                      "note": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "floor": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "state",
+                  "text",
+                  "version",
+                  "feedRevision",
+                  "entries",
+                  "lastGateAt",
+                  "gateNote"
+                ],
+                "properties": {
+                  "state": {
+                    "enum": [
+                      "confirmed",
+                      "not_confirmed",
+                      "not_installed",
+                      "older",
+                      "not_read"
+                    ]
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "feedRevision": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "entries": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "lastGateAt": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "gateNote": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              },
+              "grantsBefore": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "agent",
+                        "product",
+                        "crud"
+                      ],
+                      "properties": {
+                        "agent": {
+                          "type": "string"
+                        },
+                        "product": {
+                          "type": "string"
+                        },
+                        "crud": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "maxItems": 4
+                        }
+                      }
+                    },
+                    "maxItems": 200
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "notices": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 8
+              },
+              "history": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "kind",
+                    "from",
+                    "to",
+                    "actor",
+                    "reason",
+                    "note",
+                    "at"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "from": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "to": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "actor": {
+                      "enum": [
+                        "owner",
+                        "system"
+                      ]
+                    },
+                    "reason": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "note": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "at": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "maxItems": 100
+              }
+            }
+          },
+          "transition": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "from",
+                  "to",
+                  "event"
+                ],
+                "properties": {
+                  "from": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "to": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "event": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "crud": [
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "required",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "settings_set",
+      "title": "Governance settings",
+      "description": "Set the cooling period before you can close an entry (1 to 365 days), and the default owner. The default owner takes every agent with no owner now and each new agent. Each change is in the history. Only you can do this.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "coolingDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365
+          },
+          "defaultOwner": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "settings",
+          "assigned"
+        ],
+        "properties": {
+          "settings": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "coolingDays",
+              "defaultOwner",
+              "stopCap"
+            ],
+            "properties": {
+              "coolingDays": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "defaultOwner": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "name"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "stopCap": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "assigned": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       },

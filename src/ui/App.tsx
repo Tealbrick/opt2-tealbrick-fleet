@@ -10,7 +10,10 @@ import { AccessPage } from "./access-page.tsx";
 import { useLoad } from "./common.tsx";
 import { ContactRulesPage } from "./contact-rules.tsx";
 import { DirectoryPage } from "./pages/directory.tsx";
+import { EveryonePage } from "./pages/everyone.tsx";
+import { FEATURES } from "./pages/features.ts";
 import { Identities } from "./pages/identities.tsx";
+import { SummaryPage } from "./pages/summary.tsx";
 import { loadReviews, ReviewsPage, reviewBadge } from "./reviews.tsx";
 import { HoldsPage, portalHref, useHoldList, useNav } from "./standard.tsx";
 import { TopologyPage } from "./topology.tsx";
@@ -20,8 +23,12 @@ const NAME = "Governance";
 const STILLS = new URL("./stills/", import.meta.url).href;
 
 /** Shell page id → path under the base `/a/fleet/`. Teams is the launch page and the configure page (manifest `ui.launchPath` = `ui.configurePath` = "/"). */
-const ROUTES = { teams: "", topology: "topology", access: "access", reviews: "reviews", rules: "contact-rules", people: "people", agents: "agents", identities: "identities", holds: "holds" } as const;
-const PAGES = [
+const OLD_ROUTES = { teams: "", topology: "topology", access: "access", reviews: "reviews", rules: "contact-rules", people: "people", agents: "agents", identities: "identities", holds: "holds" } as const;
+/** With the lifecycle ops (C380): Summary is the launch page; /people and /agents stay as routes and leave the nav for one release. */
+const NEW_ROUTES = { ...OLD_ROUTES, summary: "", everyone: "people-and-agents", teams: "teams" } as const;
+const ROUTES: Readonly<Record<string, string>> = FEATURES.lifecycle ? NEW_ROUTES : OLD_ROUTES;
+const LAUNCH = FEATURES.lifecycle ? "summary" : "teams";
+const OLD_PAGES = [
   { id: "teams", label: "Teams" },
   { id: "topology", label: "Who owns what" },
   { id: "access", label: "Access" },
@@ -32,10 +39,22 @@ const PAGES = [
   { id: "identities", label: "Identities" },
   { id: "holds", label: "Waiting for approval" },
 ];
+const NEW_PAGES = [
+  { id: "summary", label: "Summary" },
+  { id: "everyone", label: "People and agents" },
+  { id: "access", label: "Access" },
+  { id: "reviews", label: "Reviews" },
+  { id: "teams", label: "Teams" },
+  { id: "topology", label: "Who owns what" },
+  { id: "rules", label: "Contact rules" },
+  { id: "identities", label: "Identities" },
+  { id: "holds", label: "Waiting for approval" },
+];
+const PAGES = FEATURES.lifecycle ? NEW_PAGES : OLD_PAGES;
 
 export function App() {
   const { principal, status, signOut } = useSession();
-  const nav = useNav(ROUTES, "teams");
+  const nav = useNav(ROUTES, LAUNCH);
   const holds = useHoldList();
   const signedIn = status === "signed_in" && principal;
   const loadBadge = useCallback(() => (signedIn ? loadReviews() : Promise.resolve(null)), [signedIn]);
@@ -82,7 +101,11 @@ export function App() {
         ) : null
       }
     >
-      {!signedIn ? null : nav.page === "holds" ? (
+      {!signedIn ? null : nav.page === "summary" ? (
+        <SummaryPage />
+      ) : nav.page === "everyone" ? (
+        <EveryonePage portalHref={portalLink} />
+      ) : nav.page === "holds" ? (
         <HoldsPage title="Waiting for approval" list={holds} only={nav.hold} empty="No calls wait for your approval." />
       ) : nav.page === "topology" ? (
         <TopologyPage portalHref={portalLink} />
