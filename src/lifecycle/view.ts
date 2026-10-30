@@ -45,7 +45,7 @@ export function loadColleagues(db: Db, now: number): Loaded {
   const rows: Row[] = [];
   const person = (p: Db_): Row => {
     const lifecycle = p.lifecycle as Lifecycle;
-    const effective = effectivePerson({ lifecycle, validFrom: p.valid_from === null ? null : Number(p.valid_from) }, now);
+    const effective = effectivePerson({ lifecycle, validFrom: p.valid_from === null ? null : Number(p.valid_from) });
     return {
       kind: "person",
       id: String(p.id),
@@ -71,7 +71,7 @@ export function loadColleagues(db: Db, now: number): Loaded {
     const lifecycle = a.lifecycle as Lifecycle;
     const owner = a.owner_id === null ? undefined : owners.get(String(a.owner_id));
     const keepRunning = Number(a.keep_running) === 1;
-    const effective = effectiveAgent({ lifecycle, validFrom: a.valid_from === null ? null : Number(a.valid_from), keepRunning }, owner?.lifecycle ?? null, now);
+    const effective = effectiveAgent({ lifecycle, validFrom: a.valid_from === null ? null : Number(a.valid_from), keepRunning }, owner?.lifecycle ?? null);
     const runtime = runtimeOf(a.status);
     const findings = findingsOf(
       { kind: "agent", lifecycle, effective, runtime, hasOwner: owner !== undefined, ownerLifecycle: owner?.lifecycle ?? null, reason: a.lifecycle_reason === null ? null : String(a.lifecycle_reason), at: Number(a.lifecycle_at), validUntil: a.valid_until === null ? null : Number(a.valid_until), noCard: a.migrated_note === "no_card", handleConflict: conflicts.has(String(a.id)) },

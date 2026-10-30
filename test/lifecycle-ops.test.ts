@@ -17,7 +17,7 @@ import { AGENT_A, AGENT_B, migratedDb, migrationFiles } from "./helpers.ts";
 import { OWNER, refused, SYSTEM, set, stateOf, T0, WAIVE, world } from "./lifecycle-helpers.ts";
 import { seedOldSchema } from "./seed.ts";
 
-const feedOf = (db: Db, now = T0) => directoryFeed(db, { accept: ["lifecycle"] }, undefined, now) as Extract<DirectoryFeed, { unchanged: false }>;
+const feedOf = (db: Db) => directoryFeed(db, { accept: ["lifecycle"] }) as Extract<DirectoryFeed, { unchanged: false }>;
 const AGENT_CALLER = { type: "agent", id: AGENT_A.id, name: AGENT_A.name, mode: "free" };
 const APP_CALLER = { type: "app", id: "ins_x", product: "rules", listed: true };
 const PERSON_CALLER = { type: "person", id: "per_owner", name: "owner", mode: null };
@@ -97,7 +97,7 @@ test("A33: a new agent runs with a finding; a future start date is refused until
   assert.equal(store.revision(db), rev, "one tick does not act");
   tickDates(db, seen, start + 60_001);
   assert.ok(store.revision(db) > rev, "a reader with sinceRevision sees the floor lift");
-  assert.deepEqual([feedOf(db, start + 60_002).agents.find((a) => a.id === AGENT_A.id)?.lifecycle, feedOf(db, start + 60_002).agents.find((a) => a.id === AGENT_A.id)?.floor], ["active", false]);
+  assert.deepEqual([feedOf(db).agents.find((a) => a.id === AGENT_A.id)?.lifecycle, feedOf(db).agents.find((a) => a.id === AGENT_A.id)?.floor], ["active", false]);
   void ann;
 });
 
