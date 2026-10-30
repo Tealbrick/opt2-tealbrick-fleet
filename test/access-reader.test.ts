@@ -207,7 +207,8 @@ test("backoff: a refused read holds, a manual check may repeat it, a held read n
   assert.deepEqual(s?.notShown, [{ kind: "held_calls", reason: "r" }]);
   noteStop(db, "knowledge", { state: "waiting", code: "held", text: "Wait", backoffMs: BACKOFF_MS }, 20_000);
   noteStop(db, "knowledge", { state: "not_read", code: "not_known", text: "Blip" }, 20_001);
-  assert.ok(inBackoff(db, "knowledge", 20_002), "a blip does not end a hold's backoff: no second hold");
+  const kept = inBackoff(db, "knowledge", 20_002);
+  assert.deepEqual([kept?.state, kept?.text], ["waiting", "Wait"], "a blip does not end a hold's backoff: no second hold");
   assert.equal(inBackoff(db, "knowledge", 20_000 - BACKOFF_MS - 1), null, "the clock moved back: not stuck forever");
   db.exec("UPDATE fleet_read_state SET not_shown_json = '{bad' WHERE target = 'connect'");
   assert.deepEqual(readStateOf(db, "connect")?.notShown, [], "one bad row does not stop the list");

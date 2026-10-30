@@ -5,7 +5,7 @@
   "name": "Governance",
   "summary": "Governance: who is who in your workspace, who owns which agent, and how far each person, outside agent and agent is trusted.",
   "description": "Governance is the workspace's record of who should have access: one state per person and agent, with reasons and dates, and what no longer matches. It holds no grant and no credential, and it decides no call: Portal and Rules & Approvals do that.\n\n- **Summary:** how many agents you have, which have no owner, which can write or send, what no longer matches, and if you are ready to stop an agent.\n- **People and agents:** one line per person and agent: working, not reviewed, stop asked, paused. Each change has a reason and stays in the history.\n- **Stop an agent, or a person's agents:** one dialog for one agent, or a short flow for a person. Governance records the stop and lists what to do in Portal. Each screen says what does not change: their own logins, the agent's machine, copies already made.\n- **Reviews:** an agent can ask for a review and say why; only you decide. Each verdict is kept with a copy of what the subject could do at that time.\n- **Who owns what:** who owns which agent and who is in which team, as a table you can print for a security review.\n- **Contact rules:** you can propose a rule from a fixed template. It is sent to Rules & Approvals as a draft; you approve it there.\n- **Feed for apps:** Rules & Approvals and Knowledge read a small, versioned directory feed. It has no email addresses and no job titles.\n\nGovernance finds no agent you do not know about. People are directory entries, not sign-ins. This is a record for your own review, not proof of compliance.",
-  "version": "0.4.0-dev.1",
+  "version": "0.4.0-dev.2",
   "sdkMajor": 1,
   "requires": {
     "bridge": "0.2.13"
@@ -7844,6 +7844,479 @@
       "idempotency": "supported",
       "receipt": false,
       "audience": "person"
+    },
+    {
+      "id": "reconcile_now",
+      "title": "Check now",
+      "description": "Read each app now and compare what it reports with this directory. It changes nothing in any app. The answer says if a new check started; a running check is enough. Owner only.",
+      "crud": [
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "supported",
+      "receipt": false,
+      "audience": "person",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "started"
+        ],
+        "properties": {
+          "started": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "id": "plan_preview",
+      "title": "See what would stop",
+      "description": "What each app reports now for one person or agent, and what a stop would do to each item. It changes nothing. A store that was not read says so; it is never shown as empty. Owner only.",
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "id"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "person",
+              "agent"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "subject",
+          "asOf",
+          "unlinkedAccounts",
+          "stores"
+        ],
+        "properties": {
+          "subject": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "id",
+              "name"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "person",
+                  "agent"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            }
+          },
+          "asOf": {
+            "type": "string"
+          },
+          "unlinkedAccounts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "stores": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "product",
+                "name",
+                "state",
+                "text",
+                "at",
+                "notShown",
+                "items"
+              ],
+              "properties": {
+                "product": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "state": {
+                  "enum": [
+                    "read",
+                    "not_installed",
+                    "not_read",
+                    "refused",
+                    "waiting"
+                  ]
+                },
+                "text": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "at": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "notShown": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "kind",
+                      "reason"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "type": "string"
+                      },
+                      "reason": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "kind",
+                      "label",
+                      "level",
+                      "direction",
+                      "state",
+                      "effect",
+                      "who"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "level": {
+                        "type": "string"
+                      },
+                      "direction": {
+                        "type": "string"
+                      },
+                      "state": {
+                        "type": "string"
+                      },
+                      "effect": {
+                        "enum": [
+                          "stops",
+                          "manual",
+                          "stays",
+                          "about"
+                        ]
+                      },
+                      "who": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "findings_list",
+      "title": "Differences",
+      "description": "What no longer matches between this directory and what the apps report, the apps that could not be read, and the time of the last check. It changes nothing. Owner only.",
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "lastSweepAt",
+          "storesRead",
+          "unread",
+          "items"
+        ],
+        "properties": {
+          "lastSweepAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "storesRead": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unread": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "product",
+                "name",
+                "text"
+              ],
+              "properties": {
+                "product": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "code",
+                "text",
+                "subject",
+                "productName",
+                "since",
+                "exception"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "subject": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "id",
+                        "name"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "enum": [
+                            "person",
+                            "agent"
+                          ]
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "productName": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "since": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "exception": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "reason",
+                        "until"
+                      ],
+                      "properties": {
+                        "reason": {
+                          "type": "string"
+                        },
+                        "until": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "exception_set",
+      "title": "Accept a difference",
+      "description": "Accept one difference of a person or agent with a reason until a date within one year. It changes no access, and the difference comes back on that date. Owner only.",
+      "crud": [
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "supported",
+      "receipt": false,
+      "audience": "person",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "kind",
+          "id",
+          "reason",
+          "until"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "kind": {
+            "enum": [
+              "person",
+              "agent"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "until": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "exception"
+        ],
+        "properties": {
+          "exception": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "reason",
+              "until"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "until": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
     }
   ],
   "hooks": [
@@ -7884,6 +8357,36 @@
         "read"
       ],
       "purpose": "Send a contact rule as a draft, read if you approved it, and read how far Rules has taken your stops. It cannot approve or change rules."
+    },
+    {
+      "product": "knowledge",
+      "operations": [
+        "access_list"
+      ],
+      "crud": [
+        "read"
+      ],
+      "purpose": "Reads what Knowledge reports about who can reach which memory, for the owner's Access pages. Never shown to agents. It changes nothing."
+    },
+    {
+      "product": "kanban",
+      "operations": [
+        "access_list"
+      ],
+      "crud": [
+        "read"
+      ],
+      "purpose": "Reads what Task Board reports about what each agent holds, for the owner's Access pages. Never shown to agents. It changes nothing."
+    },
+    {
+      "product": "evolution",
+      "operations": [
+        "access_list"
+      ],
+      "crud": [
+        "read"
+      ],
+      "purpose": "Reads what Evolving Workflows reports about each agent's routines and steps, for the owner's Access pages. Never shown to agents. It changes nothing."
     }
   ],
   "needsAgentDirectory": true,
