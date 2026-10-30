@@ -12,7 +12,7 @@ const STATE_TAG: Record<StoreState, { status: "live" | "idle" | "needs-you" | "b
   waiting: { status: "busy", word: "Waiting for approval" },
 };
 
-const EFFECT: Record<ItemEffect, string> = { stops: "Stops", manual: "You do this", stays: "Stays", about: "Others keep reading" };
+const EFFECT: Record<ItemEffect, string> = { stops: "Would stop", manual: "You would do this", stays: "Would stay", about: "Others would keep reading" };
 
 function Item({ item }: { item: PreviewItem }) {
   return (
