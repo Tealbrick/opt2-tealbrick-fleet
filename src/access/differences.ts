@@ -2,7 +2,7 @@
 // may accept one with a reason until a date. A finding never changes anything by itself, and an acceptance changes no access.
 import type { Db } from "@opt2-tealbrick/miniapp-sdk";
 import type { ExceptionSetInput, ExceptionSetOutput, FindingsListOutput } from "#kit";
-import type { Finding } from "../findings.ts";
+import { type Finding, stampOf } from "../findings.ts";
 import { appendEvent } from "../lifecycle/events.ts";
 import type { SubjectKind } from "../lifecycle/states.ts";
 import { fail } from "../meta.ts";
@@ -78,11 +78,13 @@ const accepted = (db: Db, now: number): Map<string, Accepted> =>
  * An acceptance covers what the owner saw. A new lifecycle change after it, or a store that lists a new item after it, is news: the
  * difference shows again, not under an old "Accepted".
  */
-function acceptanceOf(ok: ReadonlyMap<string, Accepted>, leave: ReturnType<typeof accessAfterLeave>, code: string, s: Pick<FindingSubject, "kind" | "id" | "at">): Accepted | null {
-  const a = ok.get(`${code}:${s.kind}:${s.id}`);
+function acceptanceOf(ok: ReadonlyMap<string, Accepted>, leave: ReturnType<typeof accessAfterLeave>, finding: Finding, s: Pick<FindingSubject, "kind" | "id" | "at">): Accepted | null {
+  const a = ok.get(`${finding.code}:${s.kind}:${s.id}`);
   if (!a) return null;
   if (s.at !== null && Date.parse(s.at) > a.at) return null;
-  if (code === ACCESS_AFTER_LEAVE.code && (leave.get(`${s.kind}:${s.id}`)?.newest ?? 0) > a.at) return null;
+  if (finding.code === ACCESS_AFTER_LEAVE.code && (leave.get(`${s.kind}:${s.id}`)?.newest ?? 0) > a.at) return null;
+  // a finding that knows since when it holds (a broken "Cannot hold both" rule): a clash newer than the acceptance is news
+  if ((stampOf(finding) ?? 0) > a.at) return null;
   return a;
 }
 
@@ -116,7 +118,7 @@ export function findingsList(db: Db, subjects: readonly FindingSubject[], portal
         subject: { kind: s.kind, id: s.id, name: s.name },
         productName: f.code === ACCESS_AFTER_LEAVE.code ? (leave.get(`${s.kind}:${s.id}`)?.stores.join(", ") ?? null) : null,
         since: SINCE_THE_CHANGE.has(f.code) ? s.at : null,
-        exception: shown(acceptanceOf(ok, leave, f.code, s)),
+        exception: shown(acceptanceOf(ok, leave, f, s)),
       });
     }
   }
@@ -133,7 +135,7 @@ export function findingsList(db: Db, subjects: readonly FindingSubject[], portal
 export function openDifferences(db: Db, subjects: readonly Pick<FindingSubject, "kind" | "id" | "at" | "findings">[], now: number): number {
   const ok = accepted(db, now);
   const leave = accessAfterLeave(db);
-  const own = subjects.reduce((n, s) => n + s.findings.filter((f) => !acceptanceOf(ok, leave, f.code, s)).length, 0);
+  const own = subjects.reduce((n, s) => n + s.findings.filter((f) => !acceptanceOf(ok, leave, f, s)).length, 0);
   return own + (unlinkedCount(db) > 0 ? 1 : 0) + orphansByStore(db).length;
 }
 

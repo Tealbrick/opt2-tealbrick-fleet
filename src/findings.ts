@@ -30,6 +30,12 @@ export interface FindingInput {
 
 const f = (code: string, text: string): Finding => ({ code, text });
 
+// A finding may know since when it holds, so an acceptance older than that does not cover it. It is kept beside the finding, not in it: the
+// manifest output of a finding has exactly `code` and `text`.
+const NEWEST = new WeakMap<Finding, number>();
+export const stampFinding = (finding: Finding, at: number): void => void NEWEST.set(finding, at);
+export const stampOf = (finding: Finding): number | null => NEWEST.get(finding) ?? null;
+
 export function findingsOf(r: FindingInput, now: number): Finding[] {
   const out: Finding[] = [];
   const agent = r.kind === "agent";

@@ -10,6 +10,7 @@ import { type Db, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { appendEvent } from "../lifecycle/events.ts";
 import { bump, fail } from "../meta.ts";
 import { cleanText } from "../text.ts";
+import { checkExclusions } from "./exclusions.ts";
 
 export const ROLE_REASONS = ["new_role", "project", "cover", "contract", "access_review", "other"] as const;
 export type RoleReason = (typeof ROLE_REASONS)[number];
@@ -214,7 +215,7 @@ export interface AssignInput {
 }
 
 /**
- * The checks of an assignment, in one place so a later lane (T2-c, "Cannot hold both") adds its check here and nowhere else. Throws a TbError.
+ * The checks of an assignment that need no date. The "Cannot hold both" rules (T2-c, src/roles/exclusions.ts) need the dates and run in assignRole. Throws a TbError.
  * Roles are for people and agents the owner can still use: not an outside agent, not one that is leaving or closed.
  */
 function checkAssignable(db: Db, input: AssignInput, role: Record<string, unknown>): void {
@@ -253,8 +254,10 @@ export function assignRole(db: Db, input: AssignInput, actorId: string | null, n
       fail("already_assigned", "This role is already assigned. End it first to change the dates.", 409);
     }
     const name = subjectName(db, input.subject.kind, input.subject.id) as string;
-    const id = `ras_${ulid(now)}`;
     const startsNow = from === null || from <= now;
+    // "Cannot hold both" (T2-c): the rules, with date overlap, in this transaction with the insert below (no await between)
+    checkExclusions(db, { role: { id: input.role, name: String((role as Record<string, unknown>).name) }, subject: { ...input.subject, name }, from: startsNow ? now : (from as number), until }, now);
+    const id = `ras_${ulid(now)}`;
     const note = cleanText(input.note ?? "").slice(0, ROLE_CAPS.noteMax) || null;
     db.prepare("INSERT INTO fleet_role_assignments (id, role_id, subject_kind, subject_id, reason, note, valid_from, valid_until, started_at, ended_at, end_reason, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)").run(
       id,

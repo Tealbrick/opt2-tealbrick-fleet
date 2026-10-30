@@ -9,6 +9,7 @@ import { type Finding, findingsOf } from "../findings.ts";
 import { fail, revision } from "../meta.ts";
 import { latestPlanStates, unnamedAccounts } from "../plans/guards.ts";
 import { type PlanAgent, portalPlan } from "../plans/portal-link.ts";
+import { exclusionFindings } from "../roles/exclusions.ts";
 import { cleanTopology, type DecodedTopology, decodeTopology } from "../topology-slice.ts";
 import type { Trust } from "../trust.ts";
 import { lastLeavingSnapshot, stopsSince, subjectEvents } from "./events.ts";
@@ -101,6 +102,12 @@ export function loadColleagues(db: Db, now: number): Loaded {
   }
   const leave = accessAfterLeave(db);
   for (const r of rows) if (leave.has(`${r.kind}:${r.id}`)) r.findings.push(ACCESS_AFTER_LEAVE);
+  // C380 T2-c "Cannot hold both": broken rules, computed here from the role rows like every finding (no rule: no query beyond one)
+  const clash = exclusionFindings(db, now);
+  for (const r of rows) {
+    const c = clash.get(`${r.kind}:${r.id}`);
+    if (c) r.findings.push(c);
+  }
   rows.sort((x, y) => x.name.toLowerCase().localeCompare(y.name.toLowerCase()) || x.id.localeCompare(y.id));
   return { rows, byId: new Map(rows.map((r) => [`${r.kind}:${r.id}`, r])) };
 }
