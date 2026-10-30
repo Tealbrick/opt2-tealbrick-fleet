@@ -71,3 +71,7 @@ copy of this file for its contract test (Rules lead, 2026-10-27). It replaces no
 - Source repo: `Tealbrick/opt2-tealbrick-specs`, paths `packages/spec/schemas/contracts/` and `packages/spec/examples/contracts/`, tag `spec-v0.1.89`.
 - Schema sha256: `35ebfd9f49eebeebc3c84a0ea686ab4efb18503953599828bdfd94f76734695f`
 - Fixture sha256: `3c0004d98b361bf629fb6489e655516e3fbf5123b1a1adb9d84bf62d3a17e1b2`
+
+## Rules & Approvals 0.7.0-dev.1 manifest (companion target, `floor_status`)
+
+`rules.0.7.0-dev.1.manifest.json` is a byte copy. Do not edit it. Source: `Tealbrick/opt2-tealbrick-rules`, tag `v0.7.0-dev.1`, commit `615ea6b759dfaaec772918f09e2f8de4f9f5aa36`, file `tealbrick.manifest.json`. sha256: `575922776539e9eae8bb4ac957ee95cc05c137251fe62ff835d5409a5a8b0fcf`. Use: the M-CP-2 check against the deployed Rules, and the output shape of `floor_status` that `src/lifecycle/floor.ts` reads.
