@@ -52,3 +52,14 @@ copy of this file for its contract test (Rules lead, 2026-10-27). It replaces no
 
 - Source repo: `Tealbrick/opt2-tealbrick-connect`, tag `v0.7.11` (connect#34 squash), commit `4b064bdcd6f4a57fdef3957f77eb520bd038ce01`, file `tealbrick.manifest.json` (version 0.7.11)
 - sha256: `6579ec25290da62cbd81f85a30388ee888d9f6afe44bbefa44277cc37ad651b1`
+
+## tb.access/1, the reader side (C380 B9b, spec 0.1.89)
+
+`access.list_in.1.schema.json`, `access.list_out.1.schema.json`, `access.list_in.1.json`, `access.list_out.1.json` and `access.digest.1.json` are byte copies. Do not edit them. `test/access-reader.test.ts` fails when a file no longer matches the sha256 below, and runs the fixtures through the schema and through `parsePage`.
+
+- Source repo: `Tealbrick/opt2-tealbrick-specs`, paths `packages/spec/schemas/contracts/` and `packages/spec/examples/contracts/`, tag `spec-v0.1.89` (commit `074f1a9`).
+- `access.list_in.1.schema.json`: `83f1c2f7c2c399d8e11a93418e469d01c777af5f6c8bfe7cd2643539f3a04fe5`
+- `access.list_out.1.schema.json`: `571feb6b833d392f8eec3212b21d53aa7e529dfb65a34f8a54b89d07160c7f48`
+- `access.list_in.1.json`: `dc1745d9a0bd6d83fdd672fbc14e119f9637b19537162e77455b246676535c85`
+- `access.list_out.1.json`: `efc7e1389eb7a7eac55e3149c2ac111959a5664ebaccf630a0155668c70b5c49`
+- `access.digest.1.json`: `e4db19dd894802348b9e87c2251d85383fb2e4f47e90b26dde76c42e17b42daa`
