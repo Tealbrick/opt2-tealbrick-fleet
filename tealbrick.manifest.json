@@ -10786,7 +10786,7 @@
     {
       "id": "record_export",
       "title": "Make the access record",
-      "description": "Make one file for a period of up to a year: what each app listed in every sweep with the rows that ended, the open and accepted differences, the time from a stop to the proof, the apps that were not read, verdicts, plans with their outcomes, and who approved. Our own apps report this data. The file makes no claim about any law or standard, and it states its limits. It changes no access. It writes one event with the digest of the file. Owner only.",
+      "description": "Make one file for a period of up to a year: what each app listed in every sweep with the rows that ended, the open and accepted differences, the time from a stop to the proof, the apps that were not read, verdicts, plans with their outcomes, and who approved. Our own apps report this data. The file makes no claim about any law or standard, and it states its limits. Dates are in ISO form; a date alone is the whole day in UTC, and the end is never in the future. It changes no access. It writes one event with the digest of the file. Owner only.",
       "crud": [
         "update"
       ],

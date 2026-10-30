@@ -9,7 +9,8 @@ import type { Names } from "./sweeps.ts";
 
 type Row = Record<string, unknown>;
 export const CAPS = { events: 5000, verdicts: 5000, plans: 500, steps: 5000, exceptions: 2000, stops: 500, rounds: 200 } as const;
-const OUTCOME_CHARS = 1000;
+/** A plan that ended like this was not confirmed into effect: the owner took it back, it ran out, Portal refused it, or it was replaced. */
+const NOT_CONFIRMED: readonly string[] = ["rejected", "expired", "withdrawn", "replaced", "cancelled", "stale", "lost"];
 const iso = (ms: unknown): string | null => (ms === null || ms === undefined ? null : new Date(Number(ms)).toISOString());
 const cap = (rows: Row[], max: number, what: string): Row[] => (rows.length > max ? fail("record_too_big", `This period has too many ${what} for one file. Choose a shorter period.`, 409) : rows);
 const nameFor = (names: Names, kind: unknown, id: unknown): string | null => (kind === "agent" ? names.agents : names.people).get(String(id)) ?? null;
@@ -59,10 +60,14 @@ export function roundsIn(db: Db, from: number, to: number, now: number) {
   return rows.map((r) => ({ ...summaryOf(db, r, now), createdBy: r.created_by === null ? null : String(r.created_by), closedBy: r.closed_by === null ? null : String(r.closed_by) }));
 }
 
+/** Portal's answer for a step, as the runner kept it (it cuts at 2000 characters itself). Kept whole: a record that says it copies must not cut again. */
 const outcomeOf = (s: Row): unknown => {
   if (s.output_json === null || s.output_json === undefined) return null;
-  const text = String(s.output_json);
-  return text.length > OUTCOME_CHARS ? `${text.slice(0, OUTCOME_CHARS)}…` : (JSON.parse(text) as unknown);
+  try {
+    return JSON.parse(String(s.output_json)) as unknown;
+  } catch {
+    return String(s.output_json);
+  }
 };
 const seenBy = (s: Row): string => (s.phase === "core" ? "Portal: the signed picture Governance reads" : `${TARGET_NAMES[s.target as AccessTarget] ?? String(s.target)}: a fresh list of the app`);
 
@@ -82,7 +87,7 @@ export function plansIn(db: Db, from: number, to: number, names: Names) {
       subject: subjectOf(names, p.subject_kind, p.subject_id, p.subject_name),
       purpose: String(p.purpose),
       by: String(p.trigger_kind),
-      approvedBy: p.trigger_kind === "owner" && p.actor_id !== null ? String(p.actor_id) : null,
+      confirmedBy: p.trigger_kind === "owner" && p.actor_id !== null && !NOT_CONFIRMED.includes(String(p.state)) ? String(p.actor_id) : null,
       state: String(p.state),
       mode: String(p.rail),
       openedAt: iso(p.opened_at) as string,
@@ -100,25 +105,30 @@ export function plansIn(db: Db, from: number, to: number, names: Names) {
 // ── time to stop ────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Seconds from "marked" to "stopped" as the app or the slice showed it. Marked: the owner's or the system's change to suspended or leaving. Stopped: every
- * step of the plans that followed is proved (`done`), at the time of the last proof. A step that is only said, handled by hand or still open leaves it unstopped,
- * with the count: a stop is never claimed from what an app said it did.
+ * Seconds from "marked" to "stopped" as the app or the slice showed it. Marked: the owner's or the system's change to suspended or leaving. Stopped needs all of: a
+ * stop plan came after the change and every such plan is done; every app was read or is not installed; every step that ends something is proved by its owner (the
+ * slice, or a fresh list of the app); and nothing was kept or only listed. Anything less gives no time and says why. A stop is never claimed from what an app said it did.
  */
 export function timeToStop(db: Db, from: number, to: number, names: Names) {
   const marks = cap(db.prepare("SELECT * FROM fleet_lifecycle_events WHERE kind = 'transition' AND to_state IN ('suspended', 'leaving') AND at >= ? AND at <= ? ORDER BY seq LIMIT ?").all(from, to, CAPS.stops + 1), CAPS.stops, "stops");
   const nextMark = db.prepare("SELECT MIN(at) AS at FROM fleet_lifecycle_events WHERE kind = 'transition' AND subject_kind = ? AND subject_id = ? AND seq > ?");
-  const plansAfter = db.prepare("SELECT * FROM fleet_plans WHERE subject_kind = ? AND subject_id = ? AND opened_at >= ? AND opened_at < ? ORDER BY opened_at, part");
-  const stepsOf = db.prepare("SELECT * FROM fleet_plan_steps WHERE plan_id = ? AND phase <> 'read' AND state <> 'listed' ORDER BY n");
+  const plansAfter = db.prepare("SELECT * FROM fleet_plans WHERE subject_kind = ? AND subject_id = ? AND purpose IN ('suspend', 'leave', 'transfer') AND opened_at >= ? AND opened_at < ? ORDER BY opened_at, part");
+  const stepsOf = db.prepare("SELECT * FROM fleet_plan_steps WHERE plan_id = ? ORDER BY n");
   return marks.map((m) => {
     const until = Number(nextMark.get(String(m.subject_kind), String(m.subject_id), Number(m.seq))?.at ?? Number.MAX_SAFE_INTEGER);
     const plans = plansAfter.all(String(m.subject_kind), String(m.subject_id), Number(m.at), until);
-    const steps = plans.flatMap((p) => stepsOf.all(String(p.id)));
-    const proved = steps.filter((s) => s.state === "done");
-    const said = steps.filter((s) => s.state === "reported" || s.state === "not_provable");
-    const manual = steps.filter((s) => s.state === "manual");
-    const open = steps.length - proved.length - said.length - manual.length - steps.filter((s) => ["excepted", "not_installed", "cancelled"].includes(String(s.state))).length;
-    const stopped = plans.length > 0 && steps.length > 0 && proved.length === steps.length;
+    const all = plans.flatMap((p) => stepsOf.all(String(p.id)));
+    const real = all.filter((s) => s.phase !== "read" && s.state !== "listed");
+    const proved = real.filter((s) => s.state === "done");
+    const said = real.filter((s) => s.state === "reported" || s.state === "not_provable");
+    const manual = real.filter((s) => s.state === "manual");
+    const kept = all.filter((s) => s.state === "listed").length;
+    const unread = all.filter((s) => s.phase === "read" && s.state !== "done" && s.state !== "not_installed").length;
+    const open = real.length - proved.length - said.length - manual.length - real.filter((s) => ["excepted", "not_installed", "cancelled"].includes(String(s.state))).length;
+    const planned = plans.length > 0 && plans.every((p) => p.state === "done");
+    const stopped = planned && unread === 0 && kept === 0 && real.length > 0 && proved.length === real.length;
     const at = stopped ? Math.max(...proved.map((s) => Number(s.updated_at))) : null;
+    const why = [!planned ? "A plan is not done." : null, unread > 0 ? "An app was not read." : null, kept > 0 ? `${kept} items were kept or only listed.` : null, real.length === 0 ? "No step ends anything." : proved.length < real.length ? "Not every step is proved." : null].filter(Boolean);
     return {
       subject: subjectOf(names, m.subject_kind, m.subject_id, m.subject_name),
       to: String(m.to_state),
@@ -126,24 +136,30 @@ export function timeToStop(db: Db, from: number, to: number, names: Names) {
       markedBy: m.actor_kind === "owner" ? "owner" : "system",
       markedAt: iso(m.at) as string,
       plans: plans.map((p) => String(p.id)),
-      steps: { total: steps.length, proved: proved.length, said: said.length, manual: manual.length, open: Math.max(open, 0) },
+      steps: { total: real.length, proved: proved.length, said: said.length, manual: manual.length, open: Math.max(open, 0), kept, unread },
       stoppedAt: at === null ? null : iso(at),
       seconds: at === null ? null : Math.max(0, Math.round((at - Number(m.at)) / 1000)),
       seenBy: [...new Set(proved.map(seenBy))],
-      note: plans.length === 0 ? "No plan was made for this change." : stopped ? null : "Not every step is proved. The time is not given.",
+      note: plans.length === 0 ? "No plan was made for this change." : stopped ? null : `The time is not given. ${why.join(" ")}`,
     };
   });
 }
 
 // ── who approved ────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** The distinct sign-ins that approved something in the period: verdicts, plans the owner confirmed, accepted differences, owner changes, rounds. */
-export function approversIn(parts: { verdicts: { reviewer: string | null }[]; plans: { approvedBy: string | null }[]; exceptions: { by: string | null }[]; events: { actorId: string | null }[]; rounds: { createdBy: string | null; closedBy: string | null }[] }): string[] {
+/**
+ * The distinct sign-ins that approved something in Governance in the period: a review verdict, a plan the owner confirmed that was not taken back or refused, an accepted
+ * difference, and the owner's own change of a person or agent. Making or closing a round, and making this record, approve nothing. An approval in Portal is made in Portal.
+ */
+export function approversIn(parts: { verdicts: { reviewer: string | null }[]; plans: { confirmedBy: string | null }[]; exceptions: { by: string | null }[]; events: { actorId: string | null; subject: { kind: string } }[] }): string[] {
   const ids = new Set<string>();
   for (const v of parts.verdicts) if (v.reviewer) ids.add(v.reviewer);
-  for (const p of parts.plans) if (p.approvedBy) ids.add(p.approvedBy);
+  for (const p of parts.plans) if (p.confirmedBy) ids.add(p.confirmedBy);
   for (const e of parts.exceptions) if (e.by) ids.add(e.by);
-  for (const e of parts.events) if (e.actorId) ids.add(e.actorId);
-  for (const r of parts.rounds) for (const id of [r.createdBy, r.closedBy]) if (id) ids.add(id);
+  for (const e of parts.events) if (e.actorId && e.subject.kind !== "workspace") ids.add(e.actorId);
   return [...ids].sort();
 }
+
+/** Changes the system made with no approval in Governance: system plans, and a stop or close the system recorded. */
+export const systemMadeIn = (parts: { plans: { by: string }[]; events: { actor: string; kind: string; to: string | null }[] }): number =>
+  parts.plans.filter((p) => p.by === "system").length + parts.events.filter((e) => e.actor === "system" && e.kind === "transition" && ["suspended", "leaving", "archived"].includes(String(e.to))).length;

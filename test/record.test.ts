@@ -6,10 +6,10 @@ import { validateAgainstSchema } from "@opt2-tealbrick/manifest";
 import type { Json, OpContext } from "@opt2-tealbrick/miniapp-sdk";
 import { findingsList } from "../src/access/differences.ts";
 import { handlers, manifest } from "../src/app.ts";
-import { appendEvent } from "../src/lifecycle/events.ts";
+import { appendEvent, verifyChain, verifyChainPaged } from "../src/lifecycle/events.ts";
 import { loadColleagues } from "../src/lifecycle/view.ts";
 import { buildRecord, digestOfRecord, MAX_DAYS, periodOf } from "../src/record/index.ts";
-import { NO_APPROVER, ONE_APPROVER } from "../src/record/words.ts";
+import { manyApprovers, NO_APPROVER, ONE_APPROVER } from "../src/record/words.ts";
 import { recordReview, requestReview } from "../src/reviews.ts";
 import { answer, wire } from "./access-helpers.ts";
 import { migratedDb } from "./helpers.ts";
@@ -90,7 +90,7 @@ test("R7: the outcome of each step is copied into the record, with the Portal re
   const plan = record.plans[0];
   assert.ok(plan);
   assert.equal(plan.state, "done");
-  assert.equal(plan.approvedBy, OWNER);
+  assert.equal(plan.confirmedBy, OWNER);
   assert.ok(plan.portalReceipt, "the receipt id is kept: Portal keeps the receipt for 90 days");
   assert.ok(plan.portalDraft);
   const core = plan.steps.find((s) => s.phase === "core");
@@ -135,8 +135,10 @@ test("an export is one event in the chain with the digest; a second export lists
 test("period: a default of 90 days, at most a year, a start before the end; no sweep in the period is an empty list, and nobody approved is said", async () => {
   const now = Date.UTC(2026, 9, 30);
   assert.deepEqual(periodOf({}, now), { from: now - 90 * 86_400_000, to: now });
-  assert.equal(periodOf({ from: "2026-01-01T00:00:00Z", to: "2026-12-31T00:00:00Z" }, now).to - periodOf({ from: "2026-01-01T00:00:00Z", to: "2026-12-31T00:00:00Z" }, now).from, 364 * 86_400_000);
-  for (const bad of [{ from: "2026-10-01", to: "2026-10-01" }, { from: "2026-10-02", to: "2026-10-01" }, { from: "nonsense" }, { from: "2025-01-01", to: "2026-10-01" }]) assert.throws(() => periodOf(bad, now), refused("period_invalid", 400));
+  assert.equal(periodOf({ from: "2025-10-30T00:00:00Z" }, now).to - periodOf({ from: "2025-10-30T00:00:00Z" }, now).from, 365 * 86_400_000, "a year is the most");
+  for (const bad of [{ from: "2026-10-02", to: "2026-10-01" }, { from: "nonsense" }, { from: "10/01/2026" }, { from: "2026-10-01 10:00" }, { from: "2025-01-01", to: "2026-10-01" }, { from: "2026-10-30T00:00:00Z", to: "2026-10-29T00:00:00Z" }]) assert.throws(() => periodOf(bad, now), refused("period_invalid", 400), JSON.stringify(bad));
+  assert.equal(periodOf({ from: "2026-10-01", to: "2026-10-01" }, now).to - periodOf({ from: "2026-10-01", to: "2026-10-01" }, now).from, 86_400_000 - 1, "a date alone: the whole day for the end");
+  assert.equal(periodOf({ from: "2026-10-01", to: "2030-01-01" }, now).to, now, "the end is never in the future");
   assert.equal(MAX_DAYS, 366);
   const empty = migratedDb();
   const { record } = await buildRecord(empty, {}, { findings: { lastSweepAt: null, storesRead: 0, unread: [], items: [] }, version: "t", now: T0 + 5 * HOUR });
@@ -176,4 +178,104 @@ test("what the file holds about people is what it says: no email, title, tag or 
   assert.match(out.record.contents.includes.join(" "), /Names and ids/);
   assert.match(out.record.contents.excludes.join(" "), /Email addresses/);
   assert.match(out.record.contents.decision, /Nobody checked this against a law/);
+});
+
+const verdictPlan = (w: World, over: Record<string, unknown>) => w.db.prepare("UPDATE fleet_plans SET state = ? WHERE id = (SELECT id FROM fleet_plans ORDER BY opened_at DESC LIMIT 1)").run(String(over.state));
+
+test("time to stop is given only when every plan is done, every app was read, every step that ends something is proved and nothing was kept; else the file says why", async () => {
+  const { w, marked, now } = await story();
+  const stop = async () => (await buildRecord(w.db, {}, facts(w, now))).record.timeToStop[0] as { seconds: number | null; stoppedAt: string | null; note: string | null; steps: { kept: number; unread: number } };
+  assert.ok((await stop()).seconds !== null, "quiet on good: the story is a proved stop");
+  const plan = String(w.db.prepare("SELECT id FROM fleet_plans").get()?.id);
+  // an app that was not read: its read step is not final
+  w.db.prepare("UPDATE fleet_plan_steps SET state = 'not_read' WHERE plan_id = ? AND phase = 'read' AND target = 'kanban'").run(plan);
+  let out = await stop();
+  assert.deepEqual([out.seconds, out.stoppedAt, out.steps.unread], [null, null, 1]);
+  assert.match(String(out.note), /An app was not read/);
+  w.db.prepare("UPDATE fleet_plan_steps SET state = 'done' WHERE plan_id = ? AND phase = 'read'").run(plan);
+  // an item the owner kept or the plan only listed
+  w.db.prepare("UPDATE fleet_plan_steps SET state = 'listed' WHERE plan_id = ? AND op = 'access_revoke'").run(plan);
+  out = await stop();
+  assert.deepEqual([out.seconds, out.steps.kept], [null, 1]);
+  assert.match(String(out.note), /kept or only listed/);
+  w.db.prepare("UPDATE fleet_plan_steps SET state = 'done' WHERE plan_id = ? AND op = 'access_revoke'").run(plan);
+  // a plan that is only reported, or still partial
+  for (const state of ["reported", "partial"]) {
+    verdictPlan(w, { state });
+    out = await stop();
+    assert.equal(out.seconds, null, state);
+    assert.match(String(out.note), /A plan is not done/);
+  }
+  verdictPlan(w, { state: "done" });
+  // a verdict plan made later is not a stop: it does not move the time
+  w.db.prepare("INSERT INTO fleet_plans (id, group_id, subject_kind, subject_id, subject_name, purpose, trigger_kind, lifecycle_rev, state, rail, plan_digest, expires_in_sec, opened_at, updated_at) VALUES ('pln_review', 'pln_review', 'agent', ?, 'Henry', 'review', 'owner', 0, 'done', 'none', 'd', 1, ?, ?)").run(HENRY, marked + 3_600_000, marked + 3_600_000);
+  w.db.prepare("INSERT INTO fleet_plan_steps (id, plan_id, n, phase, target, op, state, updated_at) VALUES ('pst_late', 'pln_review', 0, 'now', 'connect', 'access_revoke', 'done', ?)").run(marked + 3_600_000);
+  assert.ok(((await stop()).seconds ?? 99_999) < 3_000, "the late verdict plan is left out");
+  assert.equal(marked > 0, true);
+});
+
+test("who approved: a plan that was taken back or refused approves nothing; making a round or this record approves nothing; a second person, and what the system did", async () => {
+  const { w, now } = await story();
+  let line = (await buildRecord(w.db, {}, facts(w, now))).record.approvers;
+  assert.deepEqual([line.count, line.systemMade, line.line], [1, 0, ONE_APPROVER]);
+  // round, close, export: workspace events by the owner
+  appendEvent(w.db, { subject: { kind: "workspace", id: "", name: "Governance" }, kind: "changed", actor: { kind: "owner", id: "per_second" }, note: "Review round started: rnd_x.", at: now - 1000 });
+  assert.equal((await buildRecord(w.db, {}, facts(w, now))).record.approvers.count, 1, "a round is not an approval");
+  // a plan the owner's second sign-in made and took back
+  w.db.prepare("INSERT INTO fleet_plans (id, group_id, subject_kind, subject_id, subject_name, purpose, trigger_kind, actor_id, lifecycle_rev, state, rail, plan_digest, expires_in_sec, opened_at, updated_at) VALUES ('pln_back', 'pln_back', 'agent', ?, 'Henry', 'suspend', 'owner', 'per_second', 0, 'withdrawn', 'draft', 'd', 1, ?, ?)").run(HENRY, now - 2000, now - 2000);
+  assert.equal((await buildRecord(w.db, {}, facts(w, now))).record.approvers.count, 1, "withdrawn: not an approval");
+  w.db.prepare("UPDATE fleet_plans SET state = 'done' WHERE id = 'pln_back'").run();
+  line = (await buildRecord(w.db, {}, facts(w, now))).record.approvers;
+  assert.deepEqual([line.count, line.line], [2, manyApprovers(2)]);
+  // the system's own stop
+  w.db.prepare("INSERT INTO fleet_plans (id, group_id, subject_kind, subject_id, subject_name, purpose, trigger_kind, lifecycle_rev, state, rail, plan_digest, expires_in_sec, opened_at, updated_at) VALUES ('pln_sys', 'pln_sys', 'agent', ?, 'Henry', 'suspend', 'system', 0, 'waiting', 'draft', 'd', 1, ?, ?)").run(HENRY, now - 500, now - 500);
+  line = (await buildRecord(w.db, {}, facts(w, now))).record.approvers;
+  assert.equal(line.systemMade, 1);
+  assert.match(line.line, /1 changes were made by the system, and no person approved them in Governance\./);
+});
+
+test("Portal's answer for a step is copied whole, a long one too; and the chain walk in pages gives the same answer as the whole walk, and breaks where it breaks", async () => {
+  const { w, now } = await story();
+  const big = JSON.stringify({ agt: HENRY, note: "x".repeat(1500) });
+  w.db.prepare("UPDATE fleet_plan_steps SET output_json = ? WHERE phase = 'core'").run(big);
+  const core = (await buildRecord(w.db, {}, facts(w, now))).record.plans[0]?.steps.find((s) => s.phase === "core");
+  assert.deepEqual(core?.outcome, JSON.parse(big), "not cut, still an object");
+  // pages of 2 over a chain of many rows
+  for (let i = 0; i < 7; i++) appendEvent(w.db, { subject: { kind: "workspace", id: "", name: "G" }, kind: "changed", actor: { kind: "owner", id: "per_owner" }, note: `n${i}`, at: now + i });
+  const whole = verifyChain(w.db);
+  assert.deepEqual(await verifyChainPaged(w.db, 2), whole);
+  assert.equal(whole.ok, true);
+  w.db.exec("DROP TRIGGER fleet_lifecycle_events_no_update");
+  const mid = Number(w.db.prepare("SELECT seq FROM fleet_lifecycle_events ORDER BY seq LIMIT 1 OFFSET 12").get()?.seq);
+  w.db.prepare("UPDATE fleet_lifecycle_events SET note = 'edited' WHERE seq = ?").run(mid);
+  const broken = await verifyChainPaged(w.db, 2);
+  assert.deepEqual(broken, verifyChain(w.db));
+  assert.equal(broken.ok, false);
+  assert.equal(broken.ok === false ? broken.brokenAt : 0, mid + 1, "the row after the edited one no longer matches its predecessor");
+});
+
+test("the list of a sweep follows the log up to the sweep's watermark, not a clock: two sweeps in one millisecond keep their own lists; a sweep with no watermark has no list", async () => {
+  const db = migratedDb();
+  db.prepare("UPDATE fleet_record_meta SET value = '0' WHERE key = 'record_since'").run();
+  const row = (seq: number, sweep: string, change: string, item: string) => db.prepare("INSERT INTO fleet_access_history (seq, sweep_id, at, change, target, item_id, kind, subject_kind, resource, direction, level, label, state, revocable, digest) VALUES (?, ?, 1000, ?, 'evolution', ?, 'routine', 'unlinked', 'r', 'held_by', 'use', 'L', 'active', 1, 'd')").run(seq, sweep, change, item);
+  db.prepare("INSERT INTO fleet_sweeps (id, started_by, started_at, finished_at, calls, stores_read, history_seq) VALUES ('swp_1', 'schedule', 900, 1000, 4, 4, 2), ('swp_2', 'schedule', 1000, 1000, 4, 4, 3), ('swp_0', 'schedule', 1, 2, 4, 4, NULL)").run();
+  row(1, "swp_1", "appeared", "routine:a");
+  row(2, "swp_1", "appeared", "routine:b");
+  row(3, "swp_2", "ended", "routine:a"); // the same millisecond as swp_1's finish
+  const { record } = await buildRecord(db, { from: "1970-01-01T00:00:00Z", to: "1970-01-02T00:00:00Z" }, { findings: { lastSweepAt: null, storesRead: 0, unread: [], items: [] }, version: "t", now: 86_400_000 });
+  const lists = record.sweeps.lists;
+  assert.deepEqual(lists.map((l) => l.id), ["swp_0", "swp_1", "swp_2"].sort((a, b) => (a === "swp_0" ? -1 : 0) + (b === "swp_0" ? 1 : 0)));
+  const by = Object.fromEntries(lists.map((l) => [l.id, l]));
+  assert.equal(by.swp_0?.listKept, false);
+  assert.deepEqual(by.swp_1?.items?.map((i) => i.id), ["routine:a", "routine:b"], "swp_2's row is not in swp_1's list");
+  assert.deepEqual(by.swp_2?.items?.map((i) => i.id), ["routine:b"]);
+  assert.deepEqual(by.swp_2?.ended.map((i) => i.id), ["routine:a"]);
+});
+
+test("a list of 2000 differences may be cut: the file says so", async () => {
+  const w = makeWorld();
+  const items = Array.from({ length: 2000 }, (_, i) => ({ code: "no_owner", text: `t${i}` }));
+  const cut = await buildRecord(w.db, {}, { findings: { lastSweepAt: null, storesRead: 0, unread: [], items }, version: "t", now: T0 + HOUR });
+  assert.equal(cut.record.findings.cut, true);
+  assert.equal((await buildRecord(w.db, {}, { findings: { lastSweepAt: null, storesRead: 0, unread: [], items: items.slice(0, 5) }, version: "t", now: T0 + HOUR })).record.findings.cut, false);
 });
