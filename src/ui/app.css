@@ -39,3 +39,27 @@
 /* Contact rules: one row per team with its Hold button (C373 §5) */
 .team-rules { list-style: none; margin: 0; padding: 0; }
 .team-rules > li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 12px 0; overflow-wrap: anywhere; }
+
+/* Summary and People and agents (C380) */
+.stat { gap: var(--tb-s1); }
+.stat-value { font-size: var(--tb-text-title); font-weight: var(--tb-weight-head); line-height: 28px; }
+.ready { list-style: none; margin: 0; padding: 0; display: grid; box-shadow: var(--tb-rule-top); }
+.ready > li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 12px 0; box-shadow: var(--tb-hair-bottom); overflow-wrap: anywhere; }
+.ready > li > span:not(.tb-tag) { flex: 1 1 220px; min-width: 0; }
+.row-name { display: grid; justify-items: start; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.row-tag { display: block; margin-top: 6px; }
+.row-actions { justify-content: flex-end; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.not-changed { padding: var(--tb-s4); border-radius: var(--tb-radius-brick); background: var(--tb-plate); }
+.not-changed h3, .plan h3 { font-size: 1.0625rem; font-weight: var(--tb-weight-head); line-height: 22px; }
+.not-changed h3 { margin-bottom: var(--tb-s2); }
+.not-changed ul { margin: 0; padding-left: var(--tb-s5); list-style: disc; display: grid; gap: var(--tb-s1); font-size: var(--tb-text-label); line-height: 22px; }
+.plan-steps { margin: 0; padding: 0; list-style: none; display: grid; box-shadow: var(--tb-rule-top); }
+.plan-steps > li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 12px 0; box-shadow: var(--tb-hair-bottom); }
+.plan-steps > li > span:first-child { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }
+.stats { grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); }
+.everyone td:nth-child(3) { white-space: nowrap; }
+@media (max-width: 480px) { .everyone td.is-empty { display: none; } }
+.kv-row { display: contents; }
+.details > summary { cursor: pointer; font-weight: var(--tb-weight-label); }
+.details > .kv { margin-top: var(--tb-s3); overflow-wrap: anywhere; }
