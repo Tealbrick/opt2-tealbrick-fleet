@@ -63,3 +63,5 @@
 .kv-row { display: contents; }
 .details > summary { cursor: pointer; font-weight: var(--tb-weight-label); }
 .details > .kv { margin-top: var(--tb-s3); overflow-wrap: anywhere; }
+.flow-agent { display: grid; gap: 2px; font-size: 1.0625rem; font-weight: var(--tb-weight-head); line-height: 22px; overflow-wrap: anywhere; }
+.flow-agent .tb-hint { font-weight: var(--tb-weight-nav); }

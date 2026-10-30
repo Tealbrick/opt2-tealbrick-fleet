@@ -130,6 +130,14 @@ const agentDetail = (over: Record<string, unknown> = {}) => ({
     ...over,
   },
 });
+const personDetail = (over: Record<string, unknown> = {}) =>
+  agentDetail({
+    ...row({ kind: "person", id: ID.p, name: "Marco Rossi", runtime: null, owner: null, line: "Active" }),
+    title: "Support lead",
+    agents: [row({}), row({ id: ID.b, name: "Sales helper", lifecycle: "proposed", effective: "proposed", line: "New: working, not reviewed" })],
+    actions: [{ to: "leaving", label: "Stop this person's agents and access", blocked: null, needsWaive: false }],
+    ...over,
+  });
 const stoppedAgent = (floor: unknown) => ({ colleague: agentDetail({ lifecycle: "suspended", effective: "suspended", line: "Marked to stop, still running: approve in Portal", plan, floor, reason: "left" }).colleague, transition: { from: "active", to: "suspended", event: "lev_01J00000000000000000000H2" } });
 const pageOps = { ...shell, summary_get: ok(summary), colleagues_list: ok({ items: rows, nextCursor: null, total: rows.length }) };
 const button = (page: Page, name: string | RegExp) => page.getByRole("button", { name }).first().click();
@@ -138,6 +146,8 @@ async function pick(page: Page, label: string, option: string) {
   await page.getByRole("combobox", { name: label }).click();
   await page.getByRole("option", { name: option }).click();
 }
+const AGENT = `person-or-agent?kind=agent&id=${ID.a}`;
+const PERSON = `person-or-agent?kind=person&id=${ID.p}`;
 
 export const scenes: Scene[] = [
   { name: "summary", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: pageOps, ready: "Ready to stop an agent?", expect: ["Could not be read", "Not installed", "Rules has this change", "cannot see that switch"] },
@@ -225,6 +235,84 @@ export const scenes: Scene[] = [
     },
     expect: ["You stopped 5 entries"],
   },
+  { name: "agent", path: AGENT, personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, colleague_get: ok(agentDetail()) }, ready: "History", expect: ["Stop now", "Stop and remove access"] },
+  { name: "agent-loading", path: AGENT, personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, colleague_get: hang }, ready: "Loading this entry" },
+  { name: "agent-error", path: AGENT, personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, colleague_get: fail("internal") }, ready: "Try again" },
+  { name: "agent-no-link", path: "person-or-agent", personOps: LIFECYCLE_OPS, strict: true, ops: pageOps, ready: "not in the link" },
+  { name: "agent-stopped", path: AGENT, personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, colleague_get: ok(stoppedAgent(FLOOR_PENDING)) }, ready: "History", expect: ["Not applied: do these in Portal", "Not changed"] },
+  {
+    name: "agent-details-open",
+    path: AGENT,
+    personOps: LIFECYCLE_OPS,
+    strict: true,
+    ops: { ...pageOps, colleague_get: ok(agentDetail()) },
+    ready: "History",
+    steps: async (p) => {
+      await p.getByText("Details").click();
+    },
+  },
+  {
+    name: "close-before-cooling",
+    path: AGENT,
+    personOps: LIFECYCLE_OPS,
+    strict: true,
+    ops: { ...pageOps, colleague_get: ok(agentDetail({ lifecycle: "leaving", effective: "leaving", runtime: "paused", line: "Paused, removal waits for you", reason: "left", actions: [{ to: "archived", label: "Close", blocked: null, needsWaive: true }], close: { coolingDays: 30, coolingEndsAt: "2026-11-29T09:00:00Z", coolingOver: false, limits: ["Connect could not be read.", "No version of Task Board lists project access."] } })) },
+    ready: "History",
+    steps: (p) => button(p, "Close"),
+    expect: ["Nothing closes by itself", "cooling period of 30 days ends", "Why close before the cooling", "Connect could not be read"],
+  },
+  {
+    name: "close-blocked",
+    path: AGENT,
+    personOps: LIFECYCLE_OPS,
+    strict: true,
+    ops: { ...pageOps, colleague_get: ok(agentDetail({ lifecycle: "leaving", effective: "leaving", runtime: "running", line: "Leaving: waits for you in Portal", actions: [{ to: "archived", label: "Close", blocked: "Pause this agent in Portal first.", needsWaive: false }], plan })) },
+    ready: "History",
+    expect: ["Close: Pause this agent in Portal first."],
+  },
+  {
+    name: "mark-reviewed",
+    path: AGENT,
+    personOps: LIFECYCLE_OPS,
+    strict: true,
+    ops: { ...pageOps, colleague_get: ok(agentDetail({ lifecycle: "proposed", effective: "proposed", trust: "unreviewed", line: "New: working, not reviewed", actions: [{ to: "active", label: "Mark as reviewed", blocked: null, needsWaive: false }] })) },
+    ready: "History",
+    steps: (p) => button(p, "Mark as reviewed"),
+    expect: ["It grants nothing"],
+  },
+  {
+    name: "bring-back",
+    path: PERSON,
+    personOps: LIFECYCLE_OPS,
+    strict: true,
+    ops: { ...pageOps, colleague_get: ok(personDetail({ lifecycle: "archived", effective: "archived", line: "Closed", agents: [], actions: [{ to: "proposed", label: "Bring back", blocked: null, needsWaive: false }], grantsBefore: [{ agent: ID.a, product: "knowledge", crud: ["read", "write"] }] })) },
+    ready: "History",
+    steps: (p) => button(p, "Bring back"),
+    expect: ["This restores nothing"],
+  },
+  { name: "person", path: PERSON, personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, colleague_get: ok(personDetail()) }, ready: "History", expect: ["Their agents", "Stop this person's agents and access"] },
+  ...(["Why", "Their agents", "Confirm", "Result"] as const).map((target, i): Scene => ({
+    name: `person-flow-${i + 1}-${target.toLowerCase().replace(" ", "-")}`,
+    path: PERSON,
+    personOps: LIFECYCLE_OPS,
+    strict: true,
+    ops: { ...pageOps, colleague_get: ok(personDetail()), lifecycle_set: ok({ colleague: personDetail({ lifecycle: "leaving", effective: "leaving", line: "Leaving: 2 agents wait for you in Portal", plan, reason: "left", actions: [] }).colleague, transition: { from: "active", to: "leaving", event: "lev_01J00000000000000000000H3" } }) },
+    ready: "History",
+    steps: async (p) => {
+      await button(p, "Stop this person's agents and access");
+      const dialog = p.getByRole("dialog");
+      if (i < 1) return;
+      await pick(p, "Reason", "They left");
+      await dialog.getByRole("button", { name: "Next" }).click();
+      if (i < 2) return;
+      await dialog.getByRole("button", { name: "Next" }).click();
+      if (i < 3) return;
+      await dialog.getByRole("button", { name: "Stop", exact: true }).click();
+      await dialog.getByText("Not applied: do these in Portal").waitFor();
+    },
+    expect: i === 0 ? ["The mark takes effect now"] : i === 1 ? ["Henry", "Sales helper"] : i === 2 ? ["Not changed", "Their own logins", "The next screen says"] : i === 3 ? ["Not applied: do these in Portal"] : [],
+    forbid: ["last day"],
+  })),
   { name: "people-old", path: "people", ops: { ...shell, overview_get: ok(overview) }, ready: "Marco Rossi" },
   { name: "people-old-empty", path: "people", ops: { ...shell, overview_get: ok({ revision: 0, teams: [], people: [], agents: [] }) }, ready: "No people yet" },
   { name: "people-old-loading", path: "people", ops: { ...shell, overview_get: hang }, ready: "Loading the directory" },
