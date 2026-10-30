@@ -1,12 +1,13 @@
 // People and agents (DESIGN-C380 §10): one row per person and workspace agent, one line of state from the server, the owner,
-// and the moves that fit. "See what would stop" appears only when the app has `plan_preview`. Outside agents stay on the
+// and the moves that fit. Outside agents stay on the
 // People page: they have no lifecycle.
 import { callOp } from "@opt2-tealbrick/miniapp-sdk/client";
-import { Button, ButtonLink, EmptyState, Segmented, Table } from "@opt2-tealbrick/ui";
+import { Button, ButtonLink, EmptyState, Segmented, Table, TextLink } from "@opt2-tealbrick/ui";
 import { useCallback, useState } from "react";
 import type { ColleaguesListOutput } from "#kit";
 import { LoadFailed, Loading, PageHead, useLoad } from "../common.tsx";
 import { StopNow } from "./stop-now.tsx";
+import { openSubject, subjectHref } from "./subject-link.ts";
 import { when } from "./words.ts";
 
 export type Row = ColleaguesListOutput["items"][number];
@@ -80,7 +81,15 @@ export function EveryonePage({ portalHref }: { portalHref?: string }) {
                 <tr key={`${r.kind}:${r.id}`}>
                   <td>
                     <span className="row-name">
-                    <strong>{r.name}</strong>
+                    <TextLink
+                      href={subjectHref(r.kind, r.id)}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        openSubject(r.kind, r.id);
+                      }}
+                    >
+                      {r.name}
+                    </TextLink>
                     <span className="tb-hint">{r.kind === "agent" ? "Agent" : "Person"}</span>
                     </span>
                   </td>
