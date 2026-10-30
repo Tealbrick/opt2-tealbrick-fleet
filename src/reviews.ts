@@ -14,6 +14,7 @@
 import { createHash } from "node:crypto";
 import { canonicalize, ulid } from "@opt2-tealbrick/manifest";
 import type { Db, Json } from "@opt2-tealbrick/miniapp-sdk";
+import { markNewAgent } from "./lifecycle/transitions.ts";
 import { type Shown, sameShown } from "./shown.ts";
 import { bump, fail, fleetHandle, MAX_TEAMS_PER_ANSWER, setPerson } from "./store.ts";
 import { cleanText } from "./text.ts";
@@ -265,6 +266,12 @@ export interface RequestInput {
   why: string;
 }
 
+/** C380: an agent may ask about others. It never asks about itself, by id or by a handle Connect gave it: no agent moves its own record. */
+function assertNotSelf(db: Db, agent: string, subject: RequestInput["subject"]): void {
+  const self = (subject.kind === "agent" && subject.id === agent) || (subject.id === undefined && subject.handle !== undefined && db.prepare("SELECT 1 FROM fleet_agent_handles WHERE agent_id = ? AND handle = ?").get(agent, fleetHandle(subject.handle) ?? "") !== undefined);
+  if (self) fail("no_self_request", "An agent cannot ask for a review of itself. The owner decides.", 403);
+}
+
 /**
  * An agent (or a companion app, recorded as `system`) asks the owner to review a subject. Dedup per (requester,
  * subject): asking again returns the requester's OWN open request with `duplicate: true`, never another requester's.
@@ -276,6 +283,7 @@ export function requestReview(db: Db, by: Requester & { id: string }, input: Req
     const why = cleanText(input.why);
     if (!why) fail("input_invalid", "say why the owner should review this", 400);
     const { kind, id, handle } = input.subject;
+    if (by.kind === "agent") assertNotSelf(db, by.id, input.subject);
     let subject: Subject | null;
     if (kind === "agent") {
       if (!id) return fail("input_invalid", "an agent subject needs an id", 400);
@@ -314,8 +322,11 @@ export function requestReview(db: Db, by: Requester & { id: string }, input: Req
 
 /** `agentsChanged`: a new agent gets one review request when the policy says so (system request; at most MAX_OPEN_SYSTEM open). */
 export function requestForNewAgents(db: Db, created: readonly { id: string; name: string }[], now = Date.now()): number {
-  if (created.length === 0 || !reviewPolicy(db).reviewNewAgents) return 0;
+  if (created.length === 0) return 0;
   return db.transaction(() => {
+    // T1: every new agent gets its event, whatever the review policy says
+    for (const a of created) markNewAgent(db, a, now);
+    if (!reviewPolicy(db).reviewNewAgents) return 0;
     let n = 0;
     let open = Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_reviews WHERE requested_by_kind = 'system' AND requested_by_id IS NULL AND status = 'requested'").get()?.n);
     for (const a of created) {
@@ -327,6 +338,19 @@ export function requestForNewAgents(db: Db, created: readonly { id: string; name
       open++;
     }
     return n;
+  });
+}
+
+/** A team or owner change opens one system review of that subject (C380, mover). One open per subject; at most MAX_OPEN_SYSTEM open. */
+export function requestSystemReview(db: Db, kind: SubjectKind, id: string, why: string, now = Date.now()): boolean {
+  return db.transaction(() => {
+    const s = subjectOf(db, kind, id);
+    const by: Requester = { kind: "system", id: null };
+    if (!s || s.status === "removed" || ownOpen(db, by, s)) return false;
+    const open = Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_reviews WHERE requested_by_kind = 'system' AND requested_by_id IS NULL AND status = 'requested'").get()?.n);
+    if (open >= MAX_OPEN_SYSTEM) return false;
+    insertRequest(db, s, by, cleanText(why).slice(0, 500), now);
+    return true;
   });
 }
 

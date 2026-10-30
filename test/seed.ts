@@ -1,6 +1,7 @@
 // The seeded directory of the Governance tests: PII in the owner-side fields, an outside agent, a departed person,
 // an entry an agent added. Used by the feed, lean-view and review tests.
 import type { Db } from "@opt2-tealbrick/miniapp-sdk";
+import { transition } from "../src/lifecycle/transitions.ts";
 import * as store from "../src/store.ts";
 import { AGENT_A, AGENT_B, NOSTR } from "./helpers.ts";
 
@@ -20,9 +21,9 @@ export function seed(db: Db) {
     handles: [`buzz:${NOSTR.hex}`, "slack:u012abcdef", "telegram:123456"], // stored canonical: npub, U012ABCDEF, 123456
   });
   const bo = store.setPerson(db, { name: "Bo", email: "bo@example.com", status: "departed", handles: ["telegram:-1001234567890"] });
-  // a database as 0.3.0 left it (migrations before 0007) has no org column
-  const hasOrg = db.prepare("PRAGMA table_info(fleet_people)").all().some((c) => c.name === "org");
-  const bot = store.setPerson(db, { name: "Outside Bot", kind: "outside_agent", ...(hasOrg ? { org: "Partner Org Ltd", relationship: "secret-relationship" } : {}), handles: ["slack:W0BOT123"] });
+  // C380: Bo left long ago, so the entry is closed: an agent reads `departed` from `archived` only
+  transition(db, { kind: "person", id: bo.id, to: "archived", reason: "left", waive: "seed", actor: { kind: "owner", id: null } });
+  const bot = store.setPerson(db, { name: "Outside Bot", kind: "outside_agent", org: "Partner Org Ltd", relationship: "secret-relationship", handles: ["slack:W0BOT123"] });
   db.prepare("UPDATE fleet_people SET trust = 'trusted' WHERE id = ?").run(bot.id); // the owner reviewed it (an owner-added outside agent starts unreviewed since 0.3.1)
   const cy = store.setPerson(db, { name: "Cy", source: "agent", handles: ["slack:UCY00001"] });
   const support = store.setTeam(db, { name: "Support", description: "internal-only description", tags: ["secret-tag"] });
