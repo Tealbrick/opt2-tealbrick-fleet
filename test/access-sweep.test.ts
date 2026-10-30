@@ -313,7 +313,7 @@ test("reconcile_now: the owner starts one read, a running one is enough; an agen
   assert.deepEqual(await run({ type: "person" }), { started: true });
   assert.deepEqual(await run({ type: "person" }), { started: false });
   for (const type of ["agent", "app"]) await assert.rejects(run({ type }) as Promise<unknown>, (e: unknown) => e instanceof TbError && e.code === "no_access" && e.httpStatus === 403);
-  assert.deepEqual(Object.keys(definition.jobs ?? {}).sort(), ["access_sweep", "access_sweep_cron"]);
+  assert.deepEqual(Object.keys(definition.jobs ?? {}).sort(), ["access_sweep", "access_sweep_cron", "plans_tick"]);
 });
 
 test("onStart: the 6 h clock always, the first read only when none finished", async () => {
@@ -325,7 +325,7 @@ test("onStart: the 6 h clock always, the first read only when none finished", as
     seen.length = 0;
     await definition.onStart?.({ db, log, callApp: async () => ({ status: "ok", output: {} }), schedule: (t: { job: string }, _w: unknown, o: { key?: string }) => seen.push({ job: t.job, key: o.key }) } as never);
     await definition.onStop?.({ db, log } as never);
-    return seen.map((s) => s.job);
+    return seen.map((s) => s.job).filter((j) => j !== "plans_tick");
   };
   assert.deepEqual(await start(), ["access_sweep_cron", "access_sweep_cron"]);
   db.exec("INSERT INTO fleet_sweeps (id, started_by, started_at, finished_at) VALUES ('swp_1', 'schedule', 1, 2)");

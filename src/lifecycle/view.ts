@@ -7,6 +7,7 @@ import { ACCESS_AFTER_LEAVE, accessAfterLeave, openDifferences } from "../access
 import { type AccessTarget, TARGET_NAMES } from "../access/items.ts";
 import { type Finding, findingsOf } from "../findings.ts";
 import { fail, revision } from "../meta.ts";
+import { latestPlanStates, unnamedAccounts } from "../plans/guards.ts";
 import { type PlanAgent, portalPlan } from "../plans/portal-link.ts";
 import { cleanTopology, type DecodedTopology, decodeTopology } from "../topology-slice.ts";
 import type { Trust } from "../trust.ts";
@@ -44,6 +45,7 @@ interface Loaded {
 /** Every person and workspace agent, sorted by name. Outside agents have no lifecycle and are not listed. */
 export function loadColleagues(db: Db, now: number): Loaded {
   const conflicts = new Set(db.prepare("SELECT DISTINCT h.agent_id FROM fleet_agent_handles h JOIN fleet_handles p ON p.handle = h.handle").all().map((r) => String(r.agent_id)));
+  const plans = latestPlanStates(db);
   const owners = new Map<string, { name: string; lifecycle: string | null }>();
   const rows: Row[] = [];
   const person = (p: Db_): Row => {
@@ -59,7 +61,7 @@ export function loadColleagues(db: Db, now: number): Loaded {
       trust: p.trust as Trust,
       owner: null,
       line: lineOf("person", lifecycle, effective, null, p.valid_from),
-      findings: findingsOf({ kind: "person", lifecycle, effective, runtime: null, hasOwner: false, ownerLifecycle: null, reason: p.lifecycle_reason === null ? null : String(p.lifecycle_reason), at: Number(p.lifecycle_at), validUntil: p.valid_until === null ? null : Number(p.valid_until), noCard: false, handleConflict: false }, now),
+      findings: findingsOf({ kind: "person", lifecycle, effective, runtime: null, hasOwner: false, ownerLifecycle: null, reason: p.lifecycle_reason === null ? null : String(p.lifecycle_reason), at: Number(p.lifecycle_at), validUntil: p.valid_until === null ? null : Number(p.valid_until), noCard: false, handleConflict: false, planState: plans.get(`person:${String(p.id)}`) ?? null, unnamedAccounts: lifecycle === "leaving" ? unnamedAccounts(db, String(p.id), now) : 0 }, now),
       validFrom: isoOf(p.valid_from),
       validUntil: isoOf(p.valid_until),
       keepRunning: false,
@@ -77,7 +79,7 @@ export function loadColleagues(db: Db, now: number): Loaded {
     const effective = effectiveAgent({ lifecycle, validFrom: a.valid_from === null ? null : Number(a.valid_from), keepRunning }, owner?.lifecycle ?? null);
     const runtime = runtimeOf(a.status);
     const findings = findingsOf(
-      { kind: "agent", lifecycle, effective, runtime, hasOwner: owner !== undefined, ownerLifecycle: owner?.lifecycle ?? null, reason: a.lifecycle_reason === null ? null : String(a.lifecycle_reason), at: Number(a.lifecycle_at), validUntil: a.valid_until === null ? null : Number(a.valid_until), noCard: a.migrated_note === "no_card", handleConflict: conflicts.has(String(a.id)) },
+      { kind: "agent", lifecycle, effective, runtime, hasOwner: owner !== undefined, ownerLifecycle: owner?.lifecycle ?? null, reason: a.lifecycle_reason === null ? null : String(a.lifecycle_reason), at: Number(a.lifecycle_at), validUntil: a.valid_until === null ? null : Number(a.valid_until), noCard: a.migrated_note === "no_card", handleConflict: conflicts.has(String(a.id)), planState: plans.get(`agent:${String(a.id)}`) ?? null },
       now,
     );
     rows.push({

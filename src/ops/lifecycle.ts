@@ -16,9 +16,12 @@ import {
   type SummaryGetOutput,
 } from "#kit";
 import { setSettings } from "../lifecycle/settings.ts";
-import { type Actor, assertCap, loadSubject, setDates, setKeepRunning, transition } from "../lifecycle/transitions.ts";
+import { type Actor, assertCap, guardOf, loadSubject, setDates, setKeepRunning, transition } from "../lifecycle/transitions.ts";
 import { colleagueDetail, colleaguesList, grantsOf, readTopology, summaryGet } from "../lifecycle/view.ts";
 import { fail } from "../meta.ts";
+import { planCtxOf } from "../plans/context.ts";
+import { closeOpenPlans } from "../plans/control.ts";
+import { openPlansOf } from "../plans/plan.ts";
 import { op } from "./op.ts";
 
 /** The manifest says `person`. The handler says it again: a lifecycle is the owner's act, and a wrong manifest must not open it. */
@@ -56,6 +59,14 @@ export const lifecycleOps = {
       const now = Date.now();
       const db = ctx.db;
       const topology = readTopology(ctx);
+      // T4, T6 (§2): the draft is taken back first, and only then the state moves. A change its own guard refuses takes nothing back. An apply that won the race ends this here.
+      if (input.to === "active" || input.to === "proposed") {
+        const s = loadSubject(db, input.kind, input.id);
+        if (s && input.expectedRev !== undefined && s.rev !== input.expectedRev) fail("lifecycle_stale", "This entry changed since you looked. Open it again.", 409);
+        const problem = s ? guardOf(db, s, input.to, { waive: input.waive }, now) : null;
+        if (problem) throw new TbError(problem.code, problem.message, problem.status);
+        await closeOpenPlans(planCtxOf(ctx as never), openPlansOf(db, input.kind, input.id), "withdrawn");
+      }
       const made = db.transaction(() => {
         // Checked before anything here moves the revision of this entry.
         if (input.expectedRev !== undefined && (loadSubject(db, input.kind, input.id) ?? fail("not_found", "No such entry.", 404)).rev !== input.expectedRev) fail("lifecycle_stale", "This entry changed since you looked. Open it again.", 409);
