@@ -14,14 +14,14 @@ const STATE_TAG: Record<StoreState, { status: "live" | "idle" | "needs-you" | "b
 
 const EFFECT: Record<ItemEffect, string> = { stops: "Would stop", manual: "You would do this", stays: "Would stay", about: "Others would keep reading" };
 
-function Item({ item }: { item: PreviewItem }) {
+function Item({ item, storeName }: { item: PreviewItem; storeName: string }) {
   return (
     <li>
       <span>{item.label}</span>
       <Tag status={item.effect === "stops" ? "live" : item.effect === "manual" ? "needs-you" : "default"} title={item.who ?? undefined}>
         {EFFECT[item.effect]}
       </Tag>
-      {item.effect === "manual" && item.who ? <span className="tb-hint store-who">{item.who}</span> : null}
+      {item.effect === "manual" ? <span className="tb-hint store-who">{item.who ?? `Governance cannot end this. Someone must do it in ${storeName}.`}</span> : null}
     </li>
   );
 }
@@ -38,7 +38,7 @@ function StoreBody({ store, subjectName }: { store: PreviewStore; subjectName: s
           <summary>{store.items.length === 1 ? "1 item" : `${store.items.length} items`}</summary>
           <ul className="ready">
             {store.items.map((i) => (
-              <Item key={i.id} item={i} />
+              <Item key={i.id} item={i} storeName={store.name} />
             ))}
           </ul>
         </details>

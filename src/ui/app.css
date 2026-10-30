@@ -70,4 +70,4 @@
 .store-head h3 { font-size: 1.0625rem; font-weight: var(--tb-weight-head); line-height: 22px; }
 .store-items > summary { cursor: pointer; font-weight: var(--tb-weight-label); padding: 4px 0; }
 .store-items > .ready { margin-top: var(--tb-s2); }
-.store-who { flex-basis: 100%; }
+.ready > li > .store-who { flex: 1 0 100%; }

@@ -96,7 +96,7 @@ const rows = [
   row({ kind: "person", id: ID.p, name: "Marco Rossi", runtime: null, owner: null, line: "Active" }),
   row({ kind: "person", id: "per_01J00000000000000000000P2", name: "Bob Bianchi", runtime: null, owner: null, lifecycle: "leaving", effective: "leaving", line: "Leaving: 2 agents wait for you in Portal" }),
 ];
-const NOT_CHANGED_SERVER = ["Their own logins, such as Slack, Google or a bank.", "The agent's machine and its native tools.", "Copies of data that were already made.", "Other people with the shared Portal login. Change the Portal login if they had it.", "Engine steps after an agent step.", "Scheduled posts before you approve."];
+const NOT_CHANGED_SERVER = ["Their own logins, such as Slack, Google or a bank.", "The agent's machine and its native tools.", "Copies of data that were already made.", "Other people with the shared Portal login. Change the Portal login if they had it.", "Engine steps after an agent step.", "Scheduled posts before you approve.", "Channels or groups the person is still in. The sender bar does not cover them.", "Messages that agents read through tool accounts.", "Messages stored before the bar. Data apps can still read them.", "New handles of this person. The bar covers the handles known now.", "Edits the person makes to their own direct messages older than 30 days.", "Email, Teams and Discord. Governance bars Buzz, Slack and Telegram handles only. Use the Accounts page in Connect for the others."];
 const plan = {
   mode: "portal_link",
   applied: false,
