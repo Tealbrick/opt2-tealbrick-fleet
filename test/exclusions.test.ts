@@ -6,6 +6,7 @@ import { validateAgainstSchema } from "@opt2-tealbrick/manifest";
 import type { Db, Json } from "@opt2-tealbrick/miniapp-sdk";
 import { findingsList, openDifferences, setException } from "../src/access/differences.ts";
 import { manifest } from "../src/app.ts";
+import { setAgentMoved } from "../src/lifecycle/moved.ts";
 import { loadColleagues } from "../src/lifecycle/view.ts";
 import { checkExclusions, EXCLUSION_CAPS, exclusionFindings, getExclusion, listExclusions, setExclusion } from "../src/roles/exclusions.ts";
 import { assignRole, endAssignment, endAssignmentsOf, setRole } from "../src/roles/roles.ts";
@@ -319,4 +320,26 @@ test("checkExclusions with no rule reads nothing and changes nothing; the flags 
   assert.equal(exclusionFindings(spy, T0).size, 0);
   assert.equal(reads.length, 1);
   assert.equal(getExclusion(db, rule(db, "roles", a.id, role(db, "Payer").id).id, T0).clashCount, 0);
+});
+
+test("an acceptance under one owner does not cover the clash that a new owner brings", () => {
+  const { db, ann } = world();
+  const w = role(db, "Writes");
+  const ap = role(db, "Approves");
+  const bo = store.setPerson(db, { name: "Bo" }, T0);
+  give(db, w.id, agent(AGENT_A.id));
+  give(db, ap.id, person(bo.id));
+  give(db, ap.id, person(ann.id));
+  rule(db, "holder_owner", w.id, ap.id, T0 + 1000);
+  const subjects = (now: number) => loadColleagues(db, now).rows.map((r) => ({ kind: r.kind, id: r.id, name: r.name, at: r.at, findings: r.findings }));
+  const shown = (now: number) => findingsList(db, subjects(now), { read: true }, now).items.find((i) => i.code === "cannot_hold_both" && i.subject?.kind === "agent")?.exception ?? null;
+  // the agent's owner Ann has Approves: the clash exists, the owner accepts it
+  const T1 = T0 + 5000;
+  const row = subjects(T1).find((s) => s.kind === "agent" && s.id === AGENT_A.id);
+  setException(db, { kind: "agent", id: AGENT_A.id, code: "cannot_hold_both", reason: "Known, the quarter ends soon", until: iso(T1 + 30 * DAY) }, row ?? null, "per_owner", T1);
+  assert.equal(shown(T1 + 1)?.reason, "Known, the quarter ends soon");
+  // the owner changes to Bo, who also has Approves: a different clash, shown again
+  setAgentMoved(db, { agent: AGENT_A.id, owner: bo.id }, { kind: "owner", id: "per_owner" }, T1 + 2000);
+  assert.equal(shown(T1 + 3000), null, "a new owner is news");
+  assert.equal(flags(db, T1 + 3000).filter((f) => f.who.startsWith("agent:")).length, 1);
 });

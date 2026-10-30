@@ -151,7 +151,7 @@ export function checkExclusions(db: Db, n: NewAssignment, now: number): void {
 interface Clash {
   subject: { kind: SubjectKind; id: string; name: string };
   text: string;
-  /** when the clash came to be: the newest of the two assignments and the rule. An acceptance older than this does not cover it. */
+  /** when the clash came to be: the newest of the two assignments, the rule and (agent and owner) the last change of owner. An acceptance older than this does not cover it. */
   since: number;
   rule: string;
 }
@@ -177,13 +177,14 @@ function clashesOf(db: Db, rules: Row[], now: number): Clash[] {
   const agents = new Map<string, { name: string; owner: string }>();
   for (const a of db.prepare("SELECT id, name, owner_id FROM fleet_agents WHERE owner_id IS NOT NULL AND status <> 'removed'").all()) agents.set(String(a.id), { name: String(a.name), owner: String(a.owner_id) });
   const people = new Map<string, string>(db.prepare("SELECT id, name FROM fleet_people").all().map((p) => [String(p.id), String(p.name)] as const));
-  const names = new Map<string, string>();
+  // when an agent got its present owner: both ways to change an owner write a `moved` event on the agent
+  const movedAt = new Map<string, number>(
+    rules.some((r) => r.kind === "holder_owner") ? db.prepare("SELECT subject_id, MAX(at) AS at FROM fleet_lifecycle_events WHERE kind = 'moved' AND subject_kind = 'agent' GROUP BY subject_id").all().map((r) => [String(r.subject_id), Number(r.at)] as const) : [],
+  );
   for (const rule of rules) {
     const a = String(rule.role_a);
     const b = String(rule.role_b);
     const ruleAt = Number(rule.created_at);
-    names.set(a, names.get(a) ?? roleName(db, a));
-    names.set(b, names.get(b) ?? roleName(db, b));
     if (rule.kind === "roles") {
       for (const [key, spans] of bySubject) {
         const x = spans.find((s) => s.role === a);
@@ -206,7 +207,8 @@ function clashesOf(db: Db, rules: Row[], now: number): Clash[] {
       out.push({
         subject: { kind: "agent", id: agentId, name: info.name },
         text: `${info.name} has ${x.roleName}, and its owner, ${people.get(info.owner) ?? "(removed)"}, has ${y.roleName} ${when(o, now)}. A rule says an agent may not have ${x.roleName} while its owner has ${y.roleName}.`,
-        since: Math.max(x.created, y.created, ruleAt),
+        // a new owner is news: an acceptance made under the old owner does not cover a clash that the new owner brings
+        since: Math.max(x.created, y.created, ruleAt, movedAt.get(agentId) ?? 0),
         rule: String(rule.id),
       });
     }
