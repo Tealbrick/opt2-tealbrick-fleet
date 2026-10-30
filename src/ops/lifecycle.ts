@@ -87,7 +87,7 @@ export const lifecycleOps = {
           return out;
         }
         dates();
-        if (input.decisions?.some((d) => d.decision === "stop")) assertCap(db, input.confirmCount, now);
+        assertCap(db, input.confirmCount, now, (input.decisions ?? []).filter((d) => d.decision === "stop").map((d) => `agent:${d.agent}`));
         decide();
         const out = move();
         return out;

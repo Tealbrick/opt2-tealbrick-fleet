@@ -19,7 +19,7 @@ const STOPPED: readonly string[] = ["suspended", "leaving"];
 export function applyDecisions(db: Db, s: Subject, decisions: readonly AgentDecision[], actor: Actor, grantsOf: (agent: string) => readonly Grant[], now: number, confirmCount?: number): string[] {
   if (decisions.length > 0 && !STOPPED.includes(s.lifecycle)) fail("decisions_need_stop", "Stop this entry first. Then choose for each agent.", 409);
   if (new Set(decisions.map((d) => d.agent)).size !== decisions.length) fail("input_invalid", "Choose once for each agent.", 400);
-  if (decisions.some((d) => d.decision === "stop" && db.prepare("SELECT lifecycle FROM fleet_agents WHERE id = ?").get(d.agent)?.lifecycle !== "leaving")) assertCap(db, confirmCount, now);
+  assertCap(db, confirmCount, now, decisions.filter((d) => d.decision === "stop" && db.prepare("SELECT lifecycle FROM fleet_agents WHERE id = ?").get(d.agent)?.lifecycle !== "leaving").map((d) => `agent:${d.agent}`));
   const moved: string[] = [];
   for (const d of decisions) {
     const a = db.prepare("SELECT lifecycle, owner_id FROM fleet_agents WHERE id = ?").get(d.agent) ?? fail("agent_not_found", "No such agent.", 404);
