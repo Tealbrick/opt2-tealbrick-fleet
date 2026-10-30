@@ -490,7 +490,7 @@ test("reviews_list: filters, paging by cursor, newest first", async () => {
   const subjects = [s.ann, s.bo, s.bot, s.cy];
   const ids: string[] = [];
   for (const [i, p] of subjects.entries()) ids.push(record(db, { kind: p.kind === "outside_agent" ? "outside_agent" : "person", id: p.id }, "trusted", {}, NOW + i * 1000).id);
-  const q = await run("review_request", { subject: { kind: "agent", id: AGENT_A.id }, why: "x" }, agentCtx(db));
+  const q = await run("review_request", { subject: { kind: "agent", id: AGENT_B.id }, why: "x" }, agentCtx(db)); // C380: about another agent, never itself
   const all = await run("reviews_list", {}, ownerCtx(db));
   assert.deepEqual(all.reviews.map((x: any) => x.id), [...[...ids].reverse(), q.review.id].sort().reverse(), "newest first");
   assert.deepEqual((await run("reviews_list", { status: "open" }, ownerCtx(db))).reviews.map((x: any) => x.id), [q.review.id]);

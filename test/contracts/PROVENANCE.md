@@ -52,3 +52,11 @@ copy of this file for its contract test (Rules lead, 2026-10-27). It replaces no
 
 - Source repo: `Tealbrick/opt2-tealbrick-connect`, tag `v0.7.11` (connect#34 squash), commit `4b064bdcd6f4a57fdef3957f77eb520bd038ce01`, file `tealbrick.manifest.json` (version 0.7.11)
 - sha256: `6579ec25290da62cbd81f85a30388ee888d9f6afe44bbefa44277cc37ad651b1`
+
+## fleet.directory_feed/1 with lifecycle and floor (C380, spec 0.1.89)
+
+`fleet.directory_feed.1.lifecycle.schema.json` and `fleet.directory_feed.1.lifecycle.json` are byte copies. Do not edit them. `test/lifecycle.test.ts` fails when a file no longer matches the sha256 below.
+
+- Source repo: `Tealbrick/opt2-tealbrick-specs`, paths `packages/spec/schemas/contracts/` and `packages/spec/examples/contracts/`, tag `spec-v0.1.89`.
+- Schema sha256: `35ebfd9f49eebeebc3c84a0ea686ab4efb18503953599828bdfd94f76734695f`
+- Fixture sha256: `3c0004d98b361bf629fb6489e655516e3fbf5123b1a1adb9d84bf62d3a17e1b2`
