@@ -4,11 +4,11 @@
   "id": "fleet",
   "name": "Governance",
   "summary": "Governance: who is who in your workspace, who owns which agent, and how far each person, outside agent and agent is trusted.",
-  "description": "Governance is the workspace's record of who should have access: one state per person and agent, with reasons and dates, and what no longer matches. It holds no grant and no credential, and it decides no call: Portal and Rules & Approvals do that.\n\n- **Summary:** how many agents you have, which have no owner, which can write or send, what no longer matches, and if you are ready to stop an agent.\n- **People and agents:** one line per person and agent: working, not reviewed, stop asked, paused. Each change has a reason and stays in the history.\n- **Stop an agent, or a person's agents:** one dialog for one agent, or a short flow for a person. Governance records the stop and lists what to do in Portal. Each screen says what does not change: their own logins, the agent's machine, copies already made.\n- **Reviews:** an agent can ask for a review and say why; only you decide. Each verdict is kept with a copy of what the subject could do at that time.\n- **Who owns what:** who owns which agent and who is in which team, as a table you can print for a security review.\n- **Contact rules:** you can propose a rule from a fixed template. It is sent to Rules & Approvals as a draft; you approve it there.\n- **Feed for apps:** Rules & Approvals and Knowledge read a small, versioned directory feed. It has no email addresses and no job titles.\n\nGovernance finds no agent you do not know about. People are directory entries, not sign-ins. This is a record for your own review, not proof of compliance.",
-  "version": "0.4.0-dev.2",
+  "description": "Governance is the workspace's record of who should have access: one state per person and agent, with reasons and dates, and what no longer matches. It holds no grant and no credential, and it decides no call: Portal and Rules & Approvals do that.\n\n- **Summary:** how many agents you have, which have no owner, which can write or send, what no longer matches, and if you are ready to stop an agent.\n- **People and agents:** one line per person and agent: working, not reviewed, stop asked, paused. Each change has a reason and stays in the history.\n- **Stop an agent, or a person's agents:** one dialog for one agent, or a short flow for a person. Governance records the stop and lists what to do in Portal. Each screen says what does not change: their own logins, the agent's machine, copies already made.\n- **See what would stop:** a preview per app that changes nothing. Each app says what it reports; what could not be read says so, and is never shown as nothing.\n- **Differences:** what no longer matches. You can accept one with a reason until a date.\n- **Reviews:** an agent can ask for a review and say why; only you decide. Each verdict is kept with a copy of what the subject could do at that time.\n- **Who owns what:** who owns which agent and who is in which team, as a table you can print for a security review.\n- **Contact rules:** you can propose a rule from a fixed template. It is sent to Rules & Approvals as a draft; you approve it there.\n- **Feed for apps:** Rules & Approvals and Knowledge read a small, versioned directory feed. It has no email addresses and no job titles.\n\nGovernance finds no agent you do not know about. People are directory entries, not sign-ins. This is a record for your own review, not proof of compliance.",
+  "version": "0.4.0-dev.6",
   "sdkMajor": 1,
   "requires": {
-    "bridge": "0.2.13"
+    "bridge": "0.2.14"
   },
   "publisher": {
     "name": "Teal Brick opt2"
@@ -34,7 +34,8 @@
       "who has access",
       "stop this agent now",
       "which agents have no owner",
-      "what no longer matches"
+      "what no longer matches",
+      "what would stop if this person leaves"
     ],
     "keywords": [
       "directory",
@@ -894,7 +895,7 @@
               "minLength": 1,
               "maxLength": 64
             },
-            "description": "Optional extras the reader understands. \"agent_handles\": every agents[] entry also carries handles (canonical channel handles Connect issued to the agent, sorted, at most 16). \"lifecycle\": agents[] and person contacts[] also carry the effective lifecycle, and agents[] and contacts[] carry floor (true: the reader refuses this entry before any rule). Unknown values are ignored."
+            "description": "Optional extras the reader understands. \"agent_handles\": every agents[] entry also carries handles (canonical channel handles Connect issued to the agent, sorted, at most 16). \"lifecycle\": agents[] and person contacts[] also carry the effective lifecycle, and agents[] and contacts[] carry floor (true: the reader refuses this entry before any rule). \"roles\": the answer also carries a top-level roles list: each role that is not archived with its id, name and the agents and contacts that hold it now (started, not ended). Unknown values are ignored."
           }
         }
       },
@@ -1113,6 +1114,59 @@
                     }
                   }
                 }
+              },
+              "roles": {
+                "type": "array",
+                "maxItems": 200,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "members"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80
+                    },
+                    "members": {
+                      "type": "array",
+                      "maxItems": 4000,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "kind",
+                          "id"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "enum": [
+                              "agent",
+                              "contact"
+                            ]
+                          },
+                          "id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "epoch": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,64}$"
               }
             }
           },
@@ -1134,6 +1188,10 @@
               },
               "unchanged": {
                 "const": true
+              },
+              "epoch": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,64}$"
               }
             }
           }
@@ -4472,6 +4530,11 @@
           "request": {
             "type": "string",
             "maxLength": 40
+          },
+          "confirmCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
           }
         }
       },
@@ -5665,6 +5728,16 @@
                     "type": "null"
                   }
                 ]
+              },
+              "rulesHolds": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             }
           },
@@ -5707,6 +5780,29 @@
               "stopCap": {
                 "type": "integer",
                 "minimum": 0
+              }
+            }
+          },
+          "keysUndecided": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "name",
+                "text"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                }
               }
             }
           }
@@ -6653,6 +6749,16 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "rulesHolds": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 }
               },
@@ -7580,6 +7686,16 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "rulesHolds": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 }
               },
@@ -8321,7 +8437,7 @@
     {
       "id": "plan_send",
       "title": "Make a stop plan",
-      "description": "Prepare the plan for a person or agent you stopped: what your confirm ends at once, and what waits for your approval in Portal. Governance applies nothing in Portal; you approve there. Answers at once; read the progress with plan_get. Only you can do this. No agent can call it.",
+      "description": "Prepare the plan for a person or agent you stopped: what your confirm ends at once, and what waits for your approval in Portal. With no choice an agent is only paused, and its key stays until you choose. Choose per agent in `decisions` to finish in this one approval: stop and remove, move to `newOwner` with a new key, or keep running with a `reason`. Governance applies nothing in Portal; you approve there. Answers at once; read the progress with plan_get. Only you can do this. No agent can call it.",
       "input": {
         "type": "object",
         "additionalProperties": false,
@@ -8352,6 +8468,41 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 64
+            }
+          },
+          "decisions": {
+            "type": "array",
+            "maxItems": 400,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "agent",
+                "decision"
+              ],
+              "properties": {
+                "agent": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "decision": {
+                  "enum": [
+                    "stop",
+                    "transfer",
+                    "keep"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                "newOwner": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                }
+              }
             }
           },
           "items": {
@@ -8389,6 +8540,11 @@
             "type": "integer",
             "minimum": 60,
             "maximum": 86400
+          },
+          "confirmCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
           }
         }
       },
@@ -9285,7 +9441,7 @@
     {
       "id": "plan_cancel",
       "title": "Cancel a stop plan",
-      "description": "Take the request back from Portal and stop what has not run. What was already applied stays. Only you can do this.",
+      "description": "Take the request back from Portal and stop what has not run. What was already applied stays. Each part of a split plan answers with its own state; `left` counts the parts that still stand in Portal. Only you can do this.",
       "input": {
         "type": "object",
         "additionalProperties": false,
@@ -9304,9 +9460,14 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
+          "left",
           "plans"
         ],
         "properties": {
+          "left": {
+            "type": "integer",
+            "minimum": 0
+          },
           "plans": {
             "type": "array",
             "items": {
@@ -9571,6 +9732,885 @@
       ],
       "effect": "write",
       "idempotency": "required",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "roles_list",
+      "title": "List roles",
+      "description": "The roles of the workspace with how many people and agents hold each, or, with a subject, the roles of that person or agent (held, waiting for a start date, and ended). A role is a record: it allows and stops nothing until a Rules rule names it. Only you can do this.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "includeArchived": {
+            "type": "boolean"
+          },
+          "subject": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "id"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "person",
+                  "agent"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              }
+            }
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "roles",
+          "assignments"
+        ],
+        "properties": {
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "name",
+                "description",
+                "archived",
+                "members",
+                "scheduled",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "archived": {
+                  "type": "boolean"
+                },
+                "members": {
+                  "type": "integer"
+                },
+                "scheduled": {
+                  "type": "integer"
+                },
+                "createdAt": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "assignments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "role",
+                "subject",
+                "reason",
+                "note",
+                "validFrom",
+                "validUntil",
+                "state",
+                "endedAt",
+                "endReason",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "subject": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "id",
+                    "name"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "person",
+                        "agent"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "note": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "validFrom": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "validUntil": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "state": {
+                  "enum": [
+                    "active",
+                    "scheduled",
+                    "ended"
+                  ]
+                },
+                "endedAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "endReason": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "createdAt": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "role_get",
+      "title": "Show one role",
+      "description": "One role with who holds it now, who waits for a start date, and the last ended assignments. Only you can do this.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "role",
+          "assignments"
+        ],
+        "properties": {
+          "role": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "description",
+              "archived",
+              "members",
+              "scheduled",
+              "createdAt"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "archived": {
+                "type": "boolean"
+              },
+              "members": {
+                "type": "integer"
+              },
+              "scheduled": {
+                "type": "integer"
+              },
+              "createdAt": {
+                "type": "string"
+              }
+            }
+          },
+          "assignments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "role",
+                "subject",
+                "reason",
+                "note",
+                "validFrom",
+                "validUntil",
+                "state",
+                "endedAt",
+                "endReason",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "subject": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "id",
+                    "name"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "person",
+                        "agent"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "note": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "validFrom": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "validUntil": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "state": {
+                  "enum": [
+                    "active",
+                    "scheduled",
+                    "ended"
+                  ]
+                },
+                "endedAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "endReason": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "createdAt": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "role_set",
+      "title": "Save a role",
+      "description": "Create a role (no id) or change one (id): its name and description, and archive it or bring it back. An archived role is left out of what Rules reads, so a rule that names it matches no one. Only you can do this.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "archived": {
+            "type": "boolean"
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "role"
+        ],
+        "properties": {
+          "role": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "description",
+              "archived",
+              "members",
+              "scheduled",
+              "createdAt"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "archived": {
+                "type": "boolean"
+              },
+              "members": {
+                "type": "integer"
+              },
+              "scheduled": {
+                "type": "integer"
+              },
+              "createdAt": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "create",
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "required",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "role_assign",
+      "title": "Assign a role",
+      "description": "Give a person or an agent a role, with a reason from the list and optional start and end dates. After the end date the assignment ends by itself, with no action by anyone. Ending it removes no Portal grant. Only you can do this.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "role",
+          "subject",
+          "reason"
+        ],
+        "properties": {
+          "role": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "subject": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "id"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "person",
+                  "agent"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              }
+            }
+          },
+          "reason": {
+            "enum": [
+              "new_role",
+              "project",
+              "cover",
+              "contract",
+              "access_review",
+              "other"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "validFrom": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "validUntil": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "assignment"
+        ],
+        "properties": {
+          "assignment": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "role",
+              "subject",
+              "reason",
+              "note",
+              "validFrom",
+              "validUntil",
+              "state",
+              "endedAt",
+              "endReason",
+              "createdAt"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "role": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "name"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              },
+              "subject": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "id",
+                  "name"
+                ],
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "person",
+                      "agent"
+                    ]
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              },
+              "reason": {
+                "type": "string"
+              },
+              "note": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "validFrom": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "validUntil": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "state": {
+                "enum": [
+                  "active",
+                  "scheduled",
+                  "ended"
+                ]
+              },
+              "endedAt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "endReason": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "createdAt": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "create"
+      ],
+      "effect": "write",
+      "idempotency": "required",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "role_end",
+      "title": "End an assignment",
+      "description": "End one assignment now, or cancel one that waits for its start date. It removes no Portal grant. Only you can do this.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "assignment"
+        ],
+        "properties": {
+          "assignment": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "assignment"
+        ],
+        "properties": {
+          "assignment": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "role",
+              "subject",
+              "reason",
+              "note",
+              "validFrom",
+              "validUntil",
+              "state",
+              "endedAt",
+              "endReason",
+              "createdAt"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "role": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "name"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              },
+              "subject": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "id",
+                  "name"
+                ],
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "person",
+                      "agent"
+                    ]
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              },
+              "reason": {
+                "type": "string"
+              },
+              "note": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "validFrom": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "validUntil": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "state": {
+                "enum": [
+                  "active",
+                  "scheduled",
+                  "ended"
+                ]
+              },
+              "endedAt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "endReason": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "createdAt": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "supported",
       "receipt": false,
       "audience": "person"
     },
@@ -10855,12 +11895,15 @@
       "product": "connect",
       "operations": [
         "identities_list",
-        "contacts_list"
+        "contacts_list",
+        "access_list",
+        "access_revoke"
       ],
       "crud": [
-        "read"
+        "read",
+        "update"
       ],
-      "purpose": "Reads agent channel identities (owner view, Rules' feed handles) and which addresses each agent first-contacted (Topology contacts layer). Never shown to agents"
+      "purpose": "Reads agent identities, first contacts and access for the owner's pages; ends an item only in a stop plan you confirmed. Never shown to agents."
     },
     {
       "product": "rules",
@@ -10878,12 +11921,14 @@
     {
       "product": "knowledge",
       "operations": [
-        "access_list"
+        "access_list",
+        "access_revoke"
       ],
       "crud": [
-        "read"
+        "read",
+        "update"
       ],
-      "purpose": "Reads what Knowledge reports about who can reach which memory, for the owner's Access pages. Never shown to agents. It changes nothing."
+      "purpose": "Reads what Knowledge reports for the owner's Access pages, and ends an item only in a stop plan you confirmed. Never shown to agents."
     },
     {
       "product": "kanban",
@@ -10898,12 +11943,14 @@
     {
       "product": "evolution",
       "operations": [
-        "access_list"
+        "access_list",
+        "access_revoke"
       ],
       "crud": [
-        "read"
+        "read",
+        "update"
       ],
-      "purpose": "Reads what Evolving Workflows reports about each agent's routines and steps, for the owner's Access pages. Never shown to agents. It changes nothing."
+      "purpose": "Reads each agent's routines and steps for the owner's Access pages, and pauses a routine only in a stop plan you confirmed. Never shown to agents."
     },
     {
       "product": "inbox",

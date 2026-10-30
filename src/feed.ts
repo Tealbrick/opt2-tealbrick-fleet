@@ -7,7 +7,9 @@
 // A team's name is the one exception the contract allows (name?, 1-80 chars).
 import { normalizeHandle } from "@opt2-tealbrick/manifest";
 import { type Db, TbError } from "@opt2-tealbrick/miniapp-sdk";
+import { feedEpoch } from "./lifecycle/events.ts";
 import { type Effective, effectiveAgent, effectivePerson, floorOf, type Lifecycle } from "./lifecycle/states.ts";
+import { type FeedRole, feedRoles } from "./roles/roles.ts";
 import { revision } from "./store.ts";
 import type { ContactKind, Trust } from "./trust.ts";
 
@@ -51,13 +53,15 @@ export interface FeedAgent {
 /** The `accept` values this version knows (C373 §3, C380). Unknown values are ignored. */
 export const ACCEPT_AGENT_HANDLES = "agent_handles";
 export const ACCEPT_LIFECYCLE = "lifecycle";
+/** C380 T2-a: top-level `roles` (flat roles with the members that hold them now). A local extra of the feed: the schema allows extra members. */
+export const ACCEPT_ROLES = "roles";
 export interface FeedInput {
   sinceRevision?: number;
   accept?: string[];
 }
 export type DirectoryFeed =
-  | { v: 1; revision: number; unchanged: false; teams: FeedTeam[]; contacts: FeedContact[]; agents: FeedAgent[] }
-  | { v: 1; revision: number; unchanged: true };
+  | { v: 1; revision: number; unchanged: false; teams: FeedTeam[]; contacts: FeedContact[]; agents: FeedAgent[]; roles?: FeedRole[]; epoch?: string }
+  | { v: 1; revision: number; unchanged: true; epoch?: string };
 
 /** Transient: the directory is larger than the contract carries. 503 so a reader keeps its last good copy and retries. */
 const tooLarge = (what: string, cap: number): never => {
@@ -140,10 +144,15 @@ export function assertFeedCaller(caller: { type: string; product?: unknown; list
  * `accept: ["lifecycle"]` (C380, spec 0.1.89): agents[] and person contacts[] carry the effective lifecycle, and agents[] and contacts[]
  * carry `floor`. A reader replaces its floor entries from a full read, so a stopped row stays listed. Time changes `not_started` only with a
  * revision bump (the date timer ends the date), so `unchanged` stays true to its word.
+ *
+ * `accept: ["roles"]` (C380 T2-a): a top-level `roles` list, one entry per role that is not archived (id, name, members that hold it now). It is present
+ * (maybe empty) exactly when asked, so a reader can tell "no roles" from "a Governance that knows no roles". Timer-ended assignments leave it with a revision bump.
  */
 export function directoryFeed(db: Db, input: FeedInput, warn?: Warn): DirectoryFeed {
   const rev = revision(db);
-  if (input.sinceRevision !== undefined && input.sinceRevision === rev) return { v: 1, revision: rev, unchanged: true };
+  // N2-2: on each answer to a reader of the lifecycle, the unchanged one too: a restore can reach the very revision the reader asked about.
+  const origin = input.accept?.includes(ACCEPT_LIFECYCLE) ? { epoch: feedEpoch(db) } : {};
+  if (input.sinceRevision !== undefined && input.sinceRevision === rev) return { v: 1, revision: rev, unchanged: true, ...origin };
   // C373 §3: agent handles only when the reader asks for them; without `accept` the answer is exactly the old shape
   const agentHandles = Array.isArray(input.accept) && input.accept.includes(ACCEPT_AGENT_HANDLES) ? cachedAgentHandles(db) : null;
   // C380: lifecycle and floor only when the reader asks; without `accept` the answer is exactly the old shape
@@ -246,5 +255,6 @@ export function directoryFeed(db: Db, input: FeedInput, warn?: Warn): DirectoryF
   if (teams.length > FEED_CAPS.teams) tooLarge("teams", FEED_CAPS.teams);
   for (const t of teams) if (t.members.length > FEED_CAPS.membersPerTeam) tooLarge("members in one team", FEED_CAPS.membersPerTeam);
 
-  return { v: 1, revision: rev, unchanged: false, teams, contacts, agents };
+  const roles = Array.isArray(input.accept) && input.accept.includes(ACCEPT_ROLES) ? feedRoles(db, agentIds, contactIds) : null;
+  return { v: 1, revision: rev, unchanged: false, teams, contacts, agents, ...(roles ? { roles } : {}), ...origin };
 }

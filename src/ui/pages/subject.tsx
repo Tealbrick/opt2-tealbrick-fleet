@@ -5,11 +5,16 @@ import { appName, Button, ButtonLink, EmptyState, Notice, Table, Tag, TextLink }
 import { useCallback, useEffect, useState } from "react";
 import type { ColleagueGetOutput } from "#kit";
 import { LoadFailed, Loading, PageHead, useLoad } from "../common.tsx";
+import { canChoose } from "./agent-choice.ts";
+import { ChooseDialog } from "./agent-choices.tsx";
 import { ChangeDialog, CloseDialog } from "./change-dialogs.tsx";
+import { FEATURES } from "./features.ts";
 import { LeaveFlow } from "./leave-flow.tsx";
 import { PlanResult } from "./plan-result.tsx";
 import { StopNow } from "./stop-now.tsx";
+import { StoreRows } from "./store-rows.tsx";
 import { openSubject, type SubjectKind, subjectFromUrl, subjectHref } from "./subject-link.ts";
+import { loadPreview } from "./what-would-stop.tsx";
 import { type Lifecycle, reasonLabel, when } from "./words.ts";
 
 type Colleague = ColleagueGetOutput["colleague"];
@@ -42,6 +47,7 @@ function Subject({ kind, id, portalHref }: { kind: SubjectKind; id: string; port
   const load = useCallback(() => callOp<ColleagueGetOutput>("colleague_get", { kind, id }), [kind, id]);
   const { data, error, loading, reload } = useLoad(load);
   const [doing, setDoing] = useState<Action | null>(null);
+  const [choosing, setChoosing] = useState(false);
   const c = data?.colleague;
   const gone = error !== null && !data;
   return (
@@ -55,6 +61,7 @@ function Subject({ kind, id, portalHref }: { kind: SubjectKind; id: string; port
           <PageHead title={c.name} lede={c.line} />
           {error ? <LoadFailed message={`This page may be old. ${error}`} retrying={loading} onRetry={() => void reload()} /> : null}
           <Actions actions={c.actions} onChoose={setDoing} />
+          <KeyChoice c={c} onChoose={() => setChoosing(true)} />
           <Facts c={c} />
           {c.findings.length ? (
             <section className="tb-stack" aria-label="Differences">
@@ -66,12 +73,13 @@ function Subject({ kind, id, portalHref }: { kind: SubjectKind; id: string; port
               ))}
             </section>
           ) : null}
-          {c.plan ? (
+          {c.plan || (FEATURES.plans && (c.lifecycle === "suspended" || c.lifecycle === "leaving")) ? (
             <section className="tb-stack" aria-label="What happens now">
               <h2 className="sub-head">What happens now</h2>
-              <PlanResult colleague={c} portalHref={portalHref} showLine={false} />
+              <PlanResult colleague={c} portalHref={portalHref} showLine={false} onEnded={() => void reload()} />
             </section>
           ) : null}
+          {FEATURES.preview ? <AccessByStore kind={c.kind} id={c.id} name={c.name} /> : null}
           {c.kind === "person" && c.agents.length ? <OwnedAgents agents={c.agents} /> : null}
           {c.grantsBefore?.length ? <GrantsBefore c={c} grants={c.grantsBefore} /> : null}
           <History items={c.history} />
@@ -92,6 +100,7 @@ function Subject({ kind, id, portalHref }: { kind: SubjectKind; id: string; port
               <dd>{c.rev}</dd>
             </dl>
           </details>
+          {choosing ? <ChooseDialog c={c} onClose={() => setChoosing(false)} onChanged={reload} /> : null}
           {doing ? <Doing c={c} action={doing} portalHref={portalHref} onClose={() => setDoing(null)} onChanged={reload} /> : null}
         </>
       ) : !gone ? (
@@ -123,6 +132,40 @@ function Actions({ actions, onChoose }: { actions: Action[]; onChoose: (a: Actio
   );
 }
 
+/** The second stage (D2): a stopped person's agents wait for a choice; an agent stopped through its owner is chosen on the owner's page. */
+function KeyChoice({ c, onChoose }: { c: Colleague; onChoose: () => void }) {
+  if (!FEATURES.plans) return null;
+  if (c.kind === "person") {
+    const stopped = c.lifecycle === "suspended" || c.lifecycle === "leaving";
+    if (!stopped || !c.agents.some(canChoose)) return null;
+    return (
+      <div className="tb-row">
+        <Button variant="primary" onClick={onChoose}>
+          Choose for their agents
+        </Button>
+        <span className="tb-hint">An agent with no choice is only paused, when you approve in Portal, and its key still exists.</span>
+      </div>
+    );
+  }
+  if (!c.findings.some((f) => f.code === "key_not_decided") || !c.owner || c.lifecycle === "suspended") return null;
+  const { owner } = c;
+  return (
+    <p className="tb-soft">
+      {"Choose for this agent on the page of "}
+      <TextLink
+        href={subjectHref("person", owner.id)}
+        onClick={(e) => {
+          e.preventDefault();
+          openSubject("person", owner.id);
+        }}
+      >
+        {owner.name}
+      </TextLink>
+      .
+    </p>
+  );
+}
+
 function Doing({ c, action, portalHref, onClose, onChanged }: { c: Colleague; action: Action; portalHref?: string; onClose: () => void; onChanged: () => Promise<void> }) {
   if (action.to === "suspended") return <StopNow subject={c} portalHref={portalHref} onClose={onClose} onChanged={onChanged} />;
   if (action.to === "leaving") return <LeaveFlow c={c} portalHref={portalHref} onClose={onClose} onChanged={onChanged} />;
@@ -150,6 +193,19 @@ function Facts({ c }: { c: Colleague }) {
         </div>
       ))}
     </dl>
+  );
+}
+
+/** A5: what each app reports for this entry, by store, with who reported it and when. */
+function AccessByStore({ kind, id, name }: { kind: SubjectKind; id: string; name: string }) {
+  const { data, error, loading, reload } = useLoad(useCallback(() => loadPreview(kind, id), [kind, id]));
+  return (
+    <section className="tb-stack" aria-label="Access">
+      <h2 className="sub-head">Access</h2>
+      <p className="tb-soft">What each app reports now, and what Stop and remove access would do to it. Stop now ends less.</p>
+      {error ? <LoadFailed message={error} retrying={loading} onRetry={() => void reload()} /> : null}
+      {data === null ? error ? null : <Loading what="what each app reports" /> : <StoreRows stores={data.stores} subjectName={name} unlinkedAccounts={data.unlinkedAccounts} />}
+    </section>
   );
 }
 

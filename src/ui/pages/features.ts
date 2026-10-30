@@ -9,6 +9,12 @@ export type Features = {
   preview: boolean;
   /** Access > Differences */
   differences: boolean;
+  /** The Roles page has a route (C380 T2-a): the role ops are in this build. */
+  roles: boolean;
+  /** The Roles page is in the navigation: its ops are on AND the QA rows R1 to R4 passed. */
+  rolesInNav: boolean;
+  /** the live plan, Try again, the request in Portal */
+  plans: boolean;
   /** Review rounds: the route works when the ops are there (QA reaches it by its address) */
   rounds: boolean;
   /** Access record */
@@ -19,12 +25,21 @@ export type Features = {
 };
 
 /**
+ * "A page stays hidden unless its ops are on and its rows pass" (C380 T2). The page is built, but until the QA lead records R1 to R4 as PASS
+ * on BOARD it is not in the navigation: this one constant is the switch, and the PR that sets it to true carries the BOARD line.
+ * The route /roles works whenever the ops exist, so QA can open it by its address.
+ */
+export const ROLES_ROWS_PASSED = false;
+
+const ROLE_OPS = ["roles_list", "role_get", "role_set", "role_assign", "role_end"];
+
+/**
  * Tier 2 pages (C380 T2-b) stay off the nav until their QA rows pass: no half-shown page. One line flips each, in the PR that follows the PASS line on BOARD.
  * R5 = rounds, R6 to R8 = the access record.
  */
 export const TIER2_PASSED = { rounds: false, record: false } as const;
 
-export function featuresOf(ops: readonly string[], passed: { rounds: boolean; record: boolean } = TIER2_PASSED): Features {
+export function featuresOf(ops: readonly string[], rolesRowsPassed: boolean = ROLES_ROWS_PASSED, passed: { rounds: boolean; record: boolean } = TIER2_PASSED): Features {
   const has = (...names: string[]) => names.every((n) => ops.includes(n));
   const rounds = has("round_create", "round_get", "round_verdict", "round_set");
   const record = has("record_export");
@@ -32,6 +47,9 @@ export function featuresOf(ops: readonly string[], passed: { rounds: boolean; re
     lifecycle: has("summary_get", "colleagues_list", "colleague_get", "lifecycle_set"),
     preview: has("plan_preview"),
     differences: has("findings_list"),
+    roles: has(...ROLE_OPS),
+    rolesInNav: has(...ROLE_OPS) && rolesRowsPassed,
+    plans: has("plan_send", "plan_get", "plan_retry", "plan_cancel"),
     rounds,
     record,
     roundsNav: rounds && passed.rounds,

@@ -3,19 +3,80 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { NOT_CHANGED as SERVER_NOT_CHANGED } from "../src/plans/portal-link.ts";
+import { canChoose, choiceSummary, choicesReady, decisionsOf, hasOwnStop } from "../src/ui/pages/agent-choice.ts";
 import { featuresOf } from "../src/ui/pages/features.ts";
 import { lifecycleError, stopCapOf } from "../src/ui/pages/lifecycle-errors.ts";
+import { currentPlans, liveBanners, pollDelay } from "../src/ui/pages/plan-poll.ts";
 import { subjectFromUrl, subjectHref } from "../src/ui/pages/subject-link.ts";
 import { afterChangeText, beforeChangeText, beforeChangeTone, floorTone, NOT_CHANGED, REASONS, reasonLabel, when } from "../src/ui/pages/words.ts";
 
 describe("features come from the ops of this build", () => {
   it("on when every op is there", () => {
-    assert.deepEqual(featuresOf(["summary_get", "colleagues_list", "colleague_get", "lifecycle_set", "plan_preview", "findings_list"]), { lifecycle: true, preview: true, differences: true, rounds: false, record: false, roundsNav: false, recordNav: false });
+    assert.deepEqual(featuresOf(["summary_get", "colleagues_list", "colleague_get", "lifecycle_set", "plan_preview", "findings_list"]), { lifecycle: true, preview: true, differences: true, plans: false, roles: false, rolesInNav: false, rounds: false, record: false, roundsNav: false, recordNav: false });
   });
   it("off when one op is missing", () => {
     assert.equal(featuresOf(["summary_get", "colleagues_list", "colleague_get"]).lifecycle, false);
     assert.equal(featuresOf(["summary_get"]).preview, false);
     assert.equal(featuresOf(["summary_get"]).differences, false);
+    assert.equal(featuresOf(["plan_send", "plan_get", "plan_retry"]).plans, false);
+    assert.equal(featuresOf(["plan_send", "plan_get", "plan_retry", "plan_cancel"]).plans, true);
+  });
+});
+
+describe("the choice for each agent (D2)", () => {
+  const agents = [{ id: "a", lifecycle: "active" }, { id: "b", lifecycle: "active" }, { id: "c", lifecycle: "active" }, { id: "d", lifecycle: "active" }];
+  const later = { choice: "later", reason: "", newOwner: "" } as const;
+  it("the default is no choice: nothing goes to plan_send, so the agents are only paused", () => {
+    assert.deepEqual(decisionsOf(agents, {}), []);
+    assert.deepEqual(decisionsOf(agents, { a: later }), []);
+    assert.equal(choicesReady(agents, {}), true);
+    assert.equal(choiceSummary(agents, {}), "4 decided later, 0 stop and remove, 0 move to a new owner, 0 keep running");
+  });
+  it("sends only what was chosen, in the shape of the op", () => {
+    assert.deepEqual(decisionsOf(agents, { a: { ...later, choice: "stop" }, b: { ...later, choice: "keep", reason: " on call " }, c: { ...later, choice: "transfer", newOwner: "per_2" } }), [
+      { agent: "a", decision: "stop" },
+      { agent: "b", decision: "keep", reason: "on call" },
+      { agent: "c", decision: "transfer", newOwner: "per_2" },
+    ]);
+  });
+  it("a keep needs a reason and a transfer a new owner", () => {
+    assert.equal(choicesReady(agents, { a: { ...later, choice: "keep" } }), false);
+    assert.equal(choicesReady(agents, { a: { ...later, choice: "keep", reason: "  " } }), false);
+    assert.equal(choicesReady(agents, { a: { ...later, choice: "transfer" } }), false);
+    assert.equal(choicesReady(agents, { a: { ...later, choice: "transfer", newOwner: "p" } }), true);
+  });
+  it("who can choose", () => {
+    assert.equal(canChoose({ lifecycle: "leaving" }), false);
+    assert.equal(canChoose({ lifecycle: "archived" }), false);
+    assert.equal(canChoose({ lifecycle: "suspended" }), true);
+    assert.equal(hasOwnStop({ lifecycle: "suspended" }), true);
+    assert.equal(hasOwnStop({ lifecycle: "active" }), false);
+  });
+});
+
+describe("the plan polls only while it moves", () => {
+  const plan = (over: Record<string, unknown>) => ({ closedAt: null, reviewUrl: null, mode: "draft", ...over }) as never;
+  it("2 s until the request is ready, 30 s after, stops when all ended", () => {
+    assert.equal(pollDelay([plan({})]), 2000);
+    assert.equal(pollDelay([plan({ reviewUrl: "https://x" })]), 30000);
+    assert.equal(pollDelay([plan({ mode: "portal_link" })]), 30000);
+    assert.equal(pollDelay([plan({ closedAt: "2026-10-30T00:00:00Z" })]), null);
+    assert.equal(pollDelay([]), 30000, "no plan: no fast loop");
+  });
+  const p = (over: Record<string, unknown>) => ({ closedAt: null, reviewUrl: null, mode: "draft", groupId: "g1", openedAt: "2026-10-30T10:00:00Z", id: "p1", state: "waiting", ...over });
+  it("an old ended plan does not stand for this stop; an open one always does; a split stays together", () => {
+    const ended = p({ closedAt: "2026-10-30T11:00:00Z" });
+    assert.deepEqual(currentPlans([ended], "2026-10-30T12:00:00Z"), []);
+    assert.deepEqual(currentPlans([ended], "2026-10-30T09:00:00Z"), [ended]);
+    assert.deepEqual(currentPlans([p({})], "2026-10-30T12:00:00Z"), [p({})]);
+    assert.equal(currentPlans([p({ id: "a" }), p({ id: "b" }), p({ id: "old", groupId: "g0" })], null).length, 2);
+  });
+  it("a waiting alert ends when its plan moved on; other alerts stay", () => {
+    const b = (kind: string) => ({ plan: "p1", kind, text: "x" });
+    assert.equal(liveBanners({ plans: [p({})], banners: [b("waiting")] }).length, 1);
+    assert.equal(liveBanners({ plans: [p({ state: "running" })], banners: [b("waiting")] }).length, 0);
+    assert.equal(liveBanners({ plans: [], banners: [b("waiting")] }).length, 0);
+    assert.equal(liveBanners({ plans: [], banners: [b("expired")] }).length, 1);
   });
 });
 
@@ -85,7 +146,13 @@ describe("refusals of lifecycle_set", () => {
   it("the stop cap names the count and hands it back for the confirm", () => {
     const e = { code: "stop_cap_reached", details: { count: 6 } };
     assert.equal(stopCapOf(e), 6);
-    assert.match(lifecycleError(e, fallback).message, /You stopped 5 entries in the last 10 minutes/);
+    assert.match(lifecycleError(e, fallback).message, /^This makes 6 people and agents stopped in the last 10 minutes/);
+    assert.doesNotMatch(lifecycleError(e, fallback).message, /You stopped/, "the count holds cascades and verdicts, not only what this owner pressed");
+  });
+  it("a cap with no count (the old People form) shows the server's sentence and offers no number", () => {
+    const e = { code: "stop_cap_reached", message: "5 were stopped in the last 10 minutes. Open this person's page to confirm this stop." };
+    assert.equal(stopCapOf(e), null);
+    assert.match(lifecycleError(e, fallback).message, /Open this person's page/);
   });
   it("another error is no cap and gets the shared wording", () => {
     assert.equal(stopCapOf({ code: "internal" }), null);
@@ -100,7 +167,7 @@ describe("refusals of lifecycle_set", () => {
 describe("the subject link", () => {
   it("round trip", () => {
     const href = subjectHref("agent", "agt_1");
-    assert.deepEqual(subjectFromUrl(href.slice(href.indexOf("?"))), { kind: "agent", id: "agt_1", open: null });
+    assert.deepEqual(subjectFromUrl(href.slice(href.indexOf("?"))), { kind: "agent", id: "agt_1" });
   });
   it("refuses a bad kind or no id", () => {
     assert.equal(subjectFromUrl("?kind=team&id=x"), null);

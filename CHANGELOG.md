@@ -2,6 +2,49 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
+## 0.4.0-dev.6 - 2026-10-30
+
+C380 final security review, DEV only. Not for stable until Martin has read C380-DECISIONS.md.
+
+- N2-1: an owner change away from a stopped owner must be a transfer: Edit agents refuses it and names the path. A transfer keeps the agent stopped until you resume it, after its key is replaced. Between active owners a finding stays until the key is replaced.
+- N2-3: the stop cap counts entries: a person with the agents that stop with them, and `blocked` verdicts. It limits accidents. It does not stop a script that can call these ops: stable needs a host per app or Martin's written acceptance.
+- N2-6: a person marked leaving is always barred: if no plan comes within 20 seconds, the job makes one for the sender bar only. A finding stays, and Close asks for a reason, until Connect has shown the bar.
+- N2-2, Governance's half: the feed sends `epoch`; a restore replaces it. The page says what Rules still holds. A restore removes stops made after the snapshot from Governance. Rules keeps them until you clear them.
+- A new plan carries a new key that an earlier plan asked for and Core never replaced.
+- A transferred agent's things stay. Not changed names sends to a known Slack direct message id. Bringing a person back says the sender bar stays.
+
+## 0.4.0-dev.5 - 2026-10-30
+
+C380 D2, DEV only. Not for stable until Martin has read C380-DECISIONS.md.
+
+- A stop has two stages. With no choice an agent is only paused, because offboarding has no quick undo; the plan, its row, a finding and the Summary say "Paused. The key still exists until you choose." An owner who knows the answer chooses on the first step: stop and remove, move to a new owner, or keep running, and one approval finishes it.
+- `plan_send` takes the per-agent `decisions`; `summary_get` lists `keysUndecided`; new finding `key_not_decided`.
+- The person flow has the choice on its first step, with "Decide later" as the default. The person's page has "Choose for their agents" for later.
+
+## 0.4.0-dev.4 - 2026-10-30
+
+C380 pages for inventory and plans, DEV only. Not for stable until Martin has read C380-DECISIONS.md.
+
+- "See what would stop": a preview of Stop and remove access, per app. "Not installed", "Could not be read", "Refused" and "reports nothing" read as different facts.
+- The person or agent page shows access by app. Access has a Differences tab: what no longer matches, with Accept with a reason until a date, and "Not checked yet" apart from "No differences".
+- A stop now shows its plan live: each step in the server's words, and only a step the owner of the data proved reads "Proved". Open approval in Portal, Try again, Take the request back. The plan's note is shown.
+- The person flow gains the step "What stops" with ticks, and "Pause and transfer" with a new owner. A retry goes on from what already went through.
+- The Summary and the nav show alerts that reached nobody, with "No message was sent".
+- The "Not changed" block names the limits of the sender bar: channels and groups, tool accounts, stored messages, new handles, old edits, and email, Teams and Discord.
+
+## 0.4.0-dev.3 - 2026-10-30
+
+C380 plan runner, DEV only. Not for stable until Martin has read C380-DECISIONS.md.
+
+- A stop now has a plan: `plan_send`, `plan_get`, `plan_retry`, `plan_cancel` and the job `plans_tick` (migration 0010). Governance asks Portal for a draft; you approve there. It has no approve button.
+- Nothing reads as done until its owner proves it: a Core step by the slice, an item by a fresh list from its store. What Core or an app only said is shown as said.
+- Retry takes a new attempt with a new key, after a fresh list. A restart goes on from the tables. A held call keeps its key.
+- With the rail off, no consent `topology` or an older bridge, plans run in Portal link mode, with proof from the slice.
+- An open plan reads its stores every 60 s for 30 minutes, then every 15. Three or more open plans share one read.
+- T6 is refused after an apply, T7 while a plan is open or did not finish (a named reason passes), and while a Connect account with no person is unchecked. T4 and T6 take the draft back first.
+- Companions: `access_list` and `access_revoke` on Connect, `access_revoke` on Knowledge and Evolving Workflows, `inbox_ask` on Operator Inbox. Task Board stays list-only: it has no per-agent grant to end. SDK 0.1.46, `requires.bridge` 0.2.14.
+- Blast radius: rolling Connect back under 0.7.14 removes its whole companion entry, and with it `identities_list` and `contacts_list`, until Connect is forward again.
+
 ## 0.4.0-dev.2 - 2026-10-30
 
 C380 inventory, DEV only. Not for stable until Martin has read C380-DECISIONS.md.

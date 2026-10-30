@@ -3,9 +3,10 @@
 // (`callOp`); the page reloads the directory after each one. Holds are decided one call at a time (C8, in HoldsPage).
 // Every load shows its error with Try again (RUL-14); every failed change shows a plain message (L18).
 // The pages live in src/ui/pages/ (teams, people, agents, identities; one file per page) and the feature pages beside this file.
-import { useSession } from "@opt2-tealbrick/miniapp-sdk/client";
+import { callOp, useSession } from "@opt2-tealbrick/miniapp-sdk/client";
 import { AppShell, appArt, appColour, Button, Notice, Tag } from "@opt2-tealbrick/ui";
 import { useCallback, useState } from "react";
+import type { PlanGetOutput } from "#kit";
 import { AccessPage } from "./access-page.tsx";
 import { useLoad } from "./common.tsx";
 import { ContactRulesPage } from "./contact-rules.tsx";
@@ -13,7 +14,9 @@ import { DirectoryPage } from "./pages/directory.tsx";
 import { EveryonePage } from "./pages/everyone.tsx";
 import { FEATURES } from "./pages/features.ts";
 import { Identities } from "./pages/identities.tsx";
+import { liveBanners } from "./pages/plan-poll.ts";
 import { RecordPage } from "./pages/record.tsx";
+import { RolesPage } from "./pages/roles.tsx";
 import { RoundsPage } from "./pages/rounds.tsx";
 import { SubjectPage } from "./pages/subject.tsx";
 import { SUBJECT_PATH } from "./pages/subject-link.ts";
@@ -31,7 +34,7 @@ const OLD_ROUTES = { teams: "", topology: "topology", access: "access", reviews:
 /** With the lifecycle ops (C380): Summary is the launch page; /people and /agents stay as routes and leave the nav for one release. */
 const NEW_ROUTES = { ...OLD_ROUTES, summary: "", everyone: "people-and-agents", subject: SUBJECT_PATH, teams: "teams" } as const;
 /** Tier 2: a route exists when the ops are there; the nav entry waits for the QA rows (features.ts). */
-const TIER2_ROUTES = { ...(FEATURES.rounds ? { rounds: "review-rounds" } : {}), ...(FEATURES.record ? { record: "access-record" } : {}) };
+const TIER2_ROUTES = { ...(FEATURES.roles ? { roles: "roles" } : {}), ...(FEATURES.rounds ? { rounds: "review-rounds" } : {}), ...(FEATURES.record ? { record: "access-record" } : {}) };
 const ROUTES: Readonly<Record<string, string>> = { ...(FEATURES.lifecycle ? NEW_ROUTES : OLD_ROUTES), ...TIER2_ROUTES };
 const LAUNCH = FEATURES.lifecycle ? "summary" : "teams";
 const OLD_PAGES = [
@@ -56,9 +59,9 @@ const NEW_PAGES = [
   { id: "identities", label: "Identities" },
   { id: "holds", label: "Waiting for approval" },
 ];
-/** Review rounds follow Reviews, the Access record follows Access. */
+/** Review rounds follow Reviews, the Access record follows Access, Roles follows Teams. */
 function withTier2(pages: { id: string; label: string }[]): { id: string; label: string }[] {
-  return pages.flatMap((p) => [p, ...(p.id === "reviews" && FEATURES.roundsNav ? [{ id: "rounds", label: "Review rounds" }] : []), ...(p.id === "access" && FEATURES.recordNav ? [{ id: "record", label: "Access record" }] : [])]);
+  return pages.flatMap((p) => [p, ...(p.id === "reviews" && FEATURES.roundsNav ? [{ id: "rounds", label: "Review rounds" }] : []), ...(p.id === "access" && FEATURES.recordNav ? [{ id: "record", label: "Access record" }] : []), ...(p.id === "teams" && FEATURES.rolesInNav ? [{ id: "roles", label: "Roles" }] : [])]);
 }
 const PAGES = withTier2(FEATURES.lifecycle ? NEW_PAGES : OLD_PAGES);
 
@@ -73,7 +76,9 @@ export function App() {
   const [portal] = useState(portalHref);
   // "./" = the Portal origin is not known (no trusted referrer): then there is no link to show
   const portalLink = portal === "./" ? undefined : portal;
-  const pages = PAGES.map((p) => (p.id === "holds" ? { ...p, badge: holds.holds?.length || null } : p.id === "reviews" ? { ...p, badge: reviewBadge(badge.data) } : p));
+  const loadAlerts = useCallback(() => (signedIn && FEATURES.plans ? callOp<PlanGetOutput>("plan_get", {}) : Promise.resolve(null)), [signedIn]);
+  const alerts = useLoad(loadAlerts);
+  const pages = PAGES.map((p) => (p.id === "summary" ? { ...p, badge: (alerts.data ? liveBanners(alerts.data).length : 0) || null } : p.id === "holds" ? { ...p, badge: holds.holds?.length || null } : p.id === "reviews" ? { ...p, badge: reviewBadge(badge.data) } : p));
   return (
     <AppShell
       title={NAME}
@@ -81,7 +86,7 @@ export function App() {
       art={appArt("fleet", STILLS)}
       portalHref={portal}
       pages={pages}
-      current={nav.page === "subject" ? "everyone" : nav.page}
+      current={nav.page === "subject" ? "everyone" : nav.page === "roles" && !FEATURES.rolesInNav ? LAUNCH : nav.page}
       onNavigate={nav.go}
       pageHref={nav.href}
       actions={
@@ -133,6 +138,8 @@ export function App() {
         <RecordPage />
       ) : nav.page === "identities" ? (
         <Identities />
+      ) : nav.page === "roles" ? (
+        <RolesPage />
       ) : (
         <DirectoryPage page={nav.page as "teams" | "people" | "agents"} />
       )}

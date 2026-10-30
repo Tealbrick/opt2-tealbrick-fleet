@@ -117,9 +117,38 @@ export function lastLeavingSnapshot(db: Db, kind: string, id: string): Record<st
   return r ? (JSON.parse(String(r.snapshot_json)) as Record<string, unknown>) : null;
 }
 
-/** Stops (T3, T5, a start date in the future) since `since` (ms). The one count behind the cap and the "stopped today" banner. */
-export function stopsSince(db: Db, since: number): number {
-  return Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_lifecycle_events WHERE kind IN ('transition', 'changed') AND to_state IN ('suspended', 'leaving', 'not_started') AND at > ?").get(since)?.n ?? 0);
+const STOP_EVENT = "((kind = 'transition' AND to_state IN ('suspended', 'leaving')) OR (kind = 'changed' AND to_state = 'not_started'))";
+
+/**
+ * Who was stopped since `since` (ms): each entry once. N2-3: a stop on a person counts the agents it stops with them, and a `blocked` verdict counts: it is a stop in the floor.
+ * The one count behind the cap and the "stopped today" banner. It limits accidents. A script that can call these ops can also send the confirm.
+ */
+export function stoppedSince(db: Db, since: number): Set<string> {
+  const rows = db
+    .prepare(
+      `SELECT subject_kind || ':' || subject_id AS k FROM fleet_lifecycle_events WHERE ${STOP_EVENT} AND at > ?
+       UNION SELECT 'agent:' || a.id FROM fleet_lifecycle_events e JOIN fleet_agents a ON a.owner_id = e.subject_id
+         WHERE e.subject_kind = 'person' AND e.kind = 'transition' AND e.to_state IN ('suspended', 'leaving') AND e.at > ? AND a.status <> 'removed' AND a.keep_running = 0 AND a.lifecycle <> 'archived'
+       UNION SELECT subject_kind || ':' || subject_id FROM fleet_reviews WHERE verdict = 'blocked' AND subject_id <> '' AND COALESCE(decided_at, created_at) > ?`,
+    )
+    .all(since, since, since);
+  return new Set(rows.map((r) => String(r.k)));
+}
+export const stopsSince = (db: Db, since: number): number => stoppedSince(db, since).size;
+
+const newEpoch = (now: number): string => `fep_${ulid(now)}`;
+
+/**
+ * The feed's origin (N2-2, Rules reads it). Made once; a new one after a restore; a fresh install has none yet, so it gets its own. Each read checks for a restore first, because a feed read can come before onStart:
+ * no answer goes out with the old value. A file put back outside the SDK's restore sets no mark, and only Rules' lower-revision check sees that.
+ */
+export function feedEpoch(db: Db, now = Date.now()): string {
+  noteRestore(db, now);
+  const cur = db.prepare("SELECT value FROM fleet_settings WHERE key = 'feed_epoch'").get()?.value;
+  if (typeof cur === "string") return cur;
+  const made = newEpoch(now);
+  db.prepare("INSERT INTO fleet_settings (key, value) VALUES ('feed_epoch', ?) ON CONFLICT (key) DO NOTHING").run(made);
+  return String(db.prepare("SELECT value FROM fleet_settings WHERE key = 'feed_epoch'").get()?.value);
 }
 
 /**
@@ -138,6 +167,8 @@ export function noteRestore(db: Db, now: number): boolean {
   if (seen === mark) return false;
   return db.transaction(() => {
     db.prepare("INSERT INTO fleet_settings (key, value) VALUES ('restore_seen', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(mark as string);
+    // N2-2: the file is an older one. A reader must not take it for the same origin: the revision alone can climb back to where it was.
+    db.prepare("INSERT INTO fleet_settings (key, value) VALUES ('feed_epoch', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(newEpoch(now));
     appendEvent(db, { subject: { kind: "workspace", id: "", name: "Governance" }, kind: "restored", actor: { kind: "system", id: null }, note: "Data was restored from a backup. Rows after that backup are not in this record.", at: now });
     return true;
   });

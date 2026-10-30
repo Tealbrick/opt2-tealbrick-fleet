@@ -31,6 +31,8 @@ export interface PlanInput {
   /** the owner's ticks; absent = every item an app can end that is held by the subject */
   items?: readonly Tick[] | undefined;
   expiresInSec?: number | undefined;
+  /** N2-6: only the sender bar of a person marked leaving. No Core step, Connect only. */
+  barOnly?: boolean | undefined;
   actor: Actor;
   sourceEvent?: string | undefined;
 }
@@ -51,7 +53,8 @@ export function coreStepsFor(db: Db, s: Subject, transfers: readonly string[]): 
     if (r.status === "removed") return;
     const effective = effectiveAgent({ lifecycle: r.lifecycle as Lifecycle, validFrom: r.valid_from === null ? null : Number(r.valid_from), keepRunning: Number(r.keep_running) === 1 }, ownerLifecycle(r.owner_id));
     if (effective === "leaving") add("agents.offboard", String(r.id));
-    else if (effective === "suspended") add("agents.pause", String(r.id));
+    // Already paused, by an earlier approval or in Portal: a second draft asks only for what is new.
+    else if (effective === "suspended" && r.status !== "paused") add("agents.pause", String(r.id));
   };
   if (s.kind === "agent") {
     const r = agentRow(s.id);
@@ -65,7 +68,7 @@ export function coreStepsFor(db: Db, s: Subject, transfers: readonly string[]): 
   for (const agt of transfers) {
     const r = agentRow(agt) ?? fail("agent_not_found", "No such agent.", 404);
     if (r.lifecycle === "archived" || r.status === "removed") fail("agent_closed", "This agent is closed. It cannot move to a new owner.", 409);
-    add("agents.pause", agt);
+    if (r.status !== "paused") add("agents.pause", agt);
     add("agents.rotate", agt);
   }
   return steps;
@@ -99,7 +102,7 @@ export function checkPlan(db: Db, input: PlanInput): { s: Subject; steps: CoreSt
   const s = loadSubject(db, input.kind, input.id) ?? fail(input.kind === "agent" ? "agent_not_found" : "person_not_found", "No such entry.", 404);
   if (input.expectedRev !== undefined && input.expectedRev !== s.rev) fail("lifecycle_stale", "This entry changed since you looked. Open it again.", 409);
   if (s.lifecycle === "archived") fail("subject_closed", "This entry is closed. Bring it back first.", 409);
-  const steps = coreStepsFor(db, s, input.transfers ?? []);
+  const steps = input.barOnly ? [] : coreStepsFor(db, s, input.transfers ?? []);
   if (steps.length === 0 && !(s.kind === "person" && STOPPED.includes(s.lifecycle)) && !input.items?.length) fail("nothing_to_stop", "This entry has nothing to stop. Tick what to remove.", 409);
   return { s, steps };
 }
@@ -112,7 +115,7 @@ export function createPlan(db: Db, input: PlanInput, now = Date.now()): Made {
   return db.transaction(() => {
     const { s, steps } = checkPlan(db, input);
     if (db.prepare(`SELECT 1 FROM fleet_plans WHERE subject_kind = ? AND subject_id = ? AND state IN (${OPEN_SQL})`).get(s.kind, s.id)) fail("plan_open", "A plan for this entry is still open. Cancel it or wait for it.", 409);
-    const purpose = s.lifecycle === "suspended" ? "suspend" : s.lifecycle === "leaving" ? "leave" : input.transfers?.length ? "transfer" : steps.length > 0 ? "suspend" : "review";
+    const purpose = input.barOnly ? "bar" : s.lifecycle === "suspended" ? "suspend" : s.lifecycle === "leaving" ? "leave" : input.transfers?.length ? "transfer" : steps.length > 0 ? "suspend" : "review";
     const parts = splitSteps(steps);
     const count = Math.max(parts.length, 1);
     const groupId = `pln_${ulid(now)}`;
@@ -128,10 +131,10 @@ export function createPlan(db: Db, input: PlanInput, now = Date.now()): Made {
       ).run(id, groupId, i + 1, count, s.kind, s.id, s.name, purpose, input.actor.kind, input.actor.id, i === 0 ? (input.sourceEvent ?? null) : null, s.rev, core.length > 0 ? "draft" : "none", digest, expires, input.items ? JSON.stringify(input.items) : null, now, now);
       let n = 0;
       for (const c of core) addStep(db, id, n++, { phase: "core", target: "core", op: c.opId, agent: c.agt, subject: { kind: "agent", id: c.agt } }, now);
-      for (const t of ACCESS_TARGETS) addStep(db, id, n++, { phase: "read", target: t, op: "access_list" }, now);
+      for (const t of input.barOnly ? (["connect"] as const) : ACCESS_TARGETS) addStep(db, id, n++, { phase: "read", target: t, op: "access_list" }, now);
       ids.push(id);
     }
-    appendEvent(db, { subject: { kind: s.kind, id: s.id, name: s.name }, kind: "changed", from: s.lifecycle, to: s.lifecycle, actor: input.actor, note: `A plan was made: ${steps.length} steps in Portal.`, plan: { id: groupId, draftId: null, receiptId: null }, at: now });
+    appendEvent(db, { subject: { kind: s.kind, id: s.id, name: s.name }, kind: "changed", actor: input.actor, note: input.barOnly ? "No plan came after this person was marked as leaving. Governance made one for the sender bar only." : `A plan was made: ${steps.length} steps in Portal.`, plan: { id: groupId, draftId: null, receiptId: null }, at: now });
     return { ids };
   });
 }

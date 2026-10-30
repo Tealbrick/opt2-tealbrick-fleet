@@ -2,10 +2,13 @@
 // read and when, and "Ready to stop an agent?". Read only: every number and sentence comes from `summary_get`.
 import { callOp } from "@opt2-tealbrick/miniapp-sdk/client";
 import { Button, ButtonLink, Card, EmptyState, Notice, Table, Tag, TextLink } from "@opt2-tealbrick/ui";
-import { useState } from "react";
-import type { SummaryGetOutput } from "#kit";
+import { useCallback, useState } from "react";
+import type { PlanGetOutput, SummaryGetOutput } from "#kit";
 import { LoadFailed, Loading, PageHead, useLoad } from "../common.tsx";
+import { FEATURES } from "./features.ts";
+import { liveBanners } from "./plan-poll.ts";
 import { SettingsDialog } from "./settings-dialog.tsx";
+import { subjectHref } from "./subject-link.ts";
 import { afterChangeText, floorTone, when } from "./words.ts";
 
 const load = () => callOp<SummaryGetOutput>("summary_get", {});
@@ -51,12 +54,42 @@ export function SummaryPage() {
 function RulesNotice({ data }: { data: SummaryGetOutput }) {
   const stopping = data.agents.stopping + data.people.leaving + data.people.suspended > 0;
   const { floor } = data;
+  // After a restore this directory lists no stop, and Rules still holds them: that is said with nothing else stopping.
+  if (!stopping && floor.rulesHolds) {
+    return (
+      <Notice tone="needs-you" role="status">
+        {floor.rulesHolds}
+      </Notice>
+    );
+  }
   if (!stopping && (floor.state === "confirmed" || floor.state === "not_confirmed") && !floor.gateNote) return null;
   const text = stopping ? afterChangeText(floor) : floor.gateNote && floor.lastGateAt ? `Rules has not checked a call since ${when(floor.lastGateAt)}.` : floor.text;
   return (
     <Notice tone={stopping ? floorTone(floor) : "neutral"} role="status">
       {text}
     </Notice>
+  );
+}
+
+/** Alerts that reached nobody (§5): shown here, and the page says that no message was sent. */
+function PlanAlerts() {
+  const { data } = useLoad(useCallback(() => (FEATURES.plans ? callOp<PlanGetOutput>("plan_get", {}) : Promise.resolve(null)), []));
+  const banners = data ? liveBanners(data) : [];
+  if (!data || banners.length === 0) return null;
+  return (
+    <>
+      {banners.map((b) => {
+        const s = data.plans.find((p) => p.id === b.plan)?.subject;
+        return (
+          <Notice key={`${b.plan}:${b.kind}`} tone="needs-you" role="status">
+            <span className="tb-row">
+              <span>{b.text}</span>
+              {s ? <TextLink href={subjectHref(s.kind as "person" | "agent", s.id)}>{`Open ${s.name}`}</TextLink> : null}
+            </span>
+          </Notice>
+        );
+      })}
+    </>
   );
 }
 
@@ -73,6 +106,19 @@ function SummaryBody({ data }: { data: SummaryGetOutput }) {
         <Notice tone="needs-you" role="status">
           {data.stoppedToday === 1 ? "1 entry was stopped today." : `${data.stoppedToday} entries were stopped today.`} Check this if you did not do it.
         </Notice>
+      ) : null}
+      <PlanAlerts />
+      {(data.keysUndecided ?? []).length ? (
+        <section className="tb-stack" aria-label="Keys to decide">
+          <h2 className="sub-head">{data.keysUndecided?.[0]?.text}</h2>
+          <ul className="ready">
+            {(data.keysUndecided ?? []).map((k) => (
+              <li key={k.id}>
+                <TextLink href={subjectHref("agent", k.id)}>{k.name}</TextLink>
+              </li>
+            ))}
+          </ul>
+        </section>
       ) : null}
       <div className="cards stats">
         <Stat label="Agents" value={String(data.agents.total)} note={`${data.agents.running} running, ${data.agents.paused} paused, ${data.agents.notReviewed} not reviewed`} href="./people-and-agents" />

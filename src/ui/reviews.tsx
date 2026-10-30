@@ -7,6 +7,8 @@ import { Button, Card, Choices, EmptyState, Field, Notice, Select, StepFlow, Swa
 import { useCallback, useEffect, useState } from "react";
 import type { OverviewGetOutput, ProposalSendOutput, ReviewGetOutput, ReviewsListOutput } from "#kit";
 import { changeError, EditDialog, LoadFailed, Loading, PageHead, useLoad } from "./common.tsx";
+import { capButton, useCapConfirm } from "./pages/cap-confirm.ts";
+import { lifecycleError } from "./pages/lifecycle-errors.ts";
 import { NOTHING_APPLIES, proposalError, TEMPLATE_INFO, type Template, templatesFor } from "./rule-text.ts";
 import { sameShown } from "./shown.ts";
 
@@ -87,6 +89,7 @@ function ReviewFlow({ subject: given, requests, dir, policy, onClose, onDone }: 
   const [got, setGot] = useState<ReviewGetOutput | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [verdict, setVerdict] = useState<Verdict | null>(null);
+  const cap = useCapConfirm();
   const [reason, setReason] = useState("");
   const [name, setName] = useState<string | null>(null);
   const [recordError, setRecordError] = useState<string | null>(null);
@@ -141,6 +144,7 @@ function ReviewFlow({ subject: given, requests, dir, policy, onClose, onDone }: 
   const record = async (): Promise<boolean> => {
     if (!subject || !cur || !verdict) return false;
     setRecordError(null);
+    const confirm = cap.take();
     let reviewId = recorded;
     if (!reviewId) {
       try {
@@ -151,11 +155,13 @@ function ReviewFlow({ subject: given, requests, dir, policy, onClose, onDone }: 
           snapshotDigest: cur.digest,
           nextReviewDays: nextDays,
           ...(request ? { request: request.id } : {}),
+          ...(confirm !== null ? { confirmCount: confirm } : {}),
         });
         reviewId = out.review.id;
         setRecorded(reviewId);
       } catch (e) {
-        setRecordError(changeError(e));
+        cap.note(e);
+        setRecordError((e as { code?: unknown } | null)?.code === "stop_cap_reached" ? lifecycleError(e, changeError).message : changeError(e));
         return false;
       }
     }
@@ -198,6 +204,7 @@ function ReviewFlow({ subject: given, requests, dir, policy, onClose, onDone }: 
                       setHandleChoice(null);
                       setRecorded(null);
                       setRecordError(null);
+                      cap.clear();
                     }}
                   />
                 </Field>
@@ -270,7 +277,15 @@ function ReviewFlow({ subject: given, requests, dir, policy, onClose, onDone }: 
           canNext: verdict !== null && reason.trim().length > 0,
           render: () => (
             <div className="tb-stack">
-              <Choices label="Verdict" options={VERDICTS} value={verdict} onChange={setVerdict} />
+              <Choices
+                label="Verdict"
+                options={VERDICTS}
+                value={verdict}
+                onChange={(v) => {
+                  setVerdict(v);
+                  cap.clear();
+                }}
+              />
               <Field label="Why (kept with the record)">
                 <Textarea rows={3} maxLength={2000} value={reason} onChange={(e) => setReason(e.target.value)} />
               </Field>
@@ -310,7 +325,7 @@ function ReviewFlow({ subject: given, requests, dir, policy, onClose, onDone }: 
         },
         {
           name: "Confirm",
-          nextLabel: recorded ? "Send the rule again" : template ? (pending ? "Add, record and send rule" : "Record verdict and send rule") : pending ? "Add and record verdict" : "Record verdict",
+          nextLabel: cap.count !== null ? capButton(cap.count) : recorded ? "Send the rule again" : template ? (pending ? "Add, record and send rule" : "Record verdict and send rule") : pending ? "Add and record verdict" : "Record verdict",
           onNext: record,
           render: () => (
             <div className="tb-stack">
@@ -327,6 +342,9 @@ function ReviewFlow({ subject: given, requests, dir, policy, onClose, onDone }: 
                 <dd>{template && ruleParams ? `${TEMPLATE_INFO[template].title}${ruleParams.handle ? ` (${ruleParams.handle})` : ""}` : "None"}</dd>
               </dl>
               {template && ruleParams ? <p className="tb-soft">{NOTHING_APPLIES}</p> : null}
+              {verdict === "blocked" ? (
+                <Notice tone="needs-you">Blocked is a stop. If the Rules hook is on, Rules refuses this entry's calls and calls that name it as the requester, until you record a new review. Governance cannot see that switch: check it in Portal.</Notice>
+              ) : null}
               <p className="tb-soft">Governance records the verdict now and sets the trust state. Apps that read the directory see it with their next read. The record cannot be edited later.</p>
               {recordError ? (
                 <Notice tone="needs-you" role="alert">

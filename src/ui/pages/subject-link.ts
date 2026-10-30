@@ -4,16 +4,16 @@ export const SUBJECT_PATH = "person-or-agent";
 
 export const subjectHref = (kind: SubjectKind, id: string) => `./${SUBJECT_PATH}?kind=${kind}&id=${encodeURIComponent(id)}`;
 
-export function subjectFromUrl(search: string): { kind: SubjectKind; id: string; open: string | null } | null {
+export function subjectFromUrl(search: string): { kind: SubjectKind; id: string } | null {
   const q = new URLSearchParams(search);
   const kind = q.get("kind");
   const id = q.get("id");
   if ((kind !== "person" && kind !== "agent") || !id) return null;
-  return { kind, id, open: q.get("open") };
+  return { kind, id };
 }
 
 /** Go there with the back button working; useNav and the page both follow popstate. */
-export function openSubject(kind: SubjectKind, id: string, open?: string) {
-  globalThis.history.pushState(null, "", `${subjectHref(kind, id)}${open ? `&open=${open}` : ""}`);
+export function openSubject(kind: SubjectKind, id: string) {
+  globalThis.history.pushState(null, "", subjectHref(kind, id));
   globalThis.dispatchEvent(new PopStateEvent("popstate"));
 }

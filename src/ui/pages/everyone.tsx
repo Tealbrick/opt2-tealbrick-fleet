@@ -6,8 +6,10 @@ import { Button, ButtonLink, EmptyState, Segmented, Table, TextLink } from "@opt
 import { useCallback, useState } from "react";
 import type { ColleaguesListOutput } from "#kit";
 import { LoadFailed, Loading, PageHead, useLoad } from "../common.tsx";
+import { FEATURES } from "./features.ts";
 import { StopNow } from "./stop-now.tsx";
 import { openSubject, subjectHref } from "./subject-link.ts";
+import { WhatWouldStop } from "./what-would-stop.tsx";
 import { when } from "./words.ts";
 
 export type Row = ColleaguesListOutput["items"][number];
@@ -40,6 +42,7 @@ export function EveryonePage({ portalHref }: { portalHref?: string }) {
   const { data, error, loading, reload } = useLoad(useCallback(loadAll, []));
   const [filter, setFilter] = useState<Filter>("all");
   const [stop, setStop] = useState<Row | null>(null);
+  const [preview, setPreview] = useState<Row | null>(null);
   const rows = data?.items.filter((r) => filter === "all" || r.kind === filter) ?? [];
   return (
     <section className="app-page" aria-label="People and agents">
@@ -94,14 +97,21 @@ export function EveryonePage({ portalHref }: { portalHref?: string }) {
                     </span>
                   </td>
                   <td>
+                    <span className="row-name">
                     {r.line}
                     {r.findings.length ? (
                       <span className="row-tag tb-hint">{r.findings.length === 1 ? (r.findings[0]?.text ?? "") : `${r.findings[0]?.text ?? ""} And ${r.findings.length - 1} more.`}</span>
                     ) : null}
+                  </span>
                   </td>
                   <td className={r.kind === "agent" ? undefined : "is-empty"}>{r.kind === "agent" ? (r.owner?.name ?? "No owner") : ""}</td>
-                  <td className={canStop(r) ? undefined : "is-empty"}>
+                  <td className={FEATURES.preview || canStop(r) ? undefined : "is-empty"}>
                     <span className="tb-row tight row-actions">
+                      {FEATURES.preview ? (
+                        <Button size="sm" onClick={() => setPreview(r)}>
+                          See what would stop
+                        </Button>
+                      ) : null}
                       {canStop(r) ? (
                         <Button size="sm" variant="danger" onClick={() => setStop(r)}>
                           Stop now
@@ -116,6 +126,7 @@ export function EveryonePage({ portalHref }: { portalHref?: string }) {
           {data.total > data.items.length ? <p className="tb-hint">{`This list shows ${data.items.length} of ${data.total}.`}</p> : null}
         </>
       )}
+      {preview ? <WhatWouldStop subject={preview} onClose={() => setPreview(null)} /> : null}
       {stop ? <StopNow subject={stop} portalHref={portalHref} onClose={() => setStop(null)} onChanged={reload} /> : null}
     </section>
   );

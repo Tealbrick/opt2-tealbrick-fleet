@@ -3,14 +3,41 @@
 // Governance changes nothing here; "Change access in Portal" links to Portal. When the copy is not available (the platform is
 // older, or the owner has not turned on "See who has access" for Governance) the page says so in plain words.
 import { callOp } from "@opt2-tealbrick/miniapp-sdk/client";
-import { Notice } from "@opt2-tealbrick/ui";
+import { Notice, Tabs } from "@opt2-tealbrick/ui";
+import { useState } from "react";
 import type { AccessGetOutput } from "#kit";
 import { AccessView } from "./access.tsx";
 import { LoadFailed, Loading, PageHead, useLoad } from "./common.tsx";
+import { Differences } from "./pages/differences.tsx";
+import { FEATURES } from "./pages/features.ts";
 
 const loadAccess = () => callOp<AccessGetOutput>("access_get", {});
 
+type View = "grants" | "differences";
+const VIEWS: { value: View; label: string }[] = [
+  { value: "grants", label: "Who can use what" },
+  { value: "differences", label: "Differences" },
+];
+
 export function AccessPage({ portalHref }: { portalHref?: string }) {
+  const [view, setView] = useState<View>("grants");
+  if (!FEATURES.differences) return <Grants portalHref={portalHref} />;
+  return (
+    <section className="app-page" aria-label="Access">
+      <Tabs label="Access" tabs={VIEWS} value={view} onChange={setView} />
+      {view === "grants" ? (
+        <Grants portalHref={portalHref} />
+      ) : (
+        <>
+          <PageHead title="Differences" lede="What no longer matches. Nothing here changes by itself." />
+          <Differences />
+        </>
+      )}
+    </section>
+  );
+}
+
+function Grants({ portalHref }: { portalHref?: string }) {
   const { data, error, loading, reload } = useLoad(loadAccess);
   return (
     <section className="app-page" aria-label="Access page">

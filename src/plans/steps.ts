@@ -63,6 +63,9 @@ export const ENDS_BY_PAUSE: readonly string[] = ["routine"];
 
 /** Past a job's timeout (5 min). */
 export const TICK_LEASE_MS = 6 * 60_000;
+/** N2-6: the normal flow sends its plan within this. */
+export const BAR_WAIT_MS = 20_000;
+export const MANY_PLANS = 3;
 export const POLL_FAST_MS = 60_000;
 export const POLL_SLOW_MS = 15 * 60_000;
 export const FAST_WINDOW_MS = 30 * 60_000;
