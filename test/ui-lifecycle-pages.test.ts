@@ -392,7 +392,7 @@ describe("the person flow", () => {
     assert.equal(button(dlg, "Next").disabled, true, "no reason, no Next");
     assert.match(dlg.textContent ?? "", /Henry/);
     assert.match(dlg.textContent ?? "", /Decide later/);
-    assert.match(dlg.textContent ?? "", /Paused\. The key still exists until you choose\./);
+    assert.match(dlg.textContent ?? "", /It is only paused, when you approve in Portal\. Its key still exists until you choose\./);
     assert.doesNotMatch(dlg.textContent ?? "", /Already leaving/);
     await chooseReason(dlg, "They left");
     await next(dlg);
@@ -436,7 +436,8 @@ describe("the person flow", () => {
     stub.answers.colleagues_list = ok({ items: [ROW({ kind: "person", id: "per_2", name: "Bob", runtime: null, owner: null, line: "Active" })], nextCursor: null, total: 1 });
     stub.answers.plan_preview = refuse(500, "internal", "x");
     stub.answers.plan_send = refuse(409, "owner_inactive", "The new owner must be an active person.");
-    const m = await mount(h(flow.LeaveFlow, { c: person({ agents: [ROW()] }), onClose: () => {}, onChanged: () => {} }));
+    let reloaded = 0;
+    const m = await mount(h(flow.LeaveFlow, { c: person({ agents: [ROW()] }), onClose: () => {}, onChanged: () => void reloaded++ }));
     const dlg = m.host.querySelector("dialog") as Element;
     await chooseReason(dlg, "They left");
     const move = [...dlg.querySelectorAll('[role="radio"]')].find((r) => r.textContent?.includes("Pause and move to a new owner"));
@@ -451,6 +452,7 @@ describe("the person flow", () => {
     await next(dlg);
     await next(dlg, "Stop");
     assert.match([...dlg.querySelectorAll('[role="alert"]')].map((x) => x.textContent).join(" "), /The stop is recorded, but the request for Portal is not ready\. The new owner must be an active person\./);
+    assert.ok(reloaded >= 1, "the page behind shows the stop");
     stub.answers.plan_send = ok({ plans: [PLAN()] });
     await next(dlg, "Send again");
     assert.deepEqual(opsCalled().filter((o) => ["lifecycle_set", "agent_set", "plan_send"].includes(o)), ["lifecycle_set", "plan_send", "plan_send"]);

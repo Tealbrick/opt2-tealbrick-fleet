@@ -143,7 +143,7 @@ function KeyChoice({ c, onChoose }: { c: Colleague; onChoose: () => void }) {
         <Button variant="primary" onClick={onChoose}>
           Choose for their agents
         </Button>
-        <span className="tb-hint">Agents with no choice stay paused, and their keys still exist.</span>
+        <span className="tb-hint">An agent with no choice is only paused, when you approve in Portal, and its key still exists.</span>
       </div>
     );
   }

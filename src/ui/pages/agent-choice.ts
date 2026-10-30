@@ -34,5 +34,5 @@ export const choicesReady = (agents: readonly { id: string }[], all: Choices): b
 
 export function choiceSummary(agents: readonly { id: string }[], all: Choices): string {
   const n = (x: Choice) => agents.filter((a) => choiceOf(all, a.id).choice === x).length;
-  return `${n("later")} paused and decided later, ${n("stop")} stopped and removed, ${n("transfer")} moved to a new owner, ${n("keep")} kept running`;
+  return `${n("later")} decided later, ${n("stop")} stop and remove, ${n("transfer")} move to a new owner, ${n("keep")} keep running`;
 }

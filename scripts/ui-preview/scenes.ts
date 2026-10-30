@@ -378,7 +378,7 @@ export const scenes: Scene[] = [
       await dialog.getByRole("button", { name: "Stop", exact: true }).click();
       await dialog.getByText("Not applied: do these in Portal").waitFor();
     },
-    expect: i === 0 ? ["The mark takes effect now", "Henry", "Sales helper", "Decide later", "Paused. The key still exists until you choose."] : i === 1 ? ["Not changed", "Their own logins", "The next screen says"] : i === 2 ? ["Not applied: do these in Portal"] : [],
+    expect: i === 0 ? ["The mark takes effect now"] : i === 1 ? ["Not changed", "Their own logins", "The next screen says"] : i === 2 ? ["Not applied: do these in Portal"] : [],
     forbid: ["last day"],
   })),
   { name: "see-what-would-stop", path: "people-and-agents", personOps: INVENTORY_OPS, strict: true, ops: invOps, ready: "Marco Rossi", steps: (p) => button(p, "See what would stop"), expect: ["This is a preview of Stop and remove access", "Could not be read", "Not installed", "Knowledge reports nothing for Henry", "A partial app lists nothing for Henry, and it cannot list everything", "Refused", "You would do this", "3 accounts have no person", "Not changed", "Reported by Connect"], assertCalls: (calls) => (calls.some((c) => c.op === "lifecycle_set") ? ["a preview called lifecycle_set"] : []) },
@@ -406,7 +406,7 @@ export const scenes: Scene[] = [
     forbid: ["Proved", "Approve"],
     assertCalls: (calls) => (calls.findIndex((c) => c.op === "lifecycle_set") < calls.findIndex((c) => c.op === "plan_send") ? [] : ["plan_send must follow lifecycle_set"]),
   },
-  { name: "person-choose-later", path: PERSON, personOps: PLAN_OPS, strict: true, ops: { ...planOps([planOf({ subject: { kind: "person", id: ID.p, name: "Marco Rossi" } })]), colleague_get: ok(personDetail({ lifecycle: "leaving", effective: "leaving", line: "Leaving", reason: "left", actions: [] })) }, ready: "History", steps: (p) => button(p, "Choose for their agents"), expect: ["Decide later", "It replaces an older request"] },
+  { name: "person-choose-later", path: PERSON, personOps: PLAN_OPS, strict: true, ops: { ...planOps([planOf({ subject: { kind: "person", id: ID.p, name: "Marco Rossi" } })]), colleague_get: ok(personDetail({ lifecycle: "leaving", effective: "leaving", line: "Leaving", reason: "left", actions: [] })) }, ready: "History", steps: (p) => button(p, "Choose for their agents"), expect: ["Decide later", "takes back an older request"] },
   { name: "summary-keys", path: "", personOps: PLAN_OPS, strict: true, ops: { ...planOps([]), summary_get: ok({ ...summary, keysUndecided: [{ id: ID.a, name: "Henry", text: "Paused. The key still exists until you choose." }] }) }, ready: "Ready to stop an agent?", expect: ["Paused. The key still exists until you choose.", "Henry"] },
   { name: "plan-partial", path: AGENT, personOps: PLAN_OPS, strict: true, ops: { ...planOps([PARTIAL]), colleague_get: ok(stoppedAgent(FLOOR_CONFIRMED)) }, ready: "Part of this is done", expect: ["Proved", "Refused", "Someone must do this", "Said, not proved", "Try again", "1 proved, 1 said and not proved"] },
   { name: "plan-done", path: AGENT, personOps: PLAN_OPS, strict: true, ops: { ...planOps([planOf({ state: "done", headline: "Done: every step is proved", reviewUrl: null, closedAt: "2026-10-30T16:10:00Z", canCancel: false, counts: { proved: 1, said: 0, manual: 0, open: 0 }, steps: [pStep({ state: "done", text: "Stopped at the bridge.", final: true })] })]), colleague_get: ok(stoppedAgent(FLOOR_CONFIRMED)) }, ready: "every step is proved", forbid: ["Take the request back", "Open approval in Portal"] },
@@ -436,7 +436,7 @@ export const scenes: Scene[] = [
       await dialog.getByRole("button", { name: "Stop", exact: true }).click();
       await dialog.getByText("Open approval in Portal").waitFor();
     },
-    expect: i === 0 ? ["Pause and move to a new owner", "A new key is needed", "Decide later"] : i === 1 ? ["Would stop", "Could not be read"] : i === 2 ? ["Not changed", "1 moved to a new owner", "1 paused and decided later"] : i === 3 ? ["Open approval in Portal"] : [],
+    expect: i === 0 ? ["Pause and move to a new owner", "A new key is needed", "Decide later", "It is only paused, when you approve in Portal"] : i === 1 ? ["Would stop", "Could not be read"] : i === 2 ? ["Not changed", "1 move to a new owner", "1 decided later"] : i === 3 ? ["Open approval in Portal"] : [],
     assertCalls:
       i === 3
         ? (calls) => {

@@ -56,6 +56,8 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
             const cap = stopCapOf(e);
             if (cap !== null) setCapCount(cap);
             setFailure(`The stop is recorded, but the request for Portal is not ready. ${lifecycleError(e, changeError).message}`);
+            // the page behind must show the stop, also if the owner closes this now
+            await onChanged();
             return false;
           }
         }
@@ -91,14 +93,14 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
         <div className="tb-stack">
           <p className="tb-soft">{person ? `This marks ${c.name}'s agents to stop, and lists what to do in Portal to stop them and remove their access in Teal Brick. It does not end their employment or their own logins.` : `This marks ${c.name} to stop, and lists what to do in Portal to stop it and remove its access in Teal Brick.`}</p>
           <Field label="Reason">
-            <Select placeholder="Choose a reason" options={reasonOptions("leaving")} value={reason} onValueChange={(v) => setReason(v as Reason)} />
+            <Select placeholder="Choose a reason" disabled={Boolean(mark.current)} options={reasonOptions("leaving")} value={reason} onValueChange={(v) => setReason(v as Reason)} />
           </Field>
           <Field label="Note" hint={NOTE_HINT}>
-            <Textarea rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
+            <Textarea rows={2} maxLength={500} disabled={Boolean(mark.current)} value={note} onChange={(e) => setNote(e.target.value)} />
           </Field>
           <Notice tone="neutral">The mark takes effect now. There is no last-day date.</Notice>
           {person && agents.length === 0 ? <p>This person owns no agents.</p> : null}
-          {agents.length ? <AgentChoices agents={agents} choices={choices} onChange={setChoices} owners={owners} /> : null}
+          {agents.length && FEATURES.plans ? <AgentChoices agents={agents} choices={choices} onChange={setChoices} owners={owners} /> : null}
         </div>
       ),
     },
@@ -133,7 +135,7 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
             {person ? (
               <div className="kv-row">
                 <dt>Their agents</dt>
-                <dd>{agents.length === 0 ? "None" : choiceSummary(agents, choices)}</dd>
+                <dd>{agents.length === 0 ? "None" : FEATURES.plans ? choiceSummary(agents, choices) : `${agents.length}`}</dd>
               </div>
             ) : null}
           </dl>

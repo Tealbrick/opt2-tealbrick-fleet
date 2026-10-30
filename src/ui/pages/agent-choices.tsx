@@ -7,12 +7,13 @@ import type { ColleagueGetOutput, ColleaguesListOutput, PlanSendInput } from "#k
 import { changeError, useLoad } from "../common.tsx";
 import { type Choice, type Choices, canChoose, choiceOf, choicesReady, decisionsOf, hasOwnStop } from "./agent-choice.ts";
 import { lifecycleError, stopCapOf } from "./lifecycle-errors.ts";
-import { KEY_SENTENCE } from "./words.ts";
 
 type Colleague = ColleagueGetOutput["colleague"];
 type Agent = Colleague["agents"][number];
 export type Owner = { value: string; label: string };
 
+/** Before the approval: the server's "Paused. The key still exists until you choose." is true only after it. */
+const LATER_SENTENCE = "It is only paused, when you approve in Portal. Its key still exists until you choose.";
 const STOP_SENTENCE = "Its access and key go when you approve in Portal. To undo this you must pair it again and grant its access again.";
 const KEEP_SENTENCE = "The person who left may still hold this agent's key.";
 const TRANSFER_SENTENCE = "A new key is needed. The agent loses this person's personal memory and gains the new owner's.";
@@ -41,7 +42,7 @@ export function AgentChoices({ agents, choices, onChange, owners }: { agents: re
               value={c.choice}
               onChange={(v) => set(a.id, { choice: v })}
               options={[
-                { value: "later", title: "Decide later", body: KEY_SENTENCE },
+                { value: "later", title: "Decide later", body: a.keepRunning ? "It keeps running, as you chose before." : LATER_SENTENCE },
                 { value: "stop", title: "Stop and remove", body: STOP_SENTENCE },
                 ...(own || !owners ? [] : [{ value: "transfer" as const, title: "Pause and move to a new owner", body: TRANSFER_SENTENCE }]),
                 ...(own ? [] : [{ value: "keep" as const, title: "Keep running", body: KEEP_SENTENCE }]),
@@ -114,7 +115,7 @@ export function ChooseDialog({ c, onClose, onChanged }: { c: Colleague; onClose:
             {failure}
           </Notice>
         ) : null}
-        <p className="tb-soft">This prepares a request in Portal. It replaces an older request for this person. Nothing changes until you approve it there.</p>
+        <p className="tb-soft">Your choices are recorded when you send: a new owner and Keep running apply at once. Pause, removal and new keys wait for your approval in Portal. This takes back an older request for this person, with any new key it asked for.</p>
         <AgentChoices agents={agents} choices={choices} onChange={setChoices} owners={owners} />
       </div>
     </Dialog>

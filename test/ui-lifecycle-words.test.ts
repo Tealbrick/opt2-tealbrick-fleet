@@ -2,7 +2,6 @@
 // said before a change never claims a stop, and the refusals of `lifecycle_set` read as sentences.
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { KEY_STILL_EXISTS } from "../src/findings.ts";
 import { NOT_CHANGED as SERVER_NOT_CHANGED } from "../src/plans/portal-link.ts";
 import { canChoose, choiceSummary, choicesReady, decisionsOf, hasOwnStop } from "../src/ui/pages/agent-choice.ts";
 import { featuresOf } from "../src/ui/pages/features.ts";
@@ -31,7 +30,7 @@ describe("the choice for each agent (D2)", () => {
     assert.deepEqual(decisionsOf(agents, {}), []);
     assert.deepEqual(decisionsOf(agents, { a: later }), []);
     assert.equal(choicesReady(agents, {}), true);
-    assert.equal(choiceSummary(agents, {}), "4 paused and decided later, 0 stopped and removed, 0 moved to a new owner, 0 kept running");
+    assert.equal(choiceSummary(agents, {}), "4 decided later, 0 stop and remove, 0 move to a new owner, 0 keep running");
   });
   it("sends only what was chosen, in the shape of the op", () => {
     assert.deepEqual(decisionsOf(agents, { a: { ...later, choice: "stop" }, b: { ...later, choice: "keep", reason: " on call " }, c: { ...later, choice: "transfer", newOwner: "per_2" } }), [
@@ -101,9 +100,6 @@ describe("words before a change", () => {
     assert.equal(floorTone({ state: "not_installed" }), "neutral");
     assert.equal(beforeChangeTone({ state: "not_read" }), "needs-you");
     assert.equal(beforeChangeTone({ state: "confirmed" }), "neutral");
-  });
-  it("the page's key sentence is the server's, word for word", () => {
-    assert.equal(KEY_SENTENCE_UI, KEY_STILL_EXISTS);
   });
   it("the page's Not changed block is the server's, word for word (the browser cannot import server code)", () => {
     assert.deepEqual([...NOT_CHANGED], [...SERVER_NOT_CHANGED]);

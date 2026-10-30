@@ -27,9 +27,6 @@ export const reasonOptions = (to: Lifecycle) => REASONS[to].map((r) => ({ value:
 
 export const NOTE_HINT = "Optional. Do not write health, pay or disciplinary details.";
 
-/** With no choice an agent is only paused (D2). The server's sentence, word for word (a test compares them). */
-export const KEY_SENTENCE = "Paused. The key still exists until you choose.";
-
 /** What a stop does not change (§9 "Not true"). It goes on each Confirm, not only in docs. */
 export const NOT_CHANGED: readonly string[] = [
   "Their own logins, such as Slack, Google or a bank.",
