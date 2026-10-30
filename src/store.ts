@@ -5,7 +5,7 @@
 // tenants, roles-per-tenant or license; people are directory entries, never sign-ins (C84).
 import { handleChannel, normalizeHandle, ulid } from "@opt2-tealbrick/manifest";
 import type { Db, SliceAgent } from "@opt2-tealbrick/miniapp-sdk";
-import { beforePersonDelete, initPerson, kindChanged, statusRequested } from "./lifecycle/transitions.ts";
+import { beforePersonDelete, initPerson, kindChanged, setDates, statusRequested } from "./lifecycle/transitions.ts";
 import { bump, fail, revision } from "./meta.ts";
 import { cleanText } from "./text.ts";
 import { type ContactKind, defaultTrust, NEW_AGENT_TRUST, type Source, type Trust } from "./trust.ts";
@@ -331,6 +331,8 @@ export interface PersonInput {
   status?: PersonStatus;
   tags?: string[];
   handles?: string[];
+  /** A person's end date (C380 T2-d, a contractor). Saved in the same transaction as the person. A date that has passed is refused; null clears it. Not for an outside agent. */
+  validUntil?: string | null;
 }
 
 const OWNER = { kind: "owner", id: null } as const;
@@ -394,6 +396,13 @@ export function setPerson(db: Db, input: PersonInput, now = Date.now()): Person 
       );
       initPerson(db, id, input.kind ?? "person", name, now);
       if ((input.kind ?? "person") === "person" && input.status === "departed") statusRequested(db, id, "departed", OWNER, now);
+    }
+    if (input.validUntil !== undefined) {
+      // After the create or update above, in the same transaction: a refusal leaves no half-added contractor with no end date.
+      if (String(db.prepare("SELECT kind FROM fleet_people WHERE id = ?").get(id)?.kind) !== "person") fail("input_invalid", "Only a person has an end date.", 400);
+      const ends = input.validUntil === null ? Number.NaN : Date.parse(input.validUntil);
+      if (ends <= now) fail("date_in_past", "This end date has passed. Choose a later date.", 409);
+      setDates(db, { kind: "person", id, validUntil: input.validUntil, actor: OWNER }, now);
     }
     if (handles) {
       for (const h of handles) {

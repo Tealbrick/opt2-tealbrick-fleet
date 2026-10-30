@@ -1614,7 +1614,7 @@
     {
       "id": "person_set",
       "title": "Save person",
-      "description": "Create a directory entry for a person or an outside agent (no id) or update one (id). Handles replace the entry's channel handles. An outside agent you add starts unreviewed; a person you add starts trusted. Trust is never set here: record a review.",
+      "description": "Create a directory entry for a person or an outside agent (no id) or update one (id). Handles replace the entry's channel handles. An outside agent you add starts unreviewed; a person you add starts trusted. Trust is never set here: record a review. A person may also get an end date (validUntil, in the same save; a date that has passed is refused). When it passes, Governance marks the person as stopped.",
       "input": {
         "type": "object",
         "additionalProperties": false,
@@ -1686,6 +1686,17 @@
           "relationship": {
             "type": "string",
             "maxLength": 120
+          },
+          "validUntil": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 40
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
