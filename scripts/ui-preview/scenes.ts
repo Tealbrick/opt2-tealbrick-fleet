@@ -149,6 +149,83 @@ async function pick(page: Page, label: string, option: string) {
 const AGENT = `person-or-agent?kind=agent&id=${ID.a}`;
 const PERSON = `person-or-agent?kind=person&id=${ID.p}`;
 
+// ── Roles (C380 T2-a) ─────────────────────────────────────────────────────
+const ROLE_OPS = ["roles_list", "role_get", "role_set", "role_assign", "role_end", "overview_get", "reviews_list"];
+const roleRow = (over: Record<string, unknown> = {}) => ({ id: "rol_01J000000000000000000000R1", name: "Contractor", description: "Works for a limited time", archived: false, members: 2, scheduled: 1, createdAt: "2026-10-30T09:00:00Z", ...over });
+const holder = (over: Record<string, unknown> = {}) => ({
+  id: "ras_01J000000000000000000000A1",
+  role: { id: "rol_01J000000000000000000000R1", name: "Contractor" },
+  subject: { kind: "person", id: ID.p, name: "Marco Rossi" },
+  reason: "contract",
+  note: null,
+  validFrom: null,
+  validUntil: "2026-12-01T09:00:00Z",
+  state: "active",
+  endedAt: null,
+  endReason: null,
+  createdAt: "2026-10-30T09:00:00Z",
+  ...over,
+});
+const roleOps = {
+  ...shell,
+  overview_get: ok(overview),
+  roles_list: ok({ roles: [roleRow(), roleRow({ id: "rol_01J000000000000000000000R2", name: "Cover for a very long role name that must wrap on a phone", members: 0, scheduled: 0 }), roleRow({ id: "rol_01J000000000000000000000R3", name: "Old role", archived: true, members: 0, scheduled: 0 })], assignments: [] }),
+  role_get: ok({
+    role: roleRow(),
+    assignments: [holder(), holder({ id: "ras_01J000000000000000000000A2", subject: { kind: "agent", id: ID.a, name: "Henry" }, state: "scheduled", validFrom: "2026-11-05T09:00:00Z", validUntil: null }), holder({ id: "ras_01J000000000000000000000A3", subject: { kind: "person", id: "per_01J00000000000000000000P2", name: "Bob Bianchi" }, state: "ended", endedAt: "2026-10-31T09:00:00Z", endReason: "expired" })],
+  }),
+};
+const rolesScenes = (): Scene[] => [
+  { name: "roles", path: "roles", personOps: ROLE_OPS, strict: true, ops: roleOps, ready: "Contractor", expect: ["A role is a record of who has it", "2 holders", "Archived"], forbid: ["Roles Teams"] },
+  { name: "roles-empty", path: "roles", personOps: ROLE_OPS, strict: true, ops: { ...roleOps, roles_list: ok({ roles: [], assignments: [] }) }, ready: "No roles yet", expect: ["Nothing changes until a rule uses it"] },
+  { name: "roles-loading", path: "roles", personOps: ROLE_OPS, strict: true, ops: { ...roleOps, roles_list: hang }, ready: "Loading roles" },
+  { name: "roles-error", path: "roles", personOps: ROLE_OPS, strict: true, ops: { ...roleOps, roles_list: fail("internal") }, ready: "Try again" },
+  {
+    name: "roles-holders",
+    path: "roles",
+    personOps: ROLE_OPS,
+    strict: true,
+    ops: roleOps,
+    ready: "Contractor",
+    steps: (p) => button(p, "Who has it"),
+    expect: ["Active until 1 Dec 2026, 09:00 UTC", "Starts 5 Nov 2026, 09:00 UTC", "the end date passed"],
+  },
+  {
+    name: "roles-give",
+    path: "roles",
+    personOps: ROLE_OPS,
+    strict: true,
+    ops: roleOps,
+    ready: "Contractor",
+    steps: (p) => button(p, "Give"),
+    expect: ["Ending this does not remove a Portal grant.", "Who", "Why", "Ends"],
+  },
+  {
+    name: "roles-end",
+    path: "roles",
+    personOps: ROLE_OPS,
+    strict: true,
+    ops: roleOps,
+    ready: "Contractor",
+    steps: async (p) => {
+      await button(p, "Who has it");
+      await p.getByRole("button", { name: "End", exact: true }).first().click();
+    },
+    expect: ["Ending this does not remove a Portal grant.", "End now"],
+  },
+  {
+    name: "roles-archive",
+    path: "roles",
+    personOps: ROLE_OPS,
+    strict: true,
+    ops: roleOps,
+    ready: "Contractor",
+    steps: (p) => button(p, "Archive"),
+    expect: ["A rule that names an archived role matches no one."],
+  },
+  { name: "roles-not-in-nav", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: pageOps, ready: "Ready to stop an agent?", forbid: ["Roles"] },
+];
+
 export const scenes: Scene[] = [
   { name: "summary", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: pageOps, ready: "Ready to stop an agent?", expect: ["Could not be read", "Not installed", "Rules has this change", "cannot see that switch"] },
   { name: "summary-no-stop-open", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, summary_get: ok({ ...summary, agents: { ...summary.agents, stopping: 0 }, people: { ...summary.people, leaving: 0 } }) }, ready: "Ready to stop an agent?", forbid: ["Rules has this change"] },
@@ -313,6 +390,8 @@ export const scenes: Scene[] = [
     expect: i === 0 ? ["The mark takes effect now"] : i === 1 ? ["Henry", "Sales helper"] : i === 2 ? ["Not changed", "Their own logins", "The next screen says"] : i === 3 ? ["Not applied: do these in Portal"] : [],
     forbid: ["last day"],
   })),
+  // ── Roles (C380 T2-a): reachable by its address; in the navigation only after its rows passed ─────────────────
+  ...rolesScenes(),
   { name: "people-old", path: "people", ops: { ...shell, overview_get: ok(overview) }, ready: "Marco Rossi" },
   { name: "people-old-empty", path: "people", ops: { ...shell, overview_get: ok({ revision: 0, teams: [], people: [], agents: [] }) }, ready: "No people yet" },
   { name: "people-old-loading", path: "people", ops: { ...shell, overview_get: hang }, ready: "Loading the directory" },

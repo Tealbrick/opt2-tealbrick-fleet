@@ -13,6 +13,7 @@ import { DirectoryPage } from "./pages/directory.tsx";
 import { EveryonePage } from "./pages/everyone.tsx";
 import { FEATURES } from "./pages/features.ts";
 import { Identities } from "./pages/identities.tsx";
+import { RolesPage } from "./pages/roles.tsx";
 import { SubjectPage } from "./pages/subject.tsx";
 import { SUBJECT_PATH } from "./pages/subject-link.ts";
 import { SummaryPage } from "./pages/summary.tsx";
@@ -28,7 +29,7 @@ const STILLS = new URL("./stills/", import.meta.url).href;
 const OLD_ROUTES = { teams: "", topology: "topology", access: "access", reviews: "reviews", rules: "contact-rules", people: "people", agents: "agents", identities: "identities", holds: "holds" } as const;
 /** With the lifecycle ops (C380): Summary is the launch page; /people and /agents stay as routes and leave the nav for one release. */
 const NEW_ROUTES = { ...OLD_ROUTES, summary: "", everyone: "people-and-agents", subject: SUBJECT_PATH, teams: "teams" } as const;
-const ROUTES: Readonly<Record<string, string>> = FEATURES.lifecycle ? NEW_ROUTES : OLD_ROUTES;
+const ROUTES: Readonly<Record<string, string>> = { ...(FEATURES.lifecycle ? NEW_ROUTES : OLD_ROUTES), ...(FEATURES.roles ? { roles: "roles" } : {}) };
 const LAUNCH = FEATURES.lifecycle ? "summary" : "teams";
 const OLD_PAGES = [
   { id: "teams", label: "Teams" },
@@ -52,7 +53,10 @@ const NEW_PAGES = [
   { id: "identities", label: "Identities" },
   { id: "holds", label: "Waiting for approval" },
 ];
-const PAGES = FEATURES.lifecycle ? NEW_PAGES : OLD_PAGES;
+/** Roles (C380 T2-a) is in the navigation only after its QA rows passed; its route works as soon as its ops exist. */
+const ROLES_PAGE = { id: "roles", label: "Roles" };
+const withRoles = (pages: typeof OLD_PAGES) => (FEATURES.rolesInNav ? pages.flatMap((p) => (p.id === "teams" ? [p, ROLES_PAGE] : [p])) : pages);
+const PAGES = withRoles(FEATURES.lifecycle ? NEW_PAGES : OLD_PAGES);
 
 export function App() {
   const { principal, status, signOut } = useSession();
@@ -73,7 +77,7 @@ export function App() {
       art={appArt("fleet", STILLS)}
       portalHref={portal}
       pages={pages}
-      current={nav.page === "subject" ? "everyone" : nav.page}
+      current={nav.page === "subject" ? "everyone" : nav.page === "roles" && !FEATURES.rolesInNav ? LAUNCH : nav.page}
       onNavigate={nav.go}
       pageHref={nav.href}
       actions={
@@ -121,6 +125,8 @@ export function App() {
         <ReviewsPage onChanged={() => void badge.reload()} />
       ) : nav.page === "identities" ? (
         <Identities />
+      ) : nav.page === "roles" ? (
+        <RolesPage />
       ) : (
         <DirectoryPage page={nav.page as "teams" | "people" | "agents"} />
       )}

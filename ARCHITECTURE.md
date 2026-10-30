@@ -51,7 +51,7 @@ Governance (0.3.1; formerly Organization Plane) is the workspace directory and i
 - T7, `person_delete` and a change to outside agent end the open assignments of the subject (`endAssignmentsOf`).
 - **Feed:** `accept: ["roles"]` adds top-level `roles`: `[{id, name, members: [{kind: agent|contact, id}]}]`, archived roles left out, members the feed does not list left out. It is present (maybe empty) exactly when asked, so a reader can tell "no roles" from "a Governance that knows no roles". Caps: 200 roles, 4000 members each (503 `feed_too_large` beyond).
 - **Words:** with Governance down, a role allow lasts up to 10 minutes (Rules keeps its copy that long). Archiving a role makes a rule that names it match no one.
-- **UI:** the Roles page is built and reachable only when `FEATURES.roles` is true: the ops exist and the QA rows R1-R4 passed (`ROLES_ROWS_PASSED` in `src/ui/pages/features.ts`). Until then it is not in the navigation and has no route.
+- **UI:** the Roles page is built and reachable only when `FEATURES.roles` is true: the ops exist and the QA rows R1-R4 passed (`ROLES_ROWS_PASSED` in `src/ui/pages/features.ts`). Until then it is not in the navigation; its route `/roles` works whenever the ops exist, so QA opens it by its address.
 
 ## Inventory (C380 B9b, `src/access/`, spec 0.1.89 `tb.access/1`)
 
