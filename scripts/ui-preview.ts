@@ -143,11 +143,11 @@ function startServer(state: { current: Scene; theme: string; unknownOps: Set<str
   return new Promise((ok) => server.listen(0, "127.0.0.1", () => ok(server)));
 }
 
-/** Visible text of the page without <details> bodies (Details is where raw ids are allowed). */
+/** Visible text of the page without the Details block (`details.details`: the one place for raw ids). */
 const visibleText = (page: Page) =>
   page.evaluate(() => {
     const copy = document.body.cloneNode(true) as HTMLElement;
-    for (const d of copy.querySelectorAll("details, script, style")) d.remove();
+    for (const d of copy.querySelectorAll("details.details, script, style")) d.remove();
     // one space between text nodes, or two cells would join into one word and the \b of the checks would not fire
     const parts: string[] = [];
     const walker = document.createTreeWalker(copy, NodeFilter.SHOW_TEXT);

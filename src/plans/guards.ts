@@ -18,7 +18,7 @@ export const hasAppliedStop = (db: Db, kind: string, id: string): boolean =>
 
 /** T7: the last plan of this entry did not finish, and nobody said why. Close needs a new plan or a named reason. */
 export function lastPlanUnfinished(db: Db, kind: string, id: string): boolean {
-  const last = db.prepare("SELECT group_id FROM fleet_plans WHERE subject_kind = ? AND subject_id = ? AND state <> 'replaced' ORDER BY opened_at DESC, id DESC LIMIT 1").get(kind, id);
+  const last = db.prepare("SELECT group_id FROM fleet_plans WHERE subject_kind = ? AND subject_id = ? AND state <> 'replaced' AND purpose <> 'bar' ORDER BY opened_at DESC, id DESC LIMIT 1").get(kind, id);
   if (!last) return false;
   // Every part of a split plan: one part done says nothing about the others.
   return !!db.prepare("SELECT 1 FROM fleet_plans WHERE group_id = ? AND state IN ('expired', 'rejected', 'lost', 'failed', 'stale', 'withdrawn') LIMIT 1").get(String(last.group_id));
@@ -42,10 +42,64 @@ export const unnamedAccounts = (db: Db, personId: string, now: number): number =
 export function latestPlanStates(db: Db): Map<string, string> {
   const rows = db
     .prepare(
-      `SELECT subject_kind || ':' || subject_id AS k, state, opened_at FROM fleet_plans
+      `SELECT subject_kind || ':' || subject_id AS k, state, opened_at FROM fleet_plans WHERE purpose <> 'bar'
        UNION ALL SELECT 'agent:' || s.agent_id, p.state, p.opened_at FROM fleet_plan_steps s JOIN fleet_plans p ON p.id = s.plan_id WHERE s.phase = 'core'
        ORDER BY opened_at`,
     )
     .all();
   return new Map(rows.map((r) => [String(r.k), String(r.state)]));
+}
+
+const KEY_STEP = "s.phase = 'core' AND s.op IN ('agents.offboard', 'agents.rotate') AND s.state IN ('done', 'reported')";
+
+/** When Core last said each agent's key is gone. It counts only if that came after the agent's current stop: an agent brought back has a new key. One query for the whole list. */
+export function keyEndedAt(db: Db): Map<string, number> {
+  return new Map(db.prepare(`SELECT s.agent_id AS id, MAX(s.updated_at) AS at FROM fleet_plan_steps s WHERE ${KEY_STEP} GROUP BY s.agent_id`).all().map((r) => [String(r.id), Number(r.at)]));
+}
+
+/** The paused agents of this entry with no choice made: the words of the plan come from this, what is true now, not from what the plan held when it ran. */
+export function undecidedKeys(db: Db, kind: string, id: string): Set<string> {
+  const rows = db
+    .prepare(
+      `SELECT a.id FROM fleet_agents a LEFT JOIN fleet_people p ON p.id = a.owner_id
+       WHERE ${kind === "agent" ? "a.id" : "a.owner_id"} = ? AND a.status = 'paused' AND a.keep_running = 0 AND a.lifecycle IN ('active', 'proposed', 'suspended')
+         AND (a.lifecycle = 'suspended' OR p.lifecycle IN ('suspended', 'leaving', 'archived'))
+         AND NOT EXISTS (SELECT 1 FROM fleet_plan_steps s WHERE s.agent_id = a.id AND ${KEY_STEP} AND s.updated_at >= MAX(a.lifecycle_at, COALESCE(p.lifecycle_at, 0)))`,
+    )
+    .all(id);
+  return new Set(rows.map((r) => String(r.id)));
+}
+
+/**
+ * N2-6: this person is marked leaving, has handles, and Connect has not shown the bar since. Proof is a read of Connect in a plan made after the mark, with no sender step left open.
+ * A step the owner left unticked is his choice. Connect not installed: nothing can be barred, and nothing can reach an agent through it. `manual` is not proof: the messages still come. New handles are in Not changed.
+ */
+export function senderBarOpen(db: Db, personId: string): boolean {
+  const open = db
+    .prepare(
+      `SELECT 1 FROM fleet_people w WHERE w.id = ? AND w.lifecycle = 'leaving' AND EXISTS (SELECT 1 FROM fleet_handles h WHERE h.person_id = w.id)
+         AND NOT EXISTS (SELECT 1 FROM fleet_plans x JOIN fleet_plan_steps r ON r.plan_id = x.id
+           WHERE x.subject_kind = 'person' AND x.subject_id = w.id AND x.opened_at >= w.lifecycle_at AND r.phase = 'read' AND r.target = 'connect' AND r.state IN ('done', 'not_installed')
+             AND NOT EXISTS (SELECT 1 FROM fleet_plan_steps s WHERE s.plan_id = x.id AND s.item_kind = 'channel_sender' AND s.state NOT IN ('done', 'listed', 'not_installed', 'excepted')))`,
+    )
+    .get(personId);
+  return !!open;
+}
+
+/** The last owner change of each agent that had an owner before it. From the record: the `moved` event of `setAgentMoved`. */
+export function ownerChangedAt(db: Db): Map<string, number> {
+  const rows = db.prepare("SELECT subject_id AS id, MAX(at) AS at FROM fleet_lifecycle_events WHERE kind = 'moved' AND subject_kind = 'agent' AND note LIKE 'Owner changed from %' AND json_extract(snapshot_json, '$.before') IS NOT NULL GROUP BY subject_id").all();
+  return new Map(rows.map((r) => [String(r.id), Number(r.at)]));
+}
+
+/** Agents this entry's plans asked a new key for, and Core never replaced, still working cards. A closed or removed card has no key to replace, and must not block a new plan. */
+export function owedRotations(db: Db, kind: string, id: string): string[] {
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT s.agent_id AS id FROM fleet_plan_steps s JOIN fleet_plans p ON p.id = s.plan_id JOIN fleet_agents a ON a.id = s.agent_id
+       WHERE p.subject_kind = ? AND p.subject_id = ? AND s.op = 'agents.rotate' AND a.status <> 'removed' AND a.lifecycle <> 'archived'
+         AND NOT EXISTS (SELECT 1 FROM fleet_plan_steps d WHERE d.agent_id = s.agent_id AND d.op IN ('agents.rotate', 'agents.offboard') AND d.state IN ('done', 'reported'))`,
+    )
+    .all(kind, id);
+  return rows.map((r) => String(r.id));
 }

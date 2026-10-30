@@ -3,39 +3,69 @@
 import { type Db, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { loadSubject } from "../lifecycle/transitions.ts";
 import { askRail } from "./core-rail.ts";
-import { createPlan, getPlan, movePlan, OPEN_SQL, type Row, stepsOf } from "./plan.ts";
+import { createPlan, getPlan, movePlan, notePlan, OPEN_SQL, type Row, stepsOf } from "./plan.ts";
 import { cancelUnsent, isAppliedHere, type PlanCtx } from "./runner.ts";
-import { ASK_AGAIN_STATES, isOpenPlan, REISSUE_MS } from "./steps.ts";
+import { ASK_AGAIN_STATES, BAR_WAIT_MS, isOpenPlan, REISSUE_MS } from "./steps.ts";
+
+export interface CloseResult {
+  /** parts Portal really took back */
+  withdrawn: number;
+  /** parts that ended here with no call that took anything back: past Core, or the rail is gone */
+  ended: number;
+  /** parts that still stand in Portal */
+  left: number;
+  /** one of those: the owner approved it first */
+  applied: boolean;
+}
 
 /**
- * Takes open plans of a subject back, draft first (§2 T4, T6). `replaced`: a new plan takes over, and a plan past Core stays, so createPlan refuses.
- * `withdrawn`: the owner undid the stop; `cancelled`: the owner stopped the plan. Throws, changing nothing more, when Portal does not answer: an unknown draft could still be applied.
+ * Takes open plans of a subject back, draft first (§2 T4, T6). `replaced`: a new plan takes over. `withdrawn`: the owner undid the stop. `cancelled`: the owner stopped the plan.
+ * This cannot be one transaction: each part is a call to Portal. So it goes through every part, each ends with its true state, and the answer says how many are still there. The caller decides: a state change does not go on with a draft that can still be applied.
  */
-export async function closeOpenPlans(pc: PlanCtx, plans: readonly Row[], to: "replaced" | "withdrawn" | "cancelled"): Promise<void> {
+export async function closeOpenPlans(pc: PlanCtx, plans: readonly Row[], to: "replaced" | "withdrawn" | "cancelled"): Promise<CloseResult> {
   const rail = pc.rail;
-  // All parts or none, as far as this file can tell before it calls anyone.
+  const out: CloseResult = { withdrawn: 0, ended: 0, left: 0, applied: false };
+  // Nothing is touched when these say no.
   if (plans.some((p) => p.state === "applying" || p.draft_state === "applying")) throw new TbError("plan_applying", "Portal is applying this plan. Try again in a minute.", 409);
   if (to === "replaced" && plans.some(isAppliedHere)) throw new TbError("plan_open", "A plan for this entry is past Portal and still open. Cancel it or wait for it.", 409);
   for (const p of plans) {
     const id = String(p.id);
     if (isAppliedHere(p)) {
       if (movePlan(pc.db, id, String(p.state), "cancelled", { code: "cancelled_after_apply" }, pc.now())) cancelUnsent(pc.db, id, pc.now());
+      out.ended++;
       continue;
     }
     let code: string | null = null;
     // Whatever the mode says: a draft may stand in Portal since before the rail went away.
     if (rail && p.draft_key !== null) {
       const answer = await askRail(() => rail.withdraw(String(p.draft_key)));
-      if (answer.kind === "draft_state") throw new TbError("plan_applied", "You already approved this in Portal. It cannot be taken back here.", 409);
-      if (answer.kind === "wait" || answer.kind === "full") throw new TbError("portal_unavailable", "Portal does not answer, so this request could still be applied. Try again.", 503);
+      // Core answers draft_state with a reason for a draft that ran out: that one cannot be applied any more, so it is gone.
+      const approved = answer.kind === "draft_state" && answer.reason === null;
+      if (approved || answer.kind === "wait" || answer.kind === "full") {
+        out.left++;
+        if (approved) out.applied = true;
+        notePlan(pc.db, id, String(getPlan(pc.db, id)?.state), { close_note: approved ? "approved_first" : "not_reached" }, pc.now());
+        continue;
+      }
       // The rail is gone or refused: the plan ends, and its words say the draft may stand. A later apply shows as a difference, never silently.
-      if (answer.kind === "off" || answer.kind === "refused") code = "not_taken_back";
+      if (answer.kind !== "ok" && answer.kind !== "unknown_key" && answer.kind !== "draft_state") code = "not_taken_back";
     } else if (!rail && p.draft_key !== null) code = "not_taken_back";
     const now = pc.now();
     const cur = getPlan(pc.db, id) as Row;
     const did = stepsOf(pc.db, id).some((s) => s.phase === "core" && s.output_json !== null);
-    if (isOpenPlan(String(cur.state)) && movePlan(pc.db, id, String(cur.state), to, { code: code ?? (did ? "partly_applied" : null) }, now)) cancelUnsent(pc.db, id, now);
+    if (isOpenPlan(String(cur.state)) && movePlan(pc.db, id, String(cur.state), to, { code: code ?? (did ? "partly_applied" : null), close_note: null }, now)) cancelUnsent(pc.db, id, now);
+    if (code === null) out.withdrawn++;
+    else out.ended++;
   }
+  return out;
+}
+
+/** A state change does not go on while a draft can still be applied. The message says what already happened, so the owner reads the true state. */
+export function assertAllClosed(r: CloseResult): void {
+  if (r.left === 0) return;
+  const before = r.withdrawn > 0 ? ` ${r.withdrawn} of ${r.withdrawn + r.ended + r.left} open parts were taken back already. Nothing else changed.` : "";
+  if (r.applied) throw new TbError("plan_applied", `You already approved this in Portal. It cannot be taken back here.${before}`, 409);
+  throw new TbError("portal_unavailable", `Portal does not answer, so this request could still be applied. Try again.${before}`, 503);
 }
 
 const otherOpen = (db: Db, p: Row): boolean => !!db.prepare(`SELECT 1 FROM fleet_plans WHERE subject_kind = ? AND subject_id = ? AND group_id <> ? AND state IN (${OPEN_SQL}) LIMIT 1`).get(String(p.subject_kind), String(p.subject_id), String(p.group_id));
@@ -45,7 +75,7 @@ export function askAgain(db: Db, p: Row, now: number): void {
   db.transaction(() => {
     const id = String(p.id);
     const hasCore = stepsOf(db, id).some((s) => s.phase === "core");
-    if (!movePlan(db, id, String(p.state), "preparing", { draft_key: null, draft_id: null, draft_state: null, review_url: null, core_digest: null, expires_at: null, applying_since: null, applied_at: null, code: null, detail: null, rail: hasCore ? "draft" : "none", rail_code: null, next_at: 0, closed_at: null }, now)) return;
+    if (!movePlan(db, id, String(p.state), "preparing", { draft_key: null, draft_id: null, draft_state: null, review_url: null, core_digest: null, expires_at: null, applying_since: null, applied_at: null, code: null, close_note: null, detail: null, rail: hasCore ? "draft" : "none", rail_code: null, next_at: 0, closed_at: null }, now)) return;
     db.prepare("UPDATE fleet_plan_steps SET state = 'pending', code = NULL, detail = NULL, tries = 0, retry_at = 0, updated_at = ? WHERE plan_id = ? AND state = 'cancelled'").run(now, id);
     db.prepare("UPDATE fleet_plan_steps SET state = 'pending', code = NULL, detail = NULL, updated_at = ? WHERE plan_id = ? AND phase = 'core' AND state NOT IN ('done', 'reported')").run(now, id);
   });
@@ -78,8 +108,31 @@ export function retryPlan(db: Db, p: Row, now: number): void {
   });
 }
 
+/**
+ * N2-6: a person marked leaving is barred, whatever else happens. The owner's T5 is the approval (§5 phase A). The old People form makes no plan, a plan_send can fail, a tab can die:
+ * this makes the bar's own plan when no plan came. After a short wait, so the normal flow's plan_send goes first and one plan does it all.
+ */
+function owedBars(db: Db, now: number, warn: (m: string, f?: Record<string, string>) => void): void {
+  const rows = db
+    .prepare(
+      `SELECT p.id FROM fleet_people p WHERE p.lifecycle = 'leaving' AND COALESCE(p.lifecycle_reason, '') <> 'migrated' AND p.lifecycle_at <= ?
+         AND EXISTS (SELECT 1 FROM fleet_handles h WHERE h.person_id = p.id)
+         AND NOT EXISTS (SELECT 1 FROM fleet_plans x WHERE x.subject_kind = 'person' AND x.subject_id = p.id AND x.opened_at >= p.lifecycle_at AND x.state <> 'stale') LIMIT 20`,
+    )
+    .all(now - BAR_WAIT_MS);
+  for (const r of rows) {
+    try {
+      createPlan(db, { kind: "person", id: String(r.id), barOnly: true, actor: { kind: "system", id: null } }, now);
+    } catch (err) {
+      // An older plan still open: it ends by itself as stale, and the next run makes this one.
+      if (!(err instanceof TbError)) warn("sender bar plan failed", { reason: err instanceof Error ? err.message.slice(0, 200) : "error" });
+    }
+  }
+}
+
 /** One run of the job: plans the system owes, and expired system plans due again. Synchronous, nothing is called. */
 export function scanPlans(db: Db, now: number, warn: (m: string, f?: Record<string, string>) => void): void {
+  owedBars(db, now, warn);
   const owed = db
     .prepare(
       `SELECT e.id, e.subject_kind, e.subject_id, e.at FROM fleet_lifecycle_events e

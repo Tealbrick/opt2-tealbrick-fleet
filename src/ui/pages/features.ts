@@ -13,6 +13,8 @@ export type Features = {
   roles: boolean;
   /** The Roles page is in the navigation: its ops are on AND the QA rows R1 to R4 passed. */
   rolesInNav: boolean;
+  /** the live plan, Try again, the request in Portal */
+  plans: boolean;
 };
 
 /**
@@ -32,6 +34,7 @@ export function featuresOf(ops: readonly string[], rolesRowsPassed: boolean = RO
     differences: has("findings_list"),
     roles: has(...ROLE_OPS),
     rolesInNav: has(...ROLE_OPS) && rolesRowsPassed,
+    plans: has("plan_send", "plan_get", "plan_retry", "plan_cancel"),
   };
 }
 

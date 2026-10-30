@@ -26,15 +26,15 @@ test("one version everywhere: package.json = manifest = the newest CHANGELOG ent
   const pkg = JSON.parse(read("package.json")) as { version: string };
   const manifest = JSON.parse(read("tealbrick.manifest.json")) as { version: string };
   const top = /^## (\S+)/m.exec(read("CHANGELOG.md"))?.[1];
-  assert.equal(pkg.version, "0.4.0-dev.2");
+  assert.equal(pkg.version, "0.4.0-dev.6");
   assert.equal(manifest.version, pkg.version);
   assert.equal(top, pkg.version);
 });
 
-test("requires.bridge 0.2.13 (C380, until the rail needs 0.2.14); the bridge must validate needsTopology (0.2.12 or later); an older bridge refused 0.3.1 (schema_invalid)", () => {
+test("requires.bridge 0.2.14 (C380: the rail, cap owner_drafts); the bridge must validate needsTopology (0.2.12 or later); an older bridge refused 0.3.1 (schema_invalid)", () => {
   const manifest = JSON.parse(read("tealbrick.manifest.json")) as { requires?: { bridge?: string }; needsTopology?: boolean };
   assert.equal(manifest.needsTopology, true);
-  assert.equal(manifest.requires?.bridge, "0.2.13");
+  assert.equal(manifest.requires?.bridge, "0.2.14");
 });
 
 test("update path: every image admits 0.2.3 (stable) and 0.2.x; the range check fires on a range that does not", () => {

@@ -3,7 +3,7 @@
 export type LifecycleErrorInfo = { code: string | null; message: string };
 
 /** Codes of this op whose message the server wrote as a plain sentence. */
-const OWNER_CODES = new Set(["already_in_state", "archived_terminal", "trust_blocked", "owner_required", "owner_inactive", "date_passed", "date_in_past", "cooling_not_over", "plan_open", "agents_undecided", "agent_not_owned", "lifecycle_stale", "lifecycle_open", "use_bring_back", "no_lifecycle", "reason_required"]);
+const OWNER_CODES = new Set(["already_in_state", "archived_terminal", "trust_blocked", "owner_required", "owner_inactive", "date_passed", "date_in_past", "cooling_not_over", "plan_open", "agents_undecided", "agent_not_owned", "lifecycle_stale", "lifecycle_open", "use_bring_back", "no_lifecycle", "reason_required", "decisions_need_stop", "agent_stopped_itself", "agent_closed", "plan_open", "subject_closed", "nothing_to_stop", "input_invalid", "plan_applied", "plan_applying", "portal_unavailable"]);
 const MOVE_REFUSED = "This change is not possible in the state this entry has now. Reload the page.";
 
 type Err = { code?: unknown; message?: unknown; details?: { count?: unknown } };
@@ -20,7 +20,9 @@ export function lifecycleError(e: unknown, fallback: (e: unknown) => string): Li
   const code = typeof err.code === "string" ? err.code : null;
   if (code === "stop_cap_reached") {
     const count = typeof err.details?.count === "number" ? err.details.count : null;
-    return { code, message: count === null ? "You stopped many entries in the last 10 minutes. Check that this is you." : `You stopped ${count - 1} entries in the last 10 minutes. Check that this is you, then stop this one too.` };
+    if (count !== null) return { code, message: `This makes ${count} people and agents stopped in the last 10 minutes. Check that this is you, then confirm.` };
+    // the old People form has no confirm to send: the server's sentence names the page that can
+    return { code, message: typeof err.message === "string" && err.message.trim() ? err.message.trim() : fallback(e) };
   }
   if (code === "transition_not_allowed") return { code, message: MOVE_REFUSED };
   if (code && OWNER_CODES.has(code) && typeof err.message === "string" && err.message.trim()) return { code, message: err.message.trim() };

@@ -2,11 +2,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { validateAgainstSchema } from "@opt2-tealbrick/manifest";
-import type { Json, OpContext, TbError } from "@opt2-tealbrick/miniapp-sdk";
+import { type Json, type OpContext, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { handlers, manifest } from "../src/app.ts";
 import { DAY_MS } from "../src/lifecycle/transitions.ts";
 import { scanPlans } from "../src/plans/control.ts";
 import { getPlan } from "../src/plans/plan.ts";
+import * as store from "../src/store.ts";
 import { OWNER, refused, SYSTEM, set, stateOf, WAIVE } from "./lifecycle-helpers.ts";
 import { agentItem, approveAndDeliver, HENRY, leave, makeWorld, SALES, type World } from "./plans-world.ts";
 
@@ -113,6 +114,185 @@ test("T6 with Portal down: refused, because the draft could still be applied", a
   await assert.rejects(run("lifecycle_set", { kind: "agent", id: HENRY, to: "active", reason: "mistake" }, ctxOf(w)), refused("portal_unavailable", 503));
   assert.equal(stateOf(w.db, "agent", HENRY), "leaving");
   assert.equal(w.plan(id).state, "waiting");
+});
+
+test("T4 with a new end date in the same call: its own date lets it pass; the try-first does not refuse it, and the draft goes", async () => {
+  const w = makeWorld();
+  set(w.db, "agent", HENRY, "suspended", {}, w.clock.t);
+  w.db.prepare("UPDATE fleet_agents SET valid_until = ? WHERE id = ?").run(Date.now() - 1000, HENRY);
+  const id = w.makePlan({ kind: "agent", id: HENRY });
+  await w.tick(id);
+  await assert.rejects(run("lifecycle_set", { kind: "agent", id: HENRY, to: "active", reason: "returned" }, ctxOf(w)), refused("date_passed", 409));
+  assert.equal(w.plan(id).state, "waiting", "refused: nothing taken back");
+  assert.equal(w.core.open().length, 1);
+  const until = new Date(Date.now() + 86_400_000).toISOString();
+  await run("lifecycle_set", { kind: "agent", id: HENRY, to: "active", reason: "returned", validUntil: until }, ctxOf(w));
+  assert.equal(stateOf(w.db, "agent", HENRY), "active");
+  assert.equal(w.plan(id).state, "withdrawn");
+  assert.equal(w.core.open().length, 0);
+});
+
+test("a lifecycle_set whose own check would fail after the withdraw: tried first, nothing is taken back; a bad date, a bad decision", async () => {
+  const w = makeWorld();
+  leave(w);
+  const id = w.makePlan({ kind: "agent", id: HENRY });
+  await w.tick(id);
+  const rev = store.revision(w.db);
+  await assert.rejects(run("lifecycle_set", { kind: "agent", id: HENRY, to: "active", reason: "mistake", validUntil: "not a date" }, ctxOf(w)), refused("input_invalid", 400));
+  assert.equal(w.plan(id).state, "waiting");
+  assert.equal(w.core.open().length, 1);
+  assert.equal(store.revision(w.db), rev, "the try wrote nothing");
+  assert.equal(stateOf(w.db, "agent", HENRY), "leaving");
+});
+
+test("the entry moves during the call to Portal, so the change fails after the withdraw: the owner reads that the request is gone and the entry did not change", async () => {
+  const w = makeWorld();
+  leave(w);
+  const id = w.makePlan({ kind: "agent", id: HENRY });
+  await w.tick(id);
+  const real = w.core.withdraw.bind(w.core);
+  w.core.withdraw = async (k) => {
+    const a = await real(k);
+    w.db.prepare("UPDATE fleet_agents SET owner_id = NULL WHERE id = ?").run(HENRY); // someone took the owner away meanwhile
+    return a;
+  };
+  await assert.rejects(run("lifecycle_set", { kind: "agent", id: HENRY, to: "active", reason: "mistake" }, ctxOf(w)), (e: TbError) => {
+    assert.equal(e.code, "owner_required");
+    assert.match(e.message, /taken back already, and this entry did not change/);
+    return true;
+  });
+  assert.equal(stateOf(w.db, "agent", HENRY), "leaving");
+  const view = (await run("plan_get", { plan: id }, ctxOf(w))).plans[0];
+  assert.equal(view.state, "withdrawn");
+  assert.match(view.note, /still marked as stopped/);
+});
+
+async function splitWorld() {
+  const w = makeWorld();
+  const { agentId } = await import("./plans-world.ts");
+  const ids = Array.from({ length: 101 }, (_, i) => agentId(i + 10));
+  store.syncAgents(w.db, [...w.db.prepare("SELECT id, name, mode, status FROM fleet_agents").all(), ...ids.map((id) => ({ id, name: id, mode: "free", status: "active" }))] as never, w.clock.t);
+  for (const id of ids) {
+    store.setAgent(w.db, { agent: id, owner: w.ann.id }, w.clock.t);
+    w.core.addAgent(id, 0, 0);
+  }
+  set(w.db, "person", w.ann.id, "leaving", { noCap: true }, w.clock.t);
+  const first = w.makePlan({ kind: "person", id: w.ann.id });
+  const parts = w.db.prepare("SELECT id FROM fleet_plans WHERE group_id = ? ORDER BY part").all(first).map((r) => String(r.id));
+  for (const id of parts) await w.tick(id);
+  return { w, parts, first };
+}
+
+test("split, plan_cancel with Portal down for the second part: part 1 is cancelled, part 2 stays open; each part says its true state; a second cancel finishes it", async () => {
+  const { w, parts, first } = await splitWorld();
+  const real = w.core.withdraw.bind(w.core);
+  let calls = 0;
+  w.core.withdraw = async (k) => {
+    calls++;
+    if (calls === 2) throw new TbError("portal_unavailable", "down", 503);
+    return real(k);
+  };
+  const out = await run("plan_cancel", { plan: first }, ctxOf(w));
+  validOut("plan_cancel", out);
+  const [a, b] = out.plans;
+  assert.equal(a.state, "cancelled");
+  assert.match(a.note, /do not all have the same state/);
+  assert.match(a.note, /still marked as stopped/);
+  assert.equal(out.left, 1);
+  assert.equal(b.state, "waiting");
+  assert.equal(b.canCancel, true);
+  assert.match(b.note, /could still be applied/);
+  assert.equal(w.core.open().length, 1, "one part still stands, and the page says so");
+  // the next tick reads the draft; what the owner needs to know stays
+  await w.tick(parts[1] as string);
+  assert.match((await run("plan_get", { plan: parts[1] }, ctxOf(w))).plans[1].note, /could still be applied/);
+  w.core.withdraw = real;
+  const again = await run("plan_cancel", { plan: first }, ctxOf(w));
+  assert.deepEqual(again.plans.map((p: { state: string }) => p.state), ["cancelled", "cancelled"]);
+  assert.equal(w.core.open().length, 0);
+  assert.equal(parts.length, 2);
+});
+
+test("plan_cancel with Portal down for the only part: an error, nothing moved; the note stays after a tick", async () => {
+  const w = makeWorld();
+  leave(w);
+  const id = w.makePlan({ kind: "agent", id: HENRY });
+  await w.tick(id);
+  const real = w.core.withdraw.bind(w.core);
+  w.core.withdraw = async () => {
+    throw new TbError("portal_unavailable", "down", 503);
+  };
+  await assert.rejects(run("plan_cancel", { plan: id }, ctxOf(w)), refused("portal_unavailable", 503));
+  assert.equal(w.plan(id).state, "waiting");
+  await w.tick(id);
+  assert.match((await run("plan_get", { plan: id }, ctxOf(w))).plans[0].note, /could still be applied/);
+  w.core.withdraw = real;
+  const out = await run("plan_cancel", { plan: id }, ctxOf(w));
+  assert.equal(out.left, 0);
+  assert.equal(out.plans[0].state, "cancelled");
+  assert.doesNotMatch(String(out.plans[0].note), /could still be applied/);
+});
+
+test("the rail is gone and T6 goes on: the error text never says Portal took back what it did not", async () => {
+  const w = makeWorld();
+  leave(w);
+  const id = w.makePlan({ kind: "agent", id: HENRY });
+  await w.tick(id);
+  w.core.flag = false;
+  const real = w.core.withdraw.bind(w.core);
+  w.core.withdraw = async (k) => {
+    w.db.prepare("UPDATE fleet_agents SET owner_id = NULL WHERE id = ?").run(HENRY);
+    return real(k);
+  };
+  await assert.rejects(run("lifecycle_set", { kind: "agent", id: HENRY, to: "active", reason: "mistake" }, ctxOf(w)), (e: TbError) => {
+    assert.equal(e.code, "owner_required");
+    assert.doesNotMatch(e.message, /taken back already/);
+    return true;
+  });
+  assert.equal(w.plan(id).code, "not_taken_back");
+});
+
+test("split, T6 with Portal down for one part: the state does not move; the error counts what went; the page says the same", async () => {
+  const { w, first, parts } = await splitWorld();
+  const real = w.core.withdraw.bind(w.core);
+  let calls = 0;
+  w.core.withdraw = async (k) => {
+    calls++;
+    if (calls === 2) throw new TbError("portal_unavailable", "down", 503);
+    return real(k);
+  };
+  await assert.rejects(run("lifecycle_set", { kind: "person", id: w.ann.id, to: "active", reason: "mistake" }, ctxOf(w)), (e: TbError) => {
+    assert.equal(e.code, "portal_unavailable");
+    assert.match(e.message, /1 of 2 open parts were taken back already. Nothing else changed/);
+    return true;
+  });
+  assert.equal(stateOf(w.db, "person", w.ann.id), "leaving");
+  assert.equal(w.plan(first).state, "withdrawn");
+  assert.equal(w.plan(parts[1] as string).state, "waiting");
+  // the owner tries again: the rest goes, and the state moves
+  w.core.withdraw = real;
+  await run("lifecycle_set", { kind: "person", id: w.ann.id, to: "active", reason: "mistake" }, ctxOf(w));
+  assert.equal(stateOf(w.db, "person", w.ann.id), "active");
+  assert.equal(w.core.open().length, 0);
+});
+
+test("split, plan_retry: all parts or none. A part whose Core step failed refuses the whole Try again, and no part moved", async () => {
+  const { w, first, parts } = await splitWorld();
+  w.core.failAgent = null;
+  const p2 = parts[1] as string;
+  w.connect.add(agentItem({ id: "account_as_itself:a", kind: "account_as_itself", agent: String(w.steps(first).find((s) => s.phase === "core")?.agent_id) }));
+  for (const id of parts) await w.tick(id);
+  // part 1 refused by Rules on a store step; part 2's Core step failed
+  approveAndDeliver(w, String(w.plan(first).draft_key), String(w.steps(first).find((s) => s.phase === "core")?.agent_id));
+  w.connect.revokeScript.push({ kind: "deny" });
+  await w.tick(first);
+  w.core.failStep = "agents.pause";
+  w.core.apply(String(w.plan(p2).draft_key));
+  await w.tick(p2);
+  assert.equal(w.plan(p2).state, "partial");
+  const before = String(w.item(first, "account_as_itself:a").state);
+  await assert.rejects(run("plan_retry", { plan: first }, ctxOf(w)), refused("apply_in_portal", 409));
+  assert.equal(w.item(first, "account_as_itself:a").state, before, "part 1 did not move");
 });
 
 test("a T6 refused by its own guard takes nothing back", async () => {
@@ -616,4 +796,554 @@ test("T7 reads each part of a split plan: part 1 done and part 2 rejected is not
   const { lastPlanUnfinished } = await import("../src/plans/guards.ts");
   w.db.prepare("INSERT INTO fleet_plans (id, group_id, part, parts, subject_kind, subject_id, subject_name, purpose, trigger_kind, lifecycle_rev, state, plan_digest, expires_in_sec, opened_at, updated_at) VALUES ('pln_a', 'pln_a', 1, 2, 'person', ?, 'Ann', 'leave', 'owner', 1, 'done', 'd', 60, 5, 5), ('pln_b', 'pln_a', 2, 2, 'person', ?, 'Ann', 'leave', 'owner', 1, 'rejected', 'd', 60, 5, 5)").run(w.ann.id, w.ann.id);
   assert.equal(lastPlanUnfinished(w.db, "person", w.ann.id), true);
+});
+
+test("D2, no choice: one approval stops access, only a pause; the plan, the row, the finding and the summary say the key still exists; a second plan with a choice finishes it", async () => {
+  const { loadColleagues, summaryGet } = await import("../src/lifecycle/view.ts");
+  const w = makeWorld();
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  const out = await run("plan_send", { kind: "person", id: w.ann.id }, ctxOf(w));
+  const id = out.plans[0].id;
+  await w.tick(id);
+  assert.deepEqual(w.core.open()[0]?.steps.map((s) => s.opId), ["agents.pause", "agents.pause"]);
+  approveAndDeliver(w, String(w.plan(id).draft_key), HENRY, SALES);
+  await w.tick(id);
+  store.syncAgents(w.db, [{ id: HENRY, name: "Henry", mode: "free", status: "paused" }, { id: SALES, name: "Sales", mode: "bound", status: "paused" }] as never, w.clock.t);
+  assert.equal(w.core.data.agents[HENRY]?.keys, 1, "the key is still there");
+  const view = (await run("plan_get", { plan: id }, ctxOf(w))).plans[0];
+  assert.equal(view.state, "done");
+  assert.equal(view.steps[0].text, "Paused. The key still exists until you choose.");
+  assert.match(view.note, /2 agents stay paused with the key/);
+  const row = () => loadColleagues(w.db, Date.now()).byId.get(`agent:${HENRY}`);
+  assert.equal(row()?.line, "Paused. The key still exists until you choose.");
+  assert.ok(row()?.findings.some((f) => f.code === "key_not_decided"));
+  const sum = await summaryGet(ctxOf(w));
+  assert.deepEqual(sum.keysUndecided?.map((k) => [k.name, k.text]), [["Henry", "Paused. The key still exists until you choose."], ["Sales", "Paused. The key still exists until you choose."]]);
+  // the second approval: only what is new. Sales was paused already, and no pause goes again
+  const again = await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: HENRY, decision: "stop" }] }, ctxOf(w));
+  const id2 = again.plans[0].id;
+  await w.tick(id2);
+  assert.deepEqual(w.core.open()[0]?.steps, [{ opId: "agents.offboard", agt: HENRY }]);
+  approveAndDeliver(w, String(w.plan(id2).draft_key), HENRY);
+  await w.tick(id2);
+  assert.equal(w.core.data.agents[HENRY]?.keys, 0);
+  assert.ok(!row()?.findings.some((f) => f.code === "key_not_decided"), "decided: the finding ends");
+  assert.ok(loadColleagues(w.db, Date.now()).byId.get(`agent:${SALES}`)?.findings.some((f) => f.code === "key_not_decided"), "Sales is still undecided");
+});
+
+test("D2, choices at the first step: stop, transfer and keep all land in one draft; one approval ends the keys; no finding is left", async () => {
+  const { loadColleagues } = await import("../src/lifecycle/view.ts");
+  const { agentId } = await import("./plans-world.ts");
+  const w = makeWorld();
+  const kept = agentId(40);
+  store.syncAgents(w.db, [...w.db.prepare("SELECT id, name, mode, status FROM fleet_agents").all(), { id: kept, name: "Kept", mode: "free", status: "active" }] as never, w.clock.t);
+  store.setAgent(w.db, { agent: kept, owner: w.ann.id }, w.clock.t);
+  w.core.addAgent(kept, 1, 1);
+  const bob = store.setPerson(w.db, { name: "Bob" }, w.clock.t);
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  const out = await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: HENRY, decision: "stop" }, { agent: SALES, decision: "transfer", newOwner: bob.id }, { agent: kept, decision: "keep", reason: "Runs the night shift" }] }, ctxOf(w));
+  validOut("plan_send", out);
+  const id = out.plans[0].id;
+  assert.equal(stateOf(w.db, "agent", HENRY), "leaving");
+  assert.equal(w.db.prepare("SELECT owner_id FROM fleet_agents WHERE id = ?").get(SALES)?.owner_id, bob.id);
+  await w.tick(id);
+  assert.deepEqual(w.core.open()[0]?.steps, [{ opId: "agents.offboard", agt: HENRY }, { opId: "agents.pause", agt: SALES }, { opId: "agents.rotate", agt: SALES }]);
+  assert.equal(w.core.data.drafts.length, 1, "one approval");
+  approveAndDeliver(w, String(w.plan(id).draft_key), HENRY, SALES);
+  await w.tick(id);
+  assert.equal(w.plan(id).state, "done");
+  assert.equal(w.core.data.agents[HENRY]?.keys, 0);
+  assert.equal(w.core.data.agents[SALES]?.keys, 0);
+  assert.equal(w.core.data.agents[kept]?.keys, 1, "keep running keeps its key, and the page says the person who left may hold it");
+  const rows = loadColleagues(w.db, w.clock.t).byId;
+  for (const a of [HENRY, SALES, kept]) assert.ok(!rows.get(`agent:${a}`)?.findings.some((f) => f.code === "key_not_decided"), a);
+  const view = (await run("plan_get", { plan: id }, ctxOf(w))).plans[0];
+  assert.doesNotMatch(String(view.note), /stay paused with the key/);
+  assert.equal(view.steps.find((s: { label: string }) => s.label === "Pause Sales").text, "Stopped at the bridge.");
+});
+
+test("D2, guards: fire on a choice on an entry not stopped, an agent not owned, twice for one agent, a keep with no reason, a transfer with no owner or to a stopped owner, a keep on an agent's own stop; each refuses whole and takes no older draft back", async () => {
+  const w = makeWorld();
+  const c = ctxOf(w);
+  await assert.rejects(run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: HENRY, decision: "stop" }] }, c), refused("decisions_need_stop", 409));
+  assert.equal(stateOf(w.db, "agent", HENRY), "active", "plan_send never starts a stop");
+  const bob = store.setPerson(w.db, { name: "Bob" }, w.clock.t);
+  const gone = store.setPerson(w.db, { name: "Gone" }, w.clock.t);
+  set(w.db, "person", gone.id, "leaving", {}, w.clock.t);
+  store.setAgent(w.db, { agent: SALES, owner: bob.id }, w.clock.t);
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  const id = (await run("plan_send", { kind: "person", id: w.ann.id }, c)).plans[0].id;
+  await w.tick(id);
+  const before = w.core.open().length;
+  const cases: [unknown[], string, number][] = [
+    [[{ agent: SALES, decision: "stop" }], "agent_not_owned", 409],
+    [[{ agent: HENRY, decision: "stop" }, { agent: HENRY, decision: "keep", reason: "x" }], "input_invalid", 400],
+    [[{ agent: HENRY, decision: "keep" }], "reason_required", 400],
+    [[{ agent: HENRY, decision: "transfer" }], "input_invalid", 400],
+    [[{ agent: HENRY, decision: "transfer", newOwner: gone.id }], "owner_inactive", 409],
+  ];
+  for (const [decisions, code, status] of cases) {
+    await assert.rejects(run("plan_send", { kind: "person", id: w.ann.id, decisions }, c), refused(code, status), code);
+    assert.equal(w.plan(id).state, "waiting", `${code}: no older draft taken back`);
+    assert.equal(w.core.open().length, before);
+    assert.equal(stateOf(w.db, "agent", HENRY), "active", `${code}: the choice rolled back`);
+  }
+  // an agent's own stop is undone by its own step, not lifted by a keep
+  set(w.db, "agent", HENRY, "suspended", {}, w.clock.t);
+  await assert.rejects(run("plan_send", { kind: "agent", id: HENRY, decisions: [{ agent: HENRY, decision: "keep", reason: "x" }] }, c), refused("agent_stopped_itself", 409));
+});
+
+test("D2, an agent alone: Stop now with a stop choice is one offboard in one approval; with none it is one pause; a stale revision reads before the choice moves it", async () => {
+  const w = makeWorld();
+  set(w.db, "agent", HENRY, "suspended", {}, w.clock.t);
+  const rev = Number(w.db.prepare("SELECT lifecycle_rev AS r FROM fleet_agents WHERE id = ?").get(HENRY)?.r);
+  await assert.rejects(run("plan_send", { kind: "agent", id: HENRY, expectedRev: rev - 1, decisions: [{ agent: HENRY, decision: "stop" }] }, ctxOf(w)), refused("lifecycle_stale", 409));
+  assert.equal(stateOf(w.db, "agent", HENRY), "suspended");
+  const out = await run("plan_send", { kind: "agent", id: HENRY, expectedRev: rev, decisions: [{ agent: HENRY, decision: "stop" }] }, ctxOf(w));
+  const id = out.plans[0].id;
+  assert.equal(w.plan(id).purpose, "leave");
+  assert.notEqual(w.plan(id).lifecycle_rev, rev, "the plan holds the revision after its own choice, so it is not stale at once");
+  await w.tick(id);
+  assert.notEqual(w.plan(id).state, "stale");
+  assert.deepEqual(w.core.open()[0]?.steps, [{ opId: "agents.offboard", agt: HENRY }]);
+});
+
+test("D2 review: after the second plan the first plan no longer says the key exists; an agent brought back with a new key gets the finding again", async () => {
+  const { loadColleagues } = await import("../src/lifecycle/view.ts");
+  const w = makeWorld();
+  store.setAgent(w.db, { agent: SALES, owner: null }, w.clock.t);
+  set(w.db, "person", w.ann.id, "suspended", {}, w.clock.t);
+  const first = (await run("plan_send", { kind: "person", id: w.ann.id }, ctxOf(w))).plans[0].id;
+  await w.tick(first);
+  approveAndDeliver(w, String(w.plan(first).draft_key), HENRY);
+  await w.tick(first);
+  const synced = (status: string) => store.syncAgents(w.db, [{ id: HENRY, name: "Henry", mode: "free", status }, { id: SALES, name: "Sales", mode: "bound", status: "active" }] as never, w.clock.t);
+  synced("paused");
+  const step = async (id: string) => (await run("plan_get", { plan: id }, ctxOf(w))).plans[0];
+  assert.equal((await step(first)).steps[0].text, "Paused. The key still exists until you choose.");
+  w.clock.t += 1000;
+  const second = (await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: HENRY, decision: "stop" }] }, ctxOf(w))).plans[0].id;
+  await w.tick(second);
+  approveAndDeliver(w, String(w.plan(second).draft_key), HENRY);
+  await w.tick(second);
+  const old = await step(first);
+  assert.equal(old.steps[0].text, "Stopped at the bridge.");
+  assert.doesNotMatch(String(old.note), /stay paused with the key/);
+  // brought back later with a new key, then its owner is stopped again
+  w.clock.t += 1000;
+  w.db.prepare("UPDATE fleet_agents SET lifecycle = 'active', lifecycle_at = ? WHERE id = ?").run(w.clock.t, HENRY);
+  w.db.prepare("UPDATE fleet_people SET lifecycle = 'active', lifecycle_at = ? WHERE id = ?").run(w.clock.t, w.ann.id);
+  w.clock.t += 1000;
+  set(w.db, "person", w.ann.id, "suspended", {}, w.clock.t);
+  const row = loadColleagues(w.db, w.clock.t).byId.get(`agent:${HENRY}`);
+  assert.ok(row?.findings.some((f) => f.code === "key_not_decided"), "the old offboard does not speak for the new key");
+  assert.equal(row?.line, "Paused. The key still exists until you choose.");
+});
+
+test("D2 review: a transfer to the current owner is refused; a plan with no Core step still says the keys of paused agents; stop choices pass the cap", async () => {
+  const w = makeWorld();
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  await assert.rejects(run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: HENRY, decision: "transfer", newOwner: w.ann.id }] }, ctxOf(w)), refused("input_invalid", 400));
+  store.syncAgents(w.db, [{ id: HENRY, name: "Henry", mode: "free", status: "paused" }, { id: SALES, name: "Sales", mode: "bound", status: "paused" }] as never, w.clock.t);
+  const out = await run("plan_send", { kind: "person", id: w.ann.id }, ctxOf(w));
+  assert.equal(out.plans[0].mode, "none");
+  await w.tick(out.plans[0].id);
+  const view = (await run("plan_get", { plan: out.plans[0].id }, ctxOf(w))).plans[0];
+  assert.match(view.note, /2 agents stay paused with the key/);
+  assert.doesNotMatch(view.headline, /^Done/);
+
+  // only an entry new in this window needs the confirm: the owner stopped an hour ago, two others just now, the cap is 2
+  const v = makeWorld();
+  set(v.db, "person", v.ann.id, "suspended", {}, Date.now() - 3_600_000);
+  for (const name of ["P1", "P2"]) set(v.db, "person", store.setPerson(v.db, { name }, v.clock.t).id, "suspended", {}, Date.now());
+  v.db.prepare("INSERT INTO fleet_settings (key, value) VALUES ('stop_cap', '2') ON CONFLICT (key) DO UPDATE SET value = '2'").run();
+  await assert.rejects(run("plan_send", { kind: "person", id: v.ann.id, decisions: [{ agent: HENRY, decision: "stop" }] }, ctxOf(v)), refused("stop_cap_reached", 409));
+  assert.equal(stateOf(v.db, "agent", HENRY), "active");
+  const ok = await run("plan_send", { kind: "person", id: v.ann.id, decisions: [{ agent: HENRY, decision: "stop" }], confirmCount: 3 }, ctxOf(v));
+  assert.equal(ok.plans.length, 1);
+  assert.equal(stateOf(v.db, "agent", HENRY), "leaving");
+});
+
+test("D2 review: plan_send when the entry moves during the call to Portal: the owner reads that the old request is gone and no new one was made", async () => {
+  const w = makeWorld();
+  leave(w);
+  const id = w.makePlan({ kind: "agent", id: HENRY });
+  await w.tick(id);
+  const real = w.core.withdraw.bind(w.core);
+  w.core.withdraw = async (k) => {
+    const a = await real(k);
+    w.db.prepare("UPDATE fleet_agents SET lifecycle_rev = lifecycle_rev + 1 WHERE id = ?").run(HENRY);
+    return a;
+  };
+  const rev = Number(w.db.prepare("SELECT lifecycle_rev AS r FROM fleet_agents WHERE id = ?").get(HENRY)?.r);
+  await assert.rejects(run("plan_send", { kind: "agent", id: HENRY, expectedRev: rev }, ctxOf(w)), (e: TbError) => {
+    assert.equal(e.code, "lifecycle_stale");
+    assert.match(e.message, /taken back already, and no new one was made/);
+    return true;
+  });
+  assert.equal(w.plan(id).state, "replaced");
+});
+
+test("N2-3: the cap counts a person's agents with the person; a blocked verdict counts and needs the same confirm; the banner counts them; each entry once", async () => {
+  const { stopsSince } = await import("../src/lifecycle/events.ts");
+  const { recordReview } = await import("../src/reviews.ts");
+  const w = makeWorld();
+  const { agentId } = await import("./plans-world.ts");
+  const many = Array.from({ length: 6 }, (_, i) => agentId(i + 50));
+  store.syncAgents(w.db, [...w.db.prepare("SELECT id, name, mode, status FROM fleet_agents").all(), ...many.map((id) => ({ id, name: id, mode: "free", status: "active" }))] as never, w.clock.t);
+  for (const id of many) store.setAgent(w.db, { agent: id, owner: w.ann.id }, w.clock.t);
+  // Ann, Henry, Sales and six more: 9 entries, cap 5. Counted once before: one stop with six agents went through with no word
+  assert.throws(() => set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t), (e: TbError) => e.code === "stop_cap_reached" && e.details?.count === 9);
+  assert.equal(stateOf(w.db, "person", w.ann.id), "active");
+  set(w.db, "person", w.ann.id, "leaving", { confirmCount: 9 }, w.clock.t);
+  assert.equal(stopsSince(w.db, w.clock.t - 1000), 9);
+  // the agents' own stop in the same window adds nothing: each entry once
+  set(w.db, "agent", HENRY, "leaving", {}, w.clock.t);
+  assert.equal(stopsSince(w.db, w.clock.t - 1000), 9);
+  // keep-running is not stopped by the cascade
+  const v = makeWorld();
+  v.db.prepare("UPDATE fleet_agents SET keep_running = 1, keep_reason = 'x' WHERE id = ?").run(SALES);
+  set(v.db, "person", v.ann.id, "leaving", {}, v.clock.t);
+  assert.equal(stopsSince(v.db, v.clock.t - 1000), 2);
+  // a blocked verdict is a stop in the floor
+  const b = makeWorld();
+  const people = Array.from({ length: 5 }, (_, i) => store.setPerson(b.db, { name: `P${i}` }, b.clock.t));
+  for (const p of people) set(b.db, "person", p.id, "suspended", {}, b.clock.t);
+  const digestOf = async (c: OpContext, id: string): Promise<string> => (await run("review_get", { subject: { kind: "agent", id } }, c)).current.digest;
+  const input = { subject: { kind: "agent" as const, id: HENRY }, verdict: "blocked" as const, reason: "Security", snapshotDigest: await digestOf(ctxOf(b), HENRY) };
+  assert.throws(() => recordReview(b.db, "per_owner", input, b.clock.t), (e: TbError) => e.code === "stop_cap_reached" && e.details?.count === 6);
+  assert.notEqual(b.db.prepare("SELECT trust FROM fleet_agents WHERE id = ?").get(HENRY)?.trust, "blocked");
+  recordReview(b.db, "per_owner", { ...input, confirmCount: 6 }, b.clock.t);
+  assert.equal(b.db.prepare("SELECT trust FROM fleet_agents WHERE id = ?").get(HENRY)?.trust, "blocked");
+  assert.equal(stopsSince(b.db, b.clock.t - 1000), 6);
+  // a trusted verdict is no stop
+  const c = makeWorld();
+  recordReview(c.db, "per_owner", { subject: { kind: "agent", id: SALES }, verdict: "trusted", reason: "ok", snapshotDigest: await digestOf(ctxOf(c), SALES) }, c.clock.t);
+  assert.equal(stopsSince(c.db, c.clock.t - 1000), 0);
+});
+
+test("N2-3: nobody can confirm for the timer or the old form: a person with many agents still stops while the window has room; past it the timer waits and the form names the page", async () => {
+  const { tickDates } = await import("../src/lifecycle/validity.ts");
+  const { agentId } = await import("./plans-world.ts");
+  const w = makeWorld();
+  const many = Array.from({ length: 6 }, (_, i) => agentId(i + 60));
+  store.syncAgents(w.db, [...w.db.prepare("SELECT id, name, mode, status FROM fleet_agents").all(), ...many.map((id) => ({ id, name: id, mode: "free", status: "active" }))] as never, w.clock.t);
+  for (const id of many) store.setAgent(w.db, { agent: id, owner: w.ann.id }, w.clock.t);
+  w.db.prepare("UPDATE fleet_people SET valid_until = ? WHERE id = ?").run(w.clock.t - 1000, w.ann.id);
+  const seen = new Set<string>();
+  tickDates(w.db, seen, w.clock.t);
+  assert.equal(tickDates(w.db, seen, w.clock.t + 60_000).stopped, 1);
+  assert.equal(stateOf(w.db, "person", w.ann.id), "suspended");
+
+  const v = makeWorld();
+  for (const id of many) {
+    store.syncAgents(v.db, [...v.db.prepare("SELECT id, name, mode, status FROM fleet_agents").all(), { id, name: id, mode: "free", status: "active" }] as never, v.clock.t);
+    store.setAgent(v.db, { agent: id, owner: v.ann.id }, v.clock.t);
+  }
+  store.setPerson(v.db, { id: v.ann.id, name: "Ann", status: "departed" }, v.clock.t);
+  assert.equal(stateOf(v.db, "person", v.ann.id), "leaving");
+
+  const full = makeWorld();
+  for (const name of ["A", "B", "C", "D", "E"]) set(full.db, "person", store.setPerson(full.db, { name }, full.clock.t).id, "suspended", {}, full.clock.t);
+  assert.throws(() => store.setPerson(full.db, { id: full.ann.id, name: "Ann", status: "departed" }, full.clock.t), (e: TbError) => e.code === "stop_cap_reached" && /this person's page/.test(e.message));
+  assert.equal(stateOf(full.db, "person", full.ann.id), "active");
+});
+
+test("N2-1: a plain owner change from a stopped owner is refused with the path; an active owner's change shows a finding until the key is replaced; the plan's transfer passes", async () => {
+  const { loadColleagues } = await import("../src/lifecycle/view.ts");
+  const codes = (w: World, id: string) => loadColleagues(w.db, w.clock.t).byId.get(`agent:${id}`)?.findings.map((f) => f.code) ?? [];
+  const w = makeWorld();
+  const bob = store.setPerson(w.db, { name: "Bob" }, w.clock.t);
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  await assert.rejects(run("agent_set", { agent: HENRY, owner: bob.id }, ctxOf(w)), refused("use_transfer", 409));
+  assert.equal(w.db.prepare("SELECT owner_id FROM fleet_agents WHERE id = ?").get(HENRY)?.owner_id, w.ann.id, "the stop stands");
+  // the path it names works, and its key goes in the same draft
+  const out = await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: HENRY, decision: "transfer", newOwner: bob.id }] }, ctxOf(w));
+  const id = out.plans[0].id;
+  assert.equal(w.db.prepare("SELECT owner_id FROM fleet_agents WHERE id = ?").get(HENRY)?.owner_id, bob.id);
+  assert.ok(codes(w, HENRY).includes("key_after_transfer"), "until Core replaced the key");
+  w.clock.t = Date.now() + 1000; // the op stamped the change with the real clock
+  await w.tick(id);
+  approveAndDeliver(w, String(w.plan(id).draft_key), HENRY, SALES);
+  await w.tick(id);
+  assert.ok(!codes(w, HENRY).includes("key_after_transfer"));
+
+  // quiet: first owner, and a change between active owners is allowed, with the finding
+  const v = makeWorld();
+  const carol = store.setPerson(v.db, { name: "Carol" }, v.clock.t);
+  await run("agent_set", { agent: HENRY, owner: carol.id }, ctxOf(v));
+  assert.ok(codes(v, HENRY).includes("key_after_transfer"));
+  assert.ok(!codes(v, SALES).includes("key_after_transfer"));
+  const fresh = makeWorld();
+  store.setAgent(fresh.db, { agent: SALES, owner: null }, fresh.clock.t);
+  await run("agent_set", { agent: SALES, owner: fresh.ann.id }, ctxOf(fresh));
+  assert.ok(!codes(fresh, SALES).includes("key_after_transfer"), "from nobody: no old key holder");
+});
+
+test("N3-3: a transferred agent's things stay, ticked or not; N3-9: bringing a person back says the bar stays", async () => {
+  const { colleagueDetail } = await import("../src/lifecycle/view.ts");
+  const w = makeWorld();
+  const bob = store.setPerson(w.db, { name: "Bob" }, w.clock.t);
+  w.connect.add(agentItem({ id: "account_as_itself:a", kind: "account_as_itself" }));
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  const id = (await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: HENRY, decision: "transfer", newOwner: bob.id }], items: [{ product: "connect", id: "account_as_itself:a" }] }, ctxOf(w))).plans[0].id;
+  await w.tick(id);
+  assert.equal(w.item(id, "account_as_itself:a").state, "listed");
+  approveAndDeliver(w, String(w.plan(id).draft_key), HENRY);
+  await w.tick(id);
+  assert.equal(w.connect.data.handled.length, 0);
+
+  const v = makeWorld();
+  v.db.prepare("UPDATE fleet_agents SET owner_id = NULL").run();
+  v.db.prepare("INSERT INTO fleet_handles (handle, person_id, created_at) VALUES ('slack:UANN', ?, 1)").run(v.ann.id);
+  v.connect.add({ id: "channel_sender:slack:UANN", kind: "channel_sender", subject: { kind: "person", id: v.ann.id }, resource: "slack:UANN", level: "use", label: "Sender" });
+  set(v.db, "person", v.ann.id, "leaving", {}, v.clock.t);
+  const pid = v.makePlan({ kind: "person", id: v.ann.id });
+  await v.tick(pid);
+  await run("lifecycle_set", { kind: "person", id: v.ann.id, to: "active", reason: "mistake" }, ctxOf(v));
+  const d = await colleagueDetail(ctxOf(v), "person", v.ann.id);
+  assert.ok(d.notices.some((n: string) => /sender bar in Connect/.test(n)));
+});
+
+test("N2-1 review: a transfer keeps the agent stopped until the owner resumes it: the floor does not lift before the new key; an agent with its own stop can find an active owner by agent_set", async () => {
+  const { directoryFeed } = await import("../src/feed.ts");
+  const w = makeWorld();
+  const bob = store.setPerson(w.db, { name: "Bob" }, w.clock.t);
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: HENRY, decision: "transfer", newOwner: bob.id }] }, ctxOf(w));
+  assert.equal(stateOf(w.db, "agent", HENRY), "suspended");
+  const feed = directoryFeed(w.db, { accept: ["lifecycle"] }) as { agents: { id: string; floor?: boolean }[] };
+  assert.equal(feed.agents.find((a) => a.id === HENRY)?.floor, true, "refused until its key is new and the owner resumes it");
+
+  const v = makeWorld();
+  const carol = store.setPerson(v.db, { name: "Carol" }, v.clock.t);
+  set(v.db, "agent", HENRY, "leaving", {}, v.clock.t);
+  set(v.db, "person", v.ann.id, "leaving", {}, v.clock.t);
+  await run("agent_set", { agent: HENRY, owner: carol.id }, ctxOf(v));
+  assert.equal(stateOf(v.db, "agent", HENRY), "leaving", "its own stop stands");
+});
+
+test("N3-3 review: an agent both offboarded and rotated is closing: its items end", async () => {
+  const w = makeWorld();
+  w.connect.add(agentItem({ id: "account_as_itself:a", kind: "account_as_itself" }));
+  leave(w);
+  const id = w.makePlan({ kind: "agent", id: HENRY, transfers: [HENRY] });
+  await w.tick(id);
+  assert.equal(w.item(id, "account_as_itself:a").state, "pending");
+});
+
+function withSender(w: World) {
+  w.db.prepare("UPDATE fleet_agents SET owner_id = NULL").run();
+  w.db.prepare("INSERT INTO fleet_handles (handle, person_id, created_at) VALUES ('slack:UANN', ?, 1)").run(w.ann.id);
+  w.connect.add({ id: "channel_sender:slack:UANN", kind: "channel_sender", subject: { kind: "person", id: w.ann.id }, resource: "slack:UANN", level: "use", label: "Slack sender" });
+}
+
+const barPlan = (w: World) => w.db.prepare("SELECT id FROM fleet_plans WHERE purpose = 'bar'").get()?.id as string | undefined;
+
+test("N2-6: the old People form makes no plan: the bar still goes, by the job, with no Core step; the finding shows until Connect proves it", async () => {
+  const { loadColleagues } = await import("../src/lifecycle/view.ts");
+  const codes = (w: World) => loadColleagues(w.db, w.clock.t).byId.get(`person:${w.ann.id}`)?.findings.map((f) => f.code) ?? [];
+  const w = makeWorld();
+  withSender(w);
+  store.setPerson(w.db, { id: w.ann.id, name: "Ann", status: "departed" }, w.clock.t);
+  assert.equal(stateOf(w.db, "person", w.ann.id), "leaving");
+  assert.ok(codes(w).includes("sender_bar_open"));
+  scanPlans(w.db, w.clock.t, () => {});
+  assert.equal(barPlan(w), undefined, "the normal flow has its time first");
+  w.clock.t += 21_000;
+  scanPlans(w.db, w.clock.t, () => {});
+  scanPlans(w.db, w.clock.t, () => {});
+  const id = barPlan(w) as string;
+  assert.equal(w.db.prepare("SELECT COUNT(*) AS n FROM fleet_plans").get()?.n, 1, "one plan");
+  assert.equal(w.plan(id).rail, "none");
+  // Connect does not answer: no claim, the finding stays, Close is refused
+  w.connect.listScript.push(() => {
+    throw new TbError("app_error", "down", 500);
+  });
+  await w.tick(id);
+  assert.ok(codes(w).includes("sender_bar_open"));
+  assert.equal(w.plan(id).state, "running");
+  w.clock.t += 60_000;
+  await w.tick(id);
+  assert.deepEqual(w.connect.data.ended, ["channel_sender:slack:UANN"]);
+  assert.equal(w.plan(id).state, "done");
+  assert.ok(!codes(w).includes("sender_bar_open"), "proved by a fresh list");
+  assert.ok(codes(w).includes("leaving_no_plan"), "the bar is not the plan for the agents");
+  assert.equal(w.core.data.drafts.length, 0, "nothing in Portal");
+});
+
+test("N2-6: a failed plan_send, or a plan the owner made: no second plan; the normal flow bars through its own plan; a plan_send replaces an open bar plan", async () => {
+  const w = makeWorld();
+  withSender(w);
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  const own = w.makePlan({ kind: "person", id: w.ann.id });
+  w.clock.t += 21_000;
+  scanPlans(w.db, w.clock.t, () => {});
+  assert.equal(barPlan(w), undefined);
+  await w.tick(own);
+  assert.deepEqual(w.connect.data.ended, ["channel_sender:slack:UANN"]);
+
+  const v = makeWorld();
+  withSender(v);
+  set(v.db, "person", v.ann.id, "leaving", {}, v.clock.t);
+  v.clock.t += 21_000;
+  scanPlans(v.db, v.clock.t, () => {});
+  const bar = barPlan(v) as string;
+  const out = await run("plan_send", { kind: "person", id: v.ann.id }, ctxOf(v));
+  assert.equal(v.plan(bar).state, "replaced");
+  assert.equal(out.plans.length, 1);
+});
+
+test("N2-6: fire on Close while the bar is open, a named reason passes; quiet: no handles, a migrated person, Connect not installed, an owner who unticked it", async () => {
+  const { senderBarOpen } = await import("../src/plans/guards.ts");
+  const w = makeWorld();
+  withSender(w);
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  assert.throws(() => set(w.db, "person", w.ann.id, "archived", { waive: undefined }, w.clock.t + 40 * DAY_MS), refused("sender_bar_open", 409));
+  set(w.db, "person", w.ann.id, "archived", { waive: WAIVE }, w.clock.t);
+  assert.equal(stateOf(w.db, "person", w.ann.id), "archived");
+
+  const none = makeWorld();
+  none.db.prepare("UPDATE fleet_agents SET owner_id = NULL").run();
+  set(none.db, "person", none.ann.id, "leaving", {}, none.clock.t);
+  none.clock.t += 21_000;
+  scanPlans(none.db, none.clock.t, () => {});
+  assert.equal(barPlan(none), undefined, "no handle, nothing to bar");
+  assert.equal(senderBarOpen(none.db, none.ann.id), false);
+
+  const old = makeWorld();
+  withSender(old);
+  set(old.db, "person", old.ann.id, "leaving", { reason: "other" }, old.clock.t);
+  old.db.prepare("UPDATE fleet_people SET lifecycle_reason = 'migrated' WHERE id = ?").run(old.ann.id);
+  old.clock.t += 21_000;
+  scanPlans(old.db, old.clock.t, () => {});
+  assert.equal(barPlan(old), undefined, "marked before this version: the owner confirms it in a plan");
+  assert.equal(senderBarOpen(old.db, old.ann.id), true);
+
+  const gone = makeWorld();
+  withSender(gone);
+  gone.installed = [];
+  set(gone.db, "person", gone.ann.id, "leaving", {}, gone.clock.t);
+  await gone.tick(gone.makePlan({ kind: "person", id: gone.ann.id }));
+  assert.equal(senderBarOpen(gone.db, gone.ann.id), false, "not installed: nothing reaches an agent through it");
+
+  const un = makeWorld();
+  withSender(un);
+  set(un.db, "person", un.ann.id, "leaving", {}, un.clock.t);
+  await un.tick(un.makePlan({ kind: "person", id: un.ann.id, items: [] }));
+  assert.equal(senderBarOpen(un.db, un.ann.id), false, "his choice, and the step says it stays");
+});
+
+test("N2-6 review: a sender step that cannot be ended keeps the finding; a stale bar plan is made again; the record says the system made it, with no alert about a date", async () => {
+  const { senderBarOpen } = await import("../src/plans/guards.ts");
+  const w = makeWorld();
+  withSender(w);
+  (w.connect.data.rows[0] as { revocable?: boolean }).revocable = false;
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  w.clock.t += 21_000;
+  scanPlans(w.db, w.clock.t, () => {});
+  const id = barPlan(w) as string;
+  await w.tick(id);
+  assert.equal(w.item(id, "channel_sender:slack:UANN").state, "manual");
+  assert.equal(senderBarOpen(w.db, w.ann.id), true, "a step someone must do by hand bars nobody yet");
+  assert.equal(w.inbox.asks.length, 0, "the bar plan is no date alert");
+  const row = w.db.prepare("SELECT actor_kind, note FROM fleet_lifecycle_events WHERE plan_id = ? ORDER BY seq LIMIT 1").get(id);
+  assert.equal(row?.actor_kind, "system");
+  assert.match(String(row?.note), /sender bar only/);
+
+  const v = makeWorld();
+  withSender(v);
+  set(v.db, "person", v.ann.id, "leaving", {}, v.clock.t);
+  v.clock.t += 21_000;
+  scanPlans(v.db, v.clock.t, () => {});
+  const first = barPlan(v) as string;
+  v.db.prepare("UPDATE fleet_people SET lifecycle_rev = lifecycle_rev + 1 WHERE id = ?").run(v.ann.id);
+  await v.tick(first);
+  assert.equal(v.plan(first).state, "stale");
+  v.clock.t += 60_000;
+  scanPlans(v.db, v.clock.t, () => {});
+  assert.equal(v.db.prepare("SELECT COUNT(*) AS n FROM fleet_plans WHERE purpose = 'bar'").get()?.n, 2);
+});
+
+test("B10: a second plan_send carries the earlier new-key step: the agent already moved, so only the older plan knew; the draft asks for it again", async () => {
+  const w = makeWorld();
+  const bob = store.setPerson(w.db, { name: "Bob" }, w.clock.t);
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  const first = (await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: HENRY, decision: "transfer", newOwner: bob.id }] }, ctxOf(w))).plans[0].id;
+  await w.tick(first);
+  const out = await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: SALES, decision: "stop" }] }, ctxOf(w));
+  assert.equal(w.plan(first).state, "replaced");
+  await w.tick(out.plans[0].id);
+  const steps = w.core.open()[0]?.steps.map((s) => `${s.opId} ${s.agt}`).sort();
+  assert.deepEqual(steps, [`agents.offboard ${SALES}`, `agents.pause ${HENRY}`, `agents.rotate ${HENRY}`].sort());
+  // a rotate already done is not asked for again
+  const v = makeWorld();
+  const carol = store.setPerson(v.db, { name: "Carol" }, v.clock.t);
+  set(v.db, "person", v.ann.id, "leaving", {}, v.clock.t);
+  const p1 = (await run("plan_send", { kind: "person", id: v.ann.id, decisions: [{ agent: HENRY, decision: "transfer", newOwner: carol.id }] }, ctxOf(v))).plans[0].id;
+  await v.tick(p1);
+  approveAndDeliver(v, String(v.plan(p1).draft_key), HENRY, SALES);
+  await v.tick(p1);
+  assert.equal(v.plan(p1).state, "done");
+  const p2 = (await run("plan_send", { kind: "person", id: v.ann.id, decisions: [{ agent: SALES, decision: "stop" }] }, ctxOf(v))).plans[0].id;
+  await v.tick(p2);
+  assert.deepEqual(v.core.open()[0]?.steps, [{ opId: "agents.offboard", agt: SALES }]);
+});
+
+test("N2-2: the feed sends one epoch to a reader of the lifecycle, on full, unchanged and empty answers; a restore replaces it; a fresh install has its own; a reader that does not ask gets none", async () => {
+  const { directoryFeed } = await import("../src/feed.ts");
+  const { migratedDb } = await import("./helpers.ts");
+  const w = makeWorld();
+  const full = directoryFeed(w.db, { accept: ["lifecycle"] }) as { epoch: string; revision: number };
+  assert.match(full.epoch, /^[A-Za-z0-9_-]{1,64}$/);
+  const same = directoryFeed(w.db, { accept: ["lifecycle"], sinceRevision: full.revision }) as { epoch: string; unchanged: boolean };
+  assert.equal(same.unchanged, true);
+  assert.equal(same.epoch, full.epoch);
+  assert.equal("epoch" in directoryFeed(w.db, {}), false);
+  const other = migratedDb();
+  const empty = directoryFeed(other, { accept: ["lifecycle"] }) as { epoch: string; agents: unknown[] };
+  assert.equal(empty.agents.length, 0);
+  assert.notEqual(empty.epoch, full.epoch, "a fresh install is another origin");
+  // the output schema of the op takes it
+  const spec = manifest.operations.find((o) => o.id === "directory_feed") as unknown as { output: Parameters<typeof validateAgainstSchema>[0] };
+  assert.deepEqual(validateAgainstSchema(spec.output, full as never).ok, true);
+  assert.deepEqual(validateAgainstSchema(spec.output, same as never).ok, true);
+  // a restore: the SDK's mark is new. The first read after it, before any boot code, has a new epoch. The file's revision can be the same
+  w.db.exec("CREATE TABLE IF NOT EXISTS tb_meta (key TEXT PRIMARY KEY, value TEXT)");
+  w.db.prepare("INSERT INTO tb_meta (key, value) VALUES ('restore_applied', 'archive-1')").run();
+  const after = directoryFeed(w.db, { accept: ["lifecycle"], sinceRevision: full.revision }) as { epoch: string };
+  assert.notEqual(after.epoch, full.epoch);
+  const stable = directoryFeed(w.db, { accept: ["lifecycle"] }) as { epoch: string };
+  assert.equal(stable.epoch, after.epoch, "once per restore");
+  // restoring the same archive again brings back the older restore_seen, so it counts again
+  w.db.prepare("DELETE FROM fleet_settings WHERE key = 'restore_seen'").run();
+  assert.notEqual((directoryFeed(w.db, { accept: ["lifecycle"] }) as { epoch: string }).epoch, after.epoch);
+});
+
+test("N2-2: after a Governance that went back, the page says what Rules still holds", async () => {
+  const { floorView } = await import("../src/lifecycle/floor.ts");
+  const read = { version: "0.7.0-dev.3", feedRevision: 9, entries: 3, lastGateAt: null };
+  assert.match(String(floorView({ ...read, unlisted: 2 }, 1, 0, false).rulesHolds), /Rules still holds 2 entries Governance does not list\. They still refuse calls\. Clear them on the Rules page\./);
+  assert.equal(floorView({ ...read, unlisted: 2 }, 1, 0, false).gateNote, null, "not the gate's sentence: the page reads that one as a stale gate");
+  assert.equal(floorView({ ...read, unlisted: 0 }, 1, 0, false).rulesHolds, null);
+  assert.equal(floorView(read, 1, 0, false).rulesHolds, null);
+});
+
+test("the owed new key: from a plan that ended too; not for a closed or removed card, which must not block the entry", async () => {
+  const w = makeWorld();
+  const bob = store.setPerson(w.db, { name: "Bob" }, w.clock.t);
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  const first = (await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: HENRY, decision: "transfer", newOwner: bob.id }] }, ctxOf(w))).plans[0].id;
+  await w.tick(first);
+  w.core.reject(String(w.plan(first).draft_key));
+  await w.tick(first);
+  assert.equal(w.plan(first).state, "rejected");
+  const next = (await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: SALES, decision: "stop" }] }, ctxOf(w))).plans[0].id;
+  await w.tick(next);
+  assert.deepEqual(w.core.open()[0]?.steps.map((s) => `${s.opId} ${s.agt}`).sort(), [`agents.offboard ${SALES}`, `agents.pause ${HENRY}`, `agents.rotate ${HENRY}`].sort());
+  // the card is gone: the entry can still make a plan, and no step names it
+  await run("plan_cancel", { plan: next }, ctxOf(w));
+  w.db.prepare("UPDATE fleet_agents SET status = 'removed' WHERE id = ?").run(HENRY);
+  const third = (await run("plan_send", { kind: "person", id: w.ann.id }, ctxOf(w))).plans[0].id;
+  assert.ok(!w.steps(third).some((s) => s.agent_id === HENRY));
 });

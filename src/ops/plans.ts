@@ -1,11 +1,15 @@
 // Plan ops (C380, DESIGN-C380 §5). Person ops only: no agent and no app can call them, and each handler checks that again. They write intent and start the job; the runner is the one that calls Core and the stores.
 import { type HandlerSpec, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { OP, type OpId, type PlanCancelInput, type PlanCancelOutput, type PlanGetInput, type PlanGetOutput, type PlanRetryInput, type PlanRetryOutput, type PlanSendInput, type PlanSendOutput } from "#kit";
+import { grantsOf, readTopology } from "../lifecycle/view.ts";
 import { bannerAlerts } from "../plans/alerts.ts";
 import { planCtxOf } from "../plans/context.ts";
-import { closeOpenPlans, retryPlan } from "../plans/control.ts";
+import { assertAllClosed, closeOpenPlans, retryPlan } from "../plans/control.ts";
+import { applyDecisions, subjectAt } from "../plans/decisions.ts";
+import { owedRotations } from "../plans/guards.ts";
 import { kickPlans } from "../plans/jobs.ts";
 import { checkPlan, createPlan, getPlan, OPEN_SQL, openPlansOf, type Row } from "../plans/plan.ts";
+import { isOpenPlan } from "../plans/steps.ts";
 import { planView } from "../plans/view.ts";
 import { assertOwner } from "./lifecycle.ts";
 import { op } from "./op.ts";
@@ -16,15 +20,42 @@ const groupOf = (db: Parameters<typeof planView>[0], id: string): Row[] => {
   return db.prepare("SELECT * FROM fleet_plans WHERE group_id = ? ORDER BY part").all(String(p.group_id));
 };
 
+class TriedOnly extends Error {}
+
 export const planOps = {
   [OP.planSend]: op<PlanSendInput, PlanSendOutput>({
     async run(input, ctx) {
       assertOwner(ctx.caller);
       const pc = planCtxOf(ctx as never);
-      const asked = { kind: input.kind, id: input.id, expectedRev: input.expectedRev, transfers: input.transfers, items: input.items, expiresInSec: input.expiresInSec, actor: { kind: "owner" as const, id: ctx.caller.id } };
-      checkPlan(ctx.db, asked);
-      await closeOpenPlans(pc, openPlansOf(ctx.db, input.kind, input.id), "replaced");
-      const made = createPlan(ctx.db, asked, pc.now());
+      const db = ctx.db;
+      const now = pc.now();
+      const actor = { kind: "owner" as const, id: ctx.caller.id };
+      const topology = readTopology(ctx);
+      const grants = (agent: string) => grantsOf(db, topology, "agent", agent);
+      const asked = { kind: input.kind, id: input.id, items: input.items, expiresInSec: input.expiresInSec, actor };
+      // A new plan takes the old draft back, with any new key it asked for; an older plan may have ended without it. That key is still owed: the agent may no longer be this entry's, so only here can it be carried over.
+      const owed = owedRotations(db, input.kind, input.id);
+      const choose = () => [...new Set([...owed, ...(input.transfers ?? [])])].concat(applyDecisions(db, subjectAt(db, input.kind, input.id, input.expectedRev), input.decisions ?? [], actor, grants, now, input.confirmCount));
+      // Tried first and rolled back: what would refuse takes no older draft back. No await in the try.
+      try {
+        db.transaction(() => {
+          checkPlan(db, { ...asked, transfers: choose() });
+          throw new TriedOnly();
+        });
+      } catch (e) {
+        if (!(e instanceof TriedOnly)) throw e;
+      }
+      const closed = await closeOpenPlans(pc, openPlansOf(db, input.kind, input.id), "replaced");
+      assertAllClosed(closed);
+      // One transaction: the choices and the plan that carries them.
+      let made: ReturnType<typeof createPlan>;
+      try {
+        made = db.transaction(() => createPlan(db, { ...asked, transfers: choose() }, now));
+      } catch (e) {
+        // The entry moved during the call to Portal. The owner reads what is true: the older request is gone, no new one was made.
+        if (closed.withdrawn > 0 && e instanceof TbError) throw new TbError(e.code, `${e.message} The older request in Portal was taken back already, and no new one was made.`, e.httpStatus);
+        throw e;
+      }
       kickPlans(ctx as never);
       return { plans: viewAll(ctx.db, made.ids) };
     },
@@ -50,7 +81,10 @@ export const planOps = {
       const finished = ["done", "reported"];
       const mine = rows.filter((p) => !finished.includes(String(p.state)));
       if (mine.length === 0) throw new TbError("plan_finished", "This plan is finished.", 409);
-      for (const p of mine) retryPlan(ctx.db, p, now);
+      // All parts or none: one transaction with no await.
+      ctx.db.transaction(() => {
+        for (const p of mine) retryPlan(ctx.db, p, now);
+      });
       kickPlans(ctx as never);
       return { plans: viewAll(ctx.db, rows.map((r) => String(r.id))) };
     },
@@ -59,8 +93,10 @@ export const planOps = {
     async run(input, ctx) {
       assertOwner(ctx.caller);
       const rows = groupOf(ctx.db, input.plan);
-      await closeOpenPlans(planCtxOf(ctx as never), rows.filter((p) => ["preparing", "waiting", "applying", "running", "partial"].includes(String(p.state))), "cancelled");
-      return { plans: viewAll(ctx.db, rows.map((r) => String(r.id))) };
+      const closed = await closeOpenPlans(planCtxOf(ctx as never), rows.filter((p) => isOpenPlan(String(p.state))), "cancelled");
+      // Nothing moved: an error, as for any other caller. Some parts moved: an answer, with the count and each part's state.
+      if (closed.withdrawn + closed.ended === 0) assertAllClosed(closed);
+      return { left: closed.left, plans: viewAll(ctx.db, rows.map((r) => String(r.id))) };
     },
   }),
 } satisfies Partial<Record<OpId, HandlerSpec>>;
