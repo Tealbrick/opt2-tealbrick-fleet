@@ -21,14 +21,18 @@ export async function closeOpenPlans(pc: PlanCtx, plans: readonly Row[], to: "re
       if (movePlan(pc.db, id, String(p.state), "cancelled", { code: "cancelled_after_apply" }, pc.now())) cancelUnsent(pc.db, id, pc.now());
       continue;
     }
-    if (rail && p.rail === "draft" && p.draft_key !== null) {
+    let code: string | null = null;
+    // Whatever the mode says: a draft may stand in Portal since before the rail went away.
+    if (rail && p.draft_key !== null) {
       const answer = await askRail(() => rail.withdraw(String(p.draft_key)));
       if (answer.kind === "draft_state") throw new TbError("plan_applied", "You already approved this in Portal. It cannot be taken back here.", 409);
       if (answer.kind === "wait" || answer.kind === "full") throw new TbError("portal_unavailable", "Portal does not answer, so this request could still be applied. Try again.", 503);
-    }
+      // The rail is gone or refused: the plan ends, and its words say the draft may stand. A later apply shows as a difference, never silently.
+      if (answer.kind === "off" || answer.kind === "refused") code = "not_taken_back";
+    } else if (!rail && p.draft_key !== null) code = "not_taken_back";
     const now = pc.now();
     const cur = getPlan(pc.db, id) as Row;
-    if (isOpenPlan(String(cur.state)) && movePlan(pc.db, id, String(cur.state), to, {}, now)) cancelUnsent(pc.db, id, now);
+    if (isOpenPlan(String(cur.state)) && movePlan(pc.db, id, String(cur.state), to, { code }, now)) cancelUnsent(pc.db, id, now);
   }
 }
 
@@ -53,13 +57,18 @@ export function retryPlan(db: Db, p: Row, now: number): void {
     askAgain(db, p, now);
     return;
   }
+  // Portal link mode: consent may be on now, or the bridge newer. Steps the slice proved stay.
+  if (p.rail === "portal_link" && p.draft_state === null) {
+    askAgain(db, p, now);
+    return;
+  }
   const steps = stepsOf(db, id);
   if (steps.some((x) => x.phase === "core" && x.state === "failed")) throw new TbError("apply_in_portal", "Portal stopped on a step. Apply it again in Portal.", 409);
   db.transaction(() => {
     // `changed` goes: the next list makes a new step from what the store shows now. What the owner ticked stands, the digest he saw does not.
     db.prepare("UPDATE fleet_plan_steps SET state = 'pending' WHERE plan_id = ? AND phase = 'read' AND target IN (SELECT target FROM fleet_plan_steps WHERE plan_id = ? AND state = 'changed')").run(id, id);
     db.prepare("DELETE FROM fleet_plan_steps WHERE plan_id = ? AND state = 'changed'").run(id);
-    db.prepare("UPDATE fleet_plan_steps SET state = 'failed', tries = 0, retry_at = 0, code = NULL, detail = NULL, updated_at = ? WHERE plan_id = ? AND phase <> 'read' AND phase <> 'core' AND state IN ('refused', 'failed')").run(now, id);
+    db.prepare("UPDATE fleet_plan_steps SET state = 'failed', tries = 0, retry_at = 0, code = NULL, detail = NULL, updated_at = ? WHERE plan_id = ? AND phase <> 'read' AND phase <> 'core' AND state IN ('refused', 'failed', 'not_revocable')").run(now, id);
     db.prepare("UPDATE fleet_plan_steps SET retry_at = 0, updated_at = ? WHERE plan_id = ? AND phase = 'read'").run(now, id);
     const ticks = typeof p.wanted_json === "string" ? (JSON.parse(p.wanted_json) as { product: string; id: string }[]).map((t) => ({ product: t.product, id: t.id })) : null;
     movePlan(db, id, String(p.state), p.state === "partial" ? "running" : String(p.state), { next_at: 0, wanted_json: ticks ? JSON.stringify(ticks) : null, code: null }, now);

@@ -500,7 +500,7 @@ test("S2-11: an apply stuck in `applying`: Portal stopped mid-way is said, then 
   assert.equal(w.plan(id).state, "done");
 });
 
-test("a Core step failed: partial, named, no app step; the owner re-applies", async () => {
+test("a Core step failed for one agent: the others ran; partial, named, no app step; the owner re-applies", async () => {
   const w = makeWorld();
   account(w);
   const id = await leavingPlan(w);
@@ -800,4 +800,214 @@ test("a system plan with no draft to wait for: the owner still hears that the da
   await w.tick(id);
   assert.equal(w.plan(id).rail, "none");
   assert.deepEqual(w.inbox.asks.map((a) => a.title), ["An end date passed."]);
+});
+
+test("overlap: a wake during a tick does not start a second tick: one revoke call, and the plan goes on after it", async () => {
+  const { wakePlans } = await import("../src/plans/control.ts");
+  const w = makeWorld();
+  account(w);
+  leave(w);
+  const id = w.makePlan({ kind: "agent", id: HENRY });
+  await runDue(w.pc);
+  approveAndDeliver(w, keyOf(w, id), HENRY);
+  w.clock.t += 60_000;
+  let open!: () => void;
+  const gate = new Promise<void>((r) => {
+    open = r;
+  });
+  const real = w.pc.access.revoke.bind(w.pc.access);
+  let calls = 0;
+  w.pc.access.revoke = async (...a) => {
+    calls++;
+    await gate;
+    return real(...a);
+  };
+  const first = runDue(w.pc);
+  while (calls === 0) await new Promise((r) => setTimeout(r, 1));
+  assert.equal(wakePlans(w.db), 1, "the slice arrived");
+  w.clock.t += 60_000;
+  const second = await runDue(w.pc);
+  assert.equal(second, 0, "the lease holds");
+  assert.equal(calls, 1);
+  open();
+  await first;
+  assert.equal(calls, 1);
+  assert.equal(w.plan(id).state, "done");
+  assert.deepEqual(w.connect.data.ended, ["account_as_itself:acc1"]);
+});
+
+test("a crash holds the lease until the next boot, which frees it", async () => {
+  const { releaseTicks } = await import("../src/plans/runner.ts");
+  const w = makeWorld();
+  leave(w);
+  const id = w.makePlan({ kind: "agent", id: HENRY });
+  w.db.prepare("UPDATE fleet_plans SET ticking_until = ? WHERE id = ?").run(w.clock.t + 300_000, id);
+  assert.equal(await runDue(w.pc), 0);
+  releaseTicks(w.db);
+  assert.equal(await runDue(w.pc), 1);
+});
+
+test("a failed draft that then expires or is rejected: what Core did stays on the record; the page does not say nothing was applied", async () => {
+  for (const end of ["expire", "reject"] as const) {
+    const w = makeWorld();
+    set(w.db, "agent", HENRY, "leaving", {}, w.clock.t);
+    set(w.db, "agent", SALES, "leaving", {}, w.clock.t);
+    set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+    const id = w.makePlan({ kind: "person", id: w.ann.id, expiresInSec: 120 });
+    await w.tick(id);
+    w.core.failAgent = SALES;
+    w.core.apply(keyOf(w, id));
+    w.core.deliver();
+    if (end === "expire") w.clock.t += 121_000;
+    else w.core.reject(keyOf(w, id));
+    await w.tick(id);
+    const core = w.steps(id).filter((s) => s.phase === "core");
+    assert.equal(core.find((s) => s.agent_id === HENRY)?.state, "done", end);
+    assert.equal(w.plan(id).code, "partly_applied");
+    const { hasAppliedStop } = await import("../src/plans/guards.ts");
+    assert.equal(hasAppliedStop(w.db, "person", w.ann.id), true, "T6 cannot pretend it did not happen");
+  }
+});
+
+test("a part with more agents than one list call may name: each is read, in chunks of the contract's limit", async () => {
+  const w = makeWorld();
+  const { agentId } = await import("./plans-world.ts");
+  const ids = Array.from({ length: 40 }, (_, i) => agentId(i + 10));
+  store.syncAgents(w.db, [...w.db.prepare("SELECT id, name, mode, status FROM fleet_agents").all(), ...ids.map((id) => ({ id, name: id, mode: "free", status: "active" }))] as never, w.clock.t);
+  for (const id of ids) {
+    store.setAgent(w.db, { agent: id, owner: w.ann.id }, w.clock.t);
+    w.core.addAgent(id, 0, 0);
+  }
+  const last = ids[39] as string;
+  w.connect.add(agentItem({ id: "account_as_itself:last", kind: "account_as_itself", agent: last }));
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  set(w.db, "agent", last, "leaving", {}, w.clock.t);
+  const id = w.makePlan({ kind: "person", id: w.ann.id });
+  await w.tick(id);
+  assert.equal((w.steps(id).find((s) => s.phase === "read" && s.target === "connect") as Record<string, unknown>).state, "done");
+  assert.ok(w.item(id, "account_as_itself:last"), "the 40th agent's item was read");
+});
+
+test("a person with more than 16 handles: each handle is asked about", async () => {
+  const w = makeWorld();
+  w.db.prepare("UPDATE fleet_agents SET owner_id = NULL").run();
+  for (let i = 0; i < 20; i++) {
+    const h = `slack:U${String(i).padStart(4, "0")}`;
+    w.db.prepare("INSERT INTO fleet_handles (handle, person_id, created_at) VALUES (?, ?, 1)").run(h, w.ann.id);
+    w.connect.add({ id: `channel_sender:${h}`, kind: "channel_sender", subject: { kind: "person", id: w.ann.id }, resource: h, level: "use", label: "Sender" });
+  }
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  const id = w.makePlan({ kind: "person", id: w.ann.id });
+  await w.tick(id);
+  await w.tick(id);
+  assert.equal(w.connect.data.ended.length, 20);
+  assert.equal(w.plan(id).state, "done");
+});
+
+test("a store that never sees the agent stopped: not retried for ever; it goes to the owner", async () => {
+  const w = makeWorld();
+  account(w);
+  const id = await leavingPlan(w);
+  w.core.apply(keyOf(w, id));
+  w.core.deliver();
+  for (let i = 0; i < 10; i++) {
+    await w.tick(id);
+    w.clock.t += 60_000;
+  }
+  const s = w.item(id, "account_as_itself:acc1");
+  assert.equal(s.state, "not_revocable");
+  assert.equal(s.tries, MAX_TRIES);
+  assert.equal(w.plan(id).state, "partial");
+  assert.equal(w.connect.data.handled.length, MAX_TRIES);
+});
+
+test("link mode: a pause in Portal with no view of the access: what stands on the removal is not run; someone acts by hand; the words do not quote Portal", async () => {
+  const w = makeWorld();
+  account(w);
+  leave(w);
+  w.core.consent = false;
+  w.core.topologyOn = false;
+  const id = w.makePlan({ kind: "agent", id: HENRY });
+  await w.tick(id);
+  w.core.pauseInPortal(HENRY);
+  w.core.deliver();
+  w.connect.sees(HENRY, "paused");
+  await w.tick(id);
+  assert.equal(w.item(id, "account_as_itself:acc1").state, "manual");
+  assert.equal(w.item(id, "account_as_itself:acc1").code, "not_approved");
+  assert.equal(w.connect.data.handled.length, 0);
+  assert.equal(w.plan(id).state, "reported");
+  const { planView } = await import("../src/plans/view.ts");
+  assert.doesNotMatch(planView(w.db, id).headline, /Portal says/);
+});
+
+test("a stale slice is not a missing rail: the plan waits, it does not fall to link mode", async () => {
+  const w = makeWorld();
+  leave(w);
+  const real = w.core.request.bind(w.core);
+  w.core.request = async () => {
+    throw new TbError("bridge_cap_missing", "stale", 409, { cap: "owner_drafts", reason: "slice_stale" });
+  };
+  const id = w.makePlan({ kind: "agent", id: HENRY });
+  await w.tick(id);
+  assert.equal(w.plan(id).rail, "draft");
+  assert.equal(w.plan(id).state, "preparing");
+  w.core.request = real;
+  await w.tick(id);
+  assert.equal(w.plan(id).state, "waiting");
+});
+
+test("a draft that fails read: an unreadable step in Core's answer moves nothing, and throws nothing", async () => {
+  const w = makeWorld();
+  const id = await leavingPlan(w);
+  const real = w.core.get.bind(w.core);
+  w.core.get = async (k) => ({ ...(await real(k)), steps: [null as never] });
+  await w.tick(id);
+  assert.equal(w.plan(id).state, "waiting");
+  assert.equal(w.plan(id).code, "bad_answer");
+});
+
+test("a rotate that stays open: a new key may be paired already, so after the window it reads as said, not seen; a slice revision proves it when the SDK has one", async () => {
+  const w = makeWorld();
+  w.db.prepare("UPDATE fleet_agents SET owner_id = NULL WHERE id = ?").run(SALES);
+  const id = w.makePlan({ kind: "agent", id: HENRY, transfers: [HENRY] });
+  await w.tick(id);
+  w.core.apply(keyOf(w, id));
+  const a = w.core.data.agents[HENRY];
+  if (a) a.keys = 1; // paired again already
+  w.core.deliver();
+  await w.tick(id);
+  const rot = () => w.steps(id).find((s) => s.op === "agents.rotate") as Record<string, unknown>;
+  assert.equal(rot().state, "pending_bridge");
+  w.clock.t += 31 * 60_000;
+  w.db.prepare("UPDATE fleet_plan_steps SET updated_at = ? WHERE op = 'agents.rotate'").run(w.clock.t - 31 * 60_000);
+  await w.tick(id);
+  assert.equal(rot().state, "reported");
+  assert.equal(w.plan(id).state, "reported");
+});
+
+test("a store's `revoked` for a kind this version cannot list is said, not proved", async () => {
+  const w = makeWorld();
+  w.connect.add(agentItem({ id: "scheduled_post:p", kind: "scheduled_post" }));
+  const id = await leavingPlan(w);
+  approveAndDeliver(w, keyOf(w, id), HENRY);
+  w.connect.notShown = [{ kind: "scheduled_post", reason: "Not listed." }];
+  await w.tick(id);
+  assert.equal(w.item(id, "scheduled_post:p").state, "reported");
+  assert.equal(w.plan(id).state, "reported");
+});
+
+test("a handler that throws frees the key: the store ran nothing; re-list, new attempt", async () => {
+  const w = makeWorld();
+  account(w);
+  const id = await leavingPlan(w);
+  approveAndDeliver(w, keyOf(w, id), HENRY);
+  w.connect.revokeScript.push({ kind: "handler_throw", code: "app_error", status: 500 });
+  await w.tick(id);
+  assert.equal(w.connect.data.ended.length, 0);
+  assert.notEqual(w.plan(id).state, "done");
+  w.clock.t += 60_000;
+  await w.tick(id);
+  assert.equal(w.plan(id).state, "done");
+  assert.deepEqual(w.connect.data.ended, ["account_as_itself:acc1"]);
 });
