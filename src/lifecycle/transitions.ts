@@ -8,6 +8,7 @@ import { canonicalize } from "@opt2-tealbrick/manifest";
 import { type Db, type Json, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { bump, fail, revision } from "../meta.ts";
 import { hasAppliedStop, hasOpenPlan, lastPlanUnfinished, unnamedAccounts } from "../plans/guards.ts";
+import { endAssignmentsOf } from "../roles/roles.ts";
 import { cleanText } from "../text.ts";
 import type { Trust } from "../trust.ts";
 import { appendEvent, SNAPSHOT_MAX, stopsSince } from "./events.ts";
@@ -230,9 +231,10 @@ export function transition(db: Db, input: TransitionInput, now = Date.now()): { 
   });
 }
 
-/** T7: team memberships end, one event each. Handles stay on the row. */
+/** T7: team memberships and role assignments end, one event each. Handles stay on the row. */
 function endMemberships(db: Db, s: Subject, actor: Actor, now: number): void {
   const kind = s.kind === "agent" ? "agent" : "person";
+  endAssignmentsOf(db, kind, s.id, "closed", actor, now);
   const rows = db.prepare("SELECT m.team_id, t.name FROM fleet_members m JOIN fleet_teams t ON t.id = m.team_id WHERE m.kind = ? AND m.subject_id = ? ORDER BY t.name COLLATE NOCASE, t.id").all(kind, s.id);
   for (const t of rows) {
     db.prepare("DELETE FROM fleet_members WHERE team_id = ? AND kind = ? AND subject_id = ?").run(t.team_id, kind, s.id);
@@ -274,6 +276,7 @@ export function kindChanged(db: Db, id: string, name: string, from: string, to: 
   }
   const cur = db.prepare("SELECT lifecycle FROM fleet_people WHERE id = ?").get(id)?.lifecycle;
   if (cur !== "active") fail("lifecycle_open", "This person is not active. Bring the person back first.", 409);
+  endAssignmentsOf(db, "person", id, "closed", { kind: "owner", id: null }, now); // an outside agent has no roles
   db.prepare("UPDATE fleet_people SET lifecycle = NULL, lifecycle_rev = ?, lifecycle_at = ? WHERE id = ?").run(revision(db), now, id);
   appendEvent(db, { subject: { kind: "person", id, name }, kind: "transition", from: "active", to: null, actor: { kind: "owner", id: null }, reason: "other", note: "Changed from person to outside agent.", at: now });
 }
