@@ -52,7 +52,8 @@ describe("reasons", () => {
     assert.ok(!REASONS.suspended.includes("mistake"));
   });
   it("an unknown stored reason reads as Other, not as a code", () => {
-    assert.equal(reasonLabel("migrated"), "Other");
+    assert.equal(reasonLabel("not_a_reason"), "Other");
+    assert.equal(reasonLabel("migrated"), "Marked as departed before this version");
     assert.equal(reasonLabel("contract_ended"), "Contract ended");
   });
 });
