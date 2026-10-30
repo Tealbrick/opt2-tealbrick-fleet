@@ -1323,8 +1323,27 @@ test("N2-2: the feed sends one epoch to a reader of the lifecycle, on full, unch
 test("N2-2: after a Governance that went back, the page says what Rules still holds", async () => {
   const { floorView } = await import("../src/lifecycle/floor.ts");
   const read = { version: "0.7.0-dev.3", feedRevision: 9, entries: 3, lastGateAt: null };
-  assert.match(String(floorView({ ...read, unlisted: 2 }, 1, 0, false).rulesHolds), /Rules still holds 2 stops Governance does not list\. Clear them on the Rules page\./);
+  assert.match(String(floorView({ ...read, unlisted: 2 }, 1, 0, false).rulesHolds), /Rules still holds 2 entries Governance does not list\. They still refuse calls\. Clear them on the Rules page\./);
   assert.equal(floorView({ ...read, unlisted: 2 }, 1, 0, false).gateNote, null, "not the gate's sentence: the page reads that one as a stale gate");
   assert.equal(floorView({ ...read, unlisted: 0 }, 1, 0, false).rulesHolds, null);
   assert.equal(floorView(read, 1, 0, false).rulesHolds, null);
+});
+
+test("the owed new key: from a plan that ended too; not for a closed or removed card, which must not block the entry", async () => {
+  const w = makeWorld();
+  const bob = store.setPerson(w.db, { name: "Bob" }, w.clock.t);
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  const first = (await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: HENRY, decision: "transfer", newOwner: bob.id }] }, ctxOf(w))).plans[0].id;
+  await w.tick(first);
+  w.core.reject(String(w.plan(first).draft_key));
+  await w.tick(first);
+  assert.equal(w.plan(first).state, "rejected");
+  const next = (await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: SALES, decision: "stop" }] }, ctxOf(w))).plans[0].id;
+  await w.tick(next);
+  assert.deepEqual(w.core.open()[0]?.steps.map((s) => `${s.opId} ${s.agt}`).sort(), [`agents.offboard ${SALES}`, `agents.pause ${HENRY}`, `agents.rotate ${HENRY}`].sort());
+  // the card is gone: the entry can still make a plan, and no step names it
+  await run("plan_cancel", { plan: next }, ctxOf(w));
+  w.db.prepare("UPDATE fleet_agents SET status = 'removed' WHERE id = ?").run(HENRY);
+  const third = (await run("plan_send", { kind: "person", id: w.ann.id }, ctxOf(w))).plans[0].id;
+  assert.ok(!w.steps(third).some((s) => s.agent_id === HENRY));
 });

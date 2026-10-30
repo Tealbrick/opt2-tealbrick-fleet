@@ -43,7 +43,7 @@ export function floorView(read: FloorStatus | Exclude<FloorState, "confirmed" | 
   const state: FloorState = read.feedRevision !== null && read.feedRevision >= rev ? "confirmed" : "not_confirmed";
   const gateMs = read.lastGateAt === null ? Number.NaN : Date.parse(read.lastGateAt);
   const gateNote = !agentsRun ? null : read.lastGateAt === null ? "Rules has not checked a call yet." : Number.isFinite(gateMs) && gateMs + GATE_STALE_MS < now ? `Rules has not checked a call since ${new Date(gateMs).toISOString()}.` : null;
-  const rulesHolds = typeof read.unlisted === "number" && read.unlisted > 0 ? `Rules still holds ${read.unlisted} stops Governance does not list. Clear them on the Rules page.` : null;
+  const rulesHolds = typeof read.unlisted === "number" && read.unlisted > 0 ? `Rules still holds ${read.unlisted === 1 ? "1 entry" : `${read.unlisted} entries`} Governance does not list. They still refuse calls. Clear them on the Rules page.` : null;
   return { state, text: FLOOR_TEXT[state], version: read.version, feedRevision: read.feedRevision, entries: read.entries, lastGateAt: read.lastGateAt, gateNote, rulesHolds };
 }
 

@@ -91,3 +91,15 @@ export function ownerChangedAt(db: Db): Map<string, number> {
   const rows = db.prepare("SELECT subject_id AS id, MAX(at) AS at FROM fleet_lifecycle_events WHERE kind = 'moved' AND subject_kind = 'agent' AND note LIKE 'Owner changed from %' AND json_extract(snapshot_json, '$.before') IS NOT NULL GROUP BY subject_id").all();
   return new Map(rows.map((r) => [String(r.id), Number(r.at)]));
 }
+
+/** Agents this entry's plans asked a new key for, and Core never replaced, still working cards. A closed or removed card has no key to replace, and must not block a new plan. */
+export function owedRotations(db: Db, kind: string, id: string): string[] {
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT s.agent_id AS id FROM fleet_plan_steps s JOIN fleet_plans p ON p.id = s.plan_id JOIN fleet_agents a ON a.id = s.agent_id
+       WHERE p.subject_kind = ? AND p.subject_id = ? AND s.op = 'agents.rotate' AND a.status <> 'removed' AND a.lifecycle <> 'archived'
+         AND NOT EXISTS (SELECT 1 FROM fleet_plan_steps d WHERE d.agent_id = s.agent_id AND d.op IN ('agents.rotate', 'agents.offboard') AND d.state IN ('done', 'reported'))`,
+    )
+    .all(kind, id);
+  return rows.map((r) => String(r.id));
+}

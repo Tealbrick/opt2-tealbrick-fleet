@@ -145,7 +145,7 @@ export function assertFeedCaller(caller: { type: string; product?: unknown; list
 export function directoryFeed(db: Db, input: FeedInput, warn?: Warn): DirectoryFeed {
   const rev = revision(db);
   // N2-2: on each answer to a reader of the lifecycle, the unchanged one too: a restore can reach the very revision the reader asked about.
-  const origin = input.accept?.includes("lifecycle") ? { epoch: feedEpoch(db) } : {};
+  const origin = input.accept?.includes(ACCEPT_LIFECYCLE) ? { epoch: feedEpoch(db) } : {};
   if (input.sinceRevision !== undefined && input.sinceRevision === rev) return { v: 1, revision: rev, unchanged: true, ...origin };
   // C373 §3: agent handles only when the reader asks for them; without `accept` the answer is exactly the old shape
   const agentHandles = Array.isArray(input.accept) && input.accept.includes(ACCEPT_AGENT_HANDLES) ? cachedAgentHandles(db) : null;
