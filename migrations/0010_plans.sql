@@ -36,6 +36,7 @@ CREATE TABLE fleet_plans (
   wanted_json TEXT,                    -- the owner's ticks, until the first read turned them into steps
   code TEXT,
   detail TEXT,
+  close_note TEXT,                     -- the owner asked to take this back and Portal did not do it: not_reached | approved_first. Kept until the plan ends or asks again
   opened_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   issued_at INTEGER,                   -- last draft request of this attempt

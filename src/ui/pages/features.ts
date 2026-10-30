@@ -17,6 +17,8 @@ export type Features = {
   exclusions: boolean;
   /** The page is in the navigation: its ops are on AND the QA rows R9 to R11 passed. */
   exclusionsInNav: boolean;
+  /** the live plan, Try again, the request in Portal */
+  plans: boolean;
 };
 
 /**
@@ -43,6 +45,7 @@ export function featuresOf(ops: readonly string[], rolesRowsPassed: boolean = RO
     // the page lists roles and makes rules: it needs both sets of ops
     exclusions: has(...ROLE_OPS, ...EXCLUSION_OPS),
     exclusionsInNav: has(...ROLE_OPS, ...EXCLUSION_OPS) && exclusionRowsPassed,
+    plans: has("plan_send", "plan_get", "plan_retry", "plan_cancel"),
   };
 }
 

@@ -35,6 +35,13 @@ export const NOT_CHANGED: readonly string[] = [
   "Other people with the shared Portal login. Change the Portal login if they had it.",
   "Engine steps after an agent step.",
   "Scheduled posts before you approve.",
+  "An agent can still send to a Slack direct message id it already knows. Governance bars what comes in from that person, not this.",
+  "Channels or groups the person is still in. The sender bar does not cover them.",
+  "Messages read through tool accounts.",
+  "Messages stored before the bar. Data apps can still read them.",
+  "New handles of this person.",
+  "Edits the person makes to their own direct messages older than 30 days.",
+  "Email, Teams and Discord. Governance bars Buzz, Slack and Telegram handles only. Use the Accounts page in Connect for the others.",
 ];
 
 /**
@@ -61,6 +68,7 @@ export const beforeChangeTone = (floor: Pick<Floor, "state">): "needs-you" | "ne
 export function afterChangeText(floor: Floor): string {
   const parts = [floor.text];
   if (floor.state === "confirmed") parts.push("If its hook is on, calls stop in about 2 minutes. Governance cannot see that switch: check it in Portal.");
+  if (floor.rulesHolds) parts.push(floor.rulesHolds);
   if (floor.gateNote && floor.lastGateAt) parts.push(`Rules has not checked a call since ${when(floor.lastGateAt)}.`);
   return parts.join(" ");
 }

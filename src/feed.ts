@@ -7,6 +7,7 @@
 // A team's name is the one exception the contract allows (name?, 1-80 chars).
 import { normalizeHandle } from "@opt2-tealbrick/manifest";
 import { type Db, TbError } from "@opt2-tealbrick/miniapp-sdk";
+import { feedEpoch } from "./lifecycle/events.ts";
 import { type Effective, effectiveAgent, effectivePerson, floorOf, type Lifecycle } from "./lifecycle/states.ts";
 import { type FeedRole, feedRoles } from "./roles/roles.ts";
 import { revision } from "./store.ts";
@@ -59,8 +60,8 @@ export interface FeedInput {
   accept?: string[];
 }
 export type DirectoryFeed =
-  | { v: 1; revision: number; unchanged: false; teams: FeedTeam[]; contacts: FeedContact[]; agents: FeedAgent[]; roles?: FeedRole[] }
-  | { v: 1; revision: number; unchanged: true };
+  | { v: 1; revision: number; unchanged: false; teams: FeedTeam[]; contacts: FeedContact[]; agents: FeedAgent[]; roles?: FeedRole[]; epoch?: string }
+  | { v: 1; revision: number; unchanged: true; epoch?: string };
 
 /** Transient: the directory is larger than the contract carries. 503 so a reader keeps its last good copy and retries. */
 const tooLarge = (what: string, cap: number): never => {
@@ -149,7 +150,9 @@ export function assertFeedCaller(caller: { type: string; product?: unknown; list
  */
 export function directoryFeed(db: Db, input: FeedInput, warn?: Warn): DirectoryFeed {
   const rev = revision(db);
-  if (input.sinceRevision !== undefined && input.sinceRevision === rev) return { v: 1, revision: rev, unchanged: true };
+  // N2-2: on each answer to a reader of the lifecycle, the unchanged one too: a restore can reach the very revision the reader asked about.
+  const origin = input.accept?.includes(ACCEPT_LIFECYCLE) ? { epoch: feedEpoch(db) } : {};
+  if (input.sinceRevision !== undefined && input.sinceRevision === rev) return { v: 1, revision: rev, unchanged: true, ...origin };
   // C373 §3: agent handles only when the reader asks for them; without `accept` the answer is exactly the old shape
   const agentHandles = Array.isArray(input.accept) && input.accept.includes(ACCEPT_AGENT_HANDLES) ? cachedAgentHandles(db) : null;
   // C380: lifecycle and floor only when the reader asks; without `accept` the answer is exactly the old shape
@@ -253,5 +256,5 @@ export function directoryFeed(db: Db, input: FeedInput, warn?: Warn): DirectoryF
   for (const t of teams) if (t.members.length > FEED_CAPS.membersPerTeam) tooLarge("members in one team", FEED_CAPS.membersPerTeam);
 
   const roles = Array.isArray(input.accept) && input.accept.includes(ACCEPT_ROLES) ? feedRoles(db, agentIds, contactIds) : null;
-  return { v: 1, revision: rev, unchanged: false, teams, contacts, agents, ...(roles ? { roles } : {}) };
+  return { v: 1, revision: rev, unchanged: false, teams, contacts, agents, ...(roles ? { roles } : {}), ...origin };
 }

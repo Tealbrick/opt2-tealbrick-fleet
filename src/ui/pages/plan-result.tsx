@@ -3,6 +3,8 @@
 // done only from what Core reports.
 import { ButtonLink, Notice, Tag } from "@opt2-tealbrick/ui";
 import type { LifecycleSetOutput } from "#kit";
+import { FEATURES } from "./features.ts";
+import { PlanLive } from "./plan-live.tsx";
 import { afterChangeText, floorTone, NOT_CHANGED } from "./words.ts";
 
 export function NotChanged({ items = NOT_CHANGED }: { items?: readonly string[] }) {
@@ -21,9 +23,25 @@ export function NotChanged({ items = NOT_CHANGED }: { items?: readonly string[] 
 type Colleague = LifecycleSetOutput["colleague"];
 const STEP_TAG = { open: { status: "needs-you", word: "Waiting for you in Portal" }, done: { status: "live", word: "Core reports this done" }, not_provable: { status: "default", word: "Cannot be checked" } } as const;
 
-export function PlanResult({ colleague, portalHref, showLine = true, showNotChanged = true }: { colleague: Colleague; portalHref?: string; showLine?: boolean; showNotChanged?: boolean }) {
+export function PlanResult({ colleague, portalHref, showLine = true, showNotChanged = true, sendFailure, onEnded }: { colleague: Colleague; portalHref?: string; showLine?: boolean; showNotChanged?: boolean; sendFailure?: string | null; onEnded?: () => void }) {
   const { plan, floor, notices } = colleague;
   const portal = plan?.portalUrl ?? portalHref;
+  // a stop has a live plan; a Portal step on an entry that is not stopped (resume) stays the plain list below
+  if (FEATURES.plans && (colleague.lifecycle === "suspended" || colleague.lifecycle === "leaving"))
+    return (
+      <div className="tb-stack">
+        {showLine ? <p>{colleague.line}</p> : null}
+        <Notice tone={floorTone(floor)} role="status">
+          {afterChangeText(floor)}
+        </Notice>
+        {notices.map((n) => (
+          <Notice key={n} tone="neutral">
+            {n}
+          </Notice>
+        ))}
+        <PlanLive kind={colleague.kind} id={colleague.id} since={colleague.at} portalHref={portal} sendFailure={sendFailure} onEnded={onEnded} />
+      </div>
+    );
   return (
     <div className="tb-stack">
       {showLine ? <p>{colleague.line}</p> : null}
