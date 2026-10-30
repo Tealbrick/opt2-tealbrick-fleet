@@ -7,10 +7,10 @@
 import { canonicalize } from "@opt2-tealbrick/manifest";
 import { type Db, type Json, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { bump, fail, revision } from "../meta.ts";
-import { hasAppliedStop, hasOpenPlan, lastPlanUnfinished, unnamedAccounts } from "../plans/guards.ts";
+import { hasAppliedStop, hasOpenPlan, lastPlanUnfinished, senderBarOpen, unnamedAccounts } from "../plans/guards.ts";
 import { cleanText } from "../text.ts";
 import type { Trust } from "../trust.ts";
-import { appendEvent, SNAPSHOT_MAX, stopsSince } from "./events.ts";
+import { appendEvent, SNAPSHOT_MAX, stoppedSince, stopsSince } from "./events.ts";
 import { coolingDays, stopCap } from "./settings.ts";
 import { type Lifecycle, NEXT, personStatusOf, type Reason, STOP_STATES, type SubjectKind } from "./states.ts";
 
@@ -123,6 +123,7 @@ export function guardOf(db: Db, s: Subject, to: Lifecycle, opts: { waive?: strin
     if (coolingEnd(s, days) > now && !cleanText(opts.waive ?? "")) return no("cooling_not_over", `You can close this after the cooling period of ${days} days. To close it now, give a reason.`);
     if (s.kind === "agent" && s.runtime === "active") return no("plan_open", "This agent still runs. Pause it in Portal first.");
     if (s.kind === "person") {
+      if (senderBarOpen(db, s.id) && !cleanText(opts.waive ?? "")) return no("sender_bar_open", "Messages from this person can still reach agents. Wait for Connect to show the bar, or give a reason to close it now.");
       const unnamed = unnamedAccounts(db, s.id, now);
       if (unnamed > 0) return no("unlinked_accounts", `${unnamed} accounts in Connect have no person. Check them. If none is this person's, accept that with a reason.`);
       const open = undecidedAgents(db, s.id);
@@ -139,9 +140,19 @@ export function capState(db: Db, now: number): { used: number; limit: number } {
   return { used: stopsSince(db, now - CAP_WINDOW_MS), limit: stopCap(db) };
 }
 
-export function assertCap(db: Db, confirmCount: number | undefined, now: number): void {
-  const { used, limit } = capState(db, now);
-  if (used >= limit && confirmCount !== used + 1) throw new TbError("stop_cap_reached", `You stopped ${used} in the last 10 minutes. Confirm stop number ${used + 1}.`, 409, { count: used + 1 });
+/** The entries one stop reaches: a person and the agents that stop with them. */
+export function stopReach(db: Db, kind: string, id: string): string[] {
+  const own = kind === "person" ? db.prepare("SELECT id FROM fleet_agents WHERE owner_id = ? AND status <> 'removed' AND keep_running = 0 AND lifecycle <> 'archived'").all(id).map((r) => `agent:${String(r.id)}`) : [];
+  return [`${kind}:${id}`, ...own];
+}
+
+/** N2-3: counted in entries, and only what is new in this window needs the confirm. `details.count` stays: any page that can call this can read the count, so hiding it would stop no script. */
+export function assertCap(db: Db, confirmCount: number | undefined, now: number, adding: readonly string[]): void {
+  const seen = stoppedSince(db, now - CAP_WINDOW_MS);
+  const before = seen.size;
+  for (const k of adding) seen.add(k);
+  const limit = stopCap(db);
+  if (seen.size > before && seen.size > limit && confirmCount !== seen.size) throw new TbError("stop_cap_reached", `This makes ${seen.size} stopped in the last 10 minutes. Confirm ${seen.size}.`, 409, { count: seen.size });
 }
 
 export interface Grant {
@@ -203,7 +214,7 @@ export function transition(db: Db, input: TransitionInput, now = Date.now()): { 
     if (input.expectedRev !== undefined && input.expectedRev !== s.rev) fail("lifecycle_stale", "This entry changed since you looked. Open it again.", 409);
     const problem = guardOf(db, s, input.to, { waive: input.waive }, now);
     if (problem) throw new TbError(problem.code, problem.message, problem.status);
-    if (STOP_STATES.includes(input.to) && !input.noCap) assertCap(db, input.confirmCount, now);
+    if (STOP_STATES.includes(input.to) && !input.noCap) assertCap(db, input.confirmCount, now, stopReach(db, s.kind, s.id));
     const note = cleanText(input.note ?? "").slice(0, 500) || null;
     const waive = cleanText(input.waive ?? "").slice(0, 200);
     const from = s.lifecycle;
@@ -288,7 +299,10 @@ export function statusRequested(db: Db, id: string, want: "active" | "departed",
   const cur = personStatusOf(s.lifecycle);
   if (cur === want) return;
   if (want === "active") fail("use_bring_back", "This person left. Use Bring back on the person's page.", 409);
-  transition(db, { kind: "person", id, to: "leaving", reason: "other", note: "Marked as departed on the People page.", actor }, now);
+  // This form has no confirm to send. It stops when the window has room, however many agents the person has; past that it names the page that can confirm.
+  const { used, limit } = capState(db, now);
+  if (used >= limit) throw new TbError("stop_cap_reached", `${used} were stopped in the last 10 minutes. Open this person's page to confirm this stop.`, 409);
+  transition(db, { kind: "person", id, to: "leaving", reason: "other", note: "Marked as departed on the People page.", actor, noCap: true }, now);
 }
 
 /** person_delete: a stop must end first, by the owner's named step, because the delete would remove the floor on this person's handles and lift the owned agents' stop. Handles stay on a closed row (T7). */
@@ -318,7 +332,7 @@ export function setDates(db: Db, input: { kind: SubjectKind; id: string; validFr
     if (input.validUntil !== undefined && until !== null && until <= now && !input.confirmPastDate) fail("date_in_past", "This end date has passed. Confirm that you want to stop this entry.", 409);
     // S2-7: a start date in the future stops a working entry at once (floor, not_started), so it counts as a stop. A later date on an entry that already waits does not.
     const startsLater = from !== null && from > now && (s.validFrom === null || s.validFrom <= now) && (s.lifecycle === "active" || s.lifecycle === "proposed");
-    if (startsLater && !input.noCap) assertCap(db, input.confirmCount, now);
+    if (startsLater && !input.noCap) assertCap(db, input.confirmCount, now, stopReach(db, s.kind, s.id));
     bump(db);
     const table = s.kind === "agent" ? "fleet_agents" : "fleet_people";
     db.prepare(`UPDATE ${table} SET valid_from = ?, valid_until = ?, lifecycle_rev = ? WHERE id = ?`).run(from, until, revision(db), s.id);

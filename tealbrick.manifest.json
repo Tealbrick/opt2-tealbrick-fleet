@@ -4481,6 +4481,11 @@
           "request": {
             "type": "string",
             "maxLength": 40
+          },
+          "confirmCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
           }
         }
       },

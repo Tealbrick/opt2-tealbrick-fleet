@@ -176,7 +176,7 @@ async function splitWorld() {
     store.setAgent(w.db, { agent: id, owner: w.ann.id }, w.clock.t);
     w.core.addAgent(id, 0, 0);
   }
-  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  set(w.db, "person", w.ann.id, "leaving", { noCap: true }, w.clock.t);
   const first = w.makePlan({ kind: "person", id: w.ann.id });
   const parts = w.db.prepare("SELECT id FROM fleet_plans WHERE group_id = ? ORDER BY part").all(first).map((r) => String(r.id));
   for (const id of parts) await w.tick(id);
@@ -855,7 +855,7 @@ test("D2, choices at the first step: stop, transfer and keep all land in one dra
   assert.equal(w.core.data.agents[HENRY]?.keys, 0);
   assert.equal(w.core.data.agents[SALES]?.keys, 0);
   assert.equal(w.core.data.agents[kept]?.keys, 1, "keep running keeps its key, and the page says the person who left may hold it");
-  const rows = loadColleagues(w.db, Date.now()).byId;
+  const rows = loadColleagues(w.db, w.clock.t).byId;
   for (const a of [HENRY, SALES, kept]) assert.ok(!rows.get(`agent:${a}`)?.findings.some((f) => f.code === "key_not_decided"), a);
   const view = (await run("plan_get", { plan: id }, ctxOf(w))).plans[0];
   assert.doesNotMatch(String(view.note), /stay paused with the key/);
@@ -952,12 +952,14 @@ test("D2 review: a transfer to the current owner is refused; a plan with no Core
   assert.match(view.note, /2 agents stay paused with the key/);
   assert.doesNotMatch(view.headline, /^Done/);
 
+  // only an entry new in this window needs the confirm: the owner stopped an hour ago, two others just now, the cap is 2
   const v = makeWorld();
-  set(v.db, "person", v.ann.id, "suspended", {}, Date.now());
-  v.db.prepare("INSERT INTO fleet_settings (key, value) VALUES ('stop_cap', '1') ON CONFLICT (key) DO UPDATE SET value = '1'").run();
+  set(v.db, "person", v.ann.id, "suspended", {}, Date.now() - 3_600_000);
+  for (const name of ["P1", "P2"]) set(v.db, "person", store.setPerson(v.db, { name }, v.clock.t).id, "suspended", {}, Date.now());
+  v.db.prepare("INSERT INTO fleet_settings (key, value) VALUES ('stop_cap', '2') ON CONFLICT (key) DO UPDATE SET value = '2'").run();
   await assert.rejects(run("plan_send", { kind: "person", id: v.ann.id, decisions: [{ agent: HENRY, decision: "stop" }] }, ctxOf(v)), refused("stop_cap_reached", 409));
   assert.equal(stateOf(v.db, "agent", HENRY), "active");
-  const ok = await run("plan_send", { kind: "person", id: v.ann.id, decisions: [{ agent: HENRY, decision: "stop" }], confirmCount: 2 }, ctxOf(v));
+  const ok = await run("plan_send", { kind: "person", id: v.ann.id, decisions: [{ agent: HENRY, decision: "stop" }], confirmCount: 3 }, ctxOf(v));
   assert.equal(ok.plans.length, 1);
   assert.equal(stateOf(v.db, "agent", HENRY), "leaving");
 });
@@ -980,6 +982,287 @@ test("D2 review: plan_send when the entry moves during the call to Portal: the o
     return true;
   });
   assert.equal(w.plan(id).state, "replaced");
+});
+
+test("N2-3: the cap counts a person's agents with the person; a blocked verdict counts and needs the same confirm; the banner counts them; each entry once", async () => {
+  const { stopsSince } = await import("../src/lifecycle/events.ts");
+  const { recordReview } = await import("../src/reviews.ts");
+  const w = makeWorld();
+  const { agentId } = await import("./plans-world.ts");
+  const many = Array.from({ length: 6 }, (_, i) => agentId(i + 50));
+  store.syncAgents(w.db, [...w.db.prepare("SELECT id, name, mode, status FROM fleet_agents").all(), ...many.map((id) => ({ id, name: id, mode: "free", status: "active" }))] as never, w.clock.t);
+  for (const id of many) store.setAgent(w.db, { agent: id, owner: w.ann.id }, w.clock.t);
+  // Ann, Henry, Sales and six more: 9 entries, cap 5. Counted once before: one stop with six agents went through with no word
+  assert.throws(() => set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t), (e: TbError) => e.code === "stop_cap_reached" && e.details?.count === 9);
+  assert.equal(stateOf(w.db, "person", w.ann.id), "active");
+  set(w.db, "person", w.ann.id, "leaving", { confirmCount: 9 }, w.clock.t);
+  assert.equal(stopsSince(w.db, w.clock.t - 1000), 9);
+  // the agents' own stop in the same window adds nothing: each entry once
+  set(w.db, "agent", HENRY, "leaving", {}, w.clock.t);
+  assert.equal(stopsSince(w.db, w.clock.t - 1000), 9);
+  // keep-running is not stopped by the cascade
+  const v = makeWorld();
+  v.db.prepare("UPDATE fleet_agents SET keep_running = 1, keep_reason = 'x' WHERE id = ?").run(SALES);
+  set(v.db, "person", v.ann.id, "leaving", {}, v.clock.t);
+  assert.equal(stopsSince(v.db, v.clock.t - 1000), 2);
+  // a blocked verdict is a stop in the floor
+  const b = makeWorld();
+  const people = Array.from({ length: 5 }, (_, i) => store.setPerson(b.db, { name: `P${i}` }, b.clock.t));
+  for (const p of people) set(b.db, "person", p.id, "suspended", {}, b.clock.t);
+  const digestOf = async (c: OpContext, id: string): Promise<string> => (await run("review_get", { subject: { kind: "agent", id } }, c)).current.digest;
+  const input = { subject: { kind: "agent" as const, id: HENRY }, verdict: "blocked" as const, reason: "Security", snapshotDigest: await digestOf(ctxOf(b), HENRY) };
+  assert.throws(() => recordReview(b.db, "per_owner", input, b.clock.t), (e: TbError) => e.code === "stop_cap_reached" && e.details?.count === 6);
+  assert.notEqual(b.db.prepare("SELECT trust FROM fleet_agents WHERE id = ?").get(HENRY)?.trust, "blocked");
+  recordReview(b.db, "per_owner", { ...input, confirmCount: 6 }, b.clock.t);
+  assert.equal(b.db.prepare("SELECT trust FROM fleet_agents WHERE id = ?").get(HENRY)?.trust, "blocked");
+  assert.equal(stopsSince(b.db, b.clock.t - 1000), 6);
+  // a trusted verdict is no stop
+  const c = makeWorld();
+  recordReview(c.db, "per_owner", { subject: { kind: "agent", id: SALES }, verdict: "trusted", reason: "ok", snapshotDigest: await digestOf(ctxOf(c), SALES) }, c.clock.t);
+  assert.equal(stopsSince(c.db, c.clock.t - 1000), 0);
+});
+
+test("N2-3: nobody can confirm for the timer or the old form: a person with many agents still stops while the window has room; past it the timer waits and the form names the page", async () => {
+  const { tickDates } = await import("../src/lifecycle/validity.ts");
+  const { agentId } = await import("./plans-world.ts");
+  const w = makeWorld();
+  const many = Array.from({ length: 6 }, (_, i) => agentId(i + 60));
+  store.syncAgents(w.db, [...w.db.prepare("SELECT id, name, mode, status FROM fleet_agents").all(), ...many.map((id) => ({ id, name: id, mode: "free", status: "active" }))] as never, w.clock.t);
+  for (const id of many) store.setAgent(w.db, { agent: id, owner: w.ann.id }, w.clock.t);
+  w.db.prepare("UPDATE fleet_people SET valid_until = ? WHERE id = ?").run(w.clock.t - 1000, w.ann.id);
+  const seen = new Set<string>();
+  tickDates(w.db, seen, w.clock.t);
+  assert.equal(tickDates(w.db, seen, w.clock.t + 60_000).stopped, 1);
+  assert.equal(stateOf(w.db, "person", w.ann.id), "suspended");
+
+  const v = makeWorld();
+  for (const id of many) {
+    store.syncAgents(v.db, [...v.db.prepare("SELECT id, name, mode, status FROM fleet_agents").all(), { id, name: id, mode: "free", status: "active" }] as never, v.clock.t);
+    store.setAgent(v.db, { agent: id, owner: v.ann.id }, v.clock.t);
+  }
+  store.setPerson(v.db, { id: v.ann.id, name: "Ann", status: "departed" }, v.clock.t);
+  assert.equal(stateOf(v.db, "person", v.ann.id), "leaving");
+
+  const full = makeWorld();
+  for (const name of ["A", "B", "C", "D", "E"]) set(full.db, "person", store.setPerson(full.db, { name }, full.clock.t).id, "suspended", {}, full.clock.t);
+  assert.throws(() => store.setPerson(full.db, { id: full.ann.id, name: "Ann", status: "departed" }, full.clock.t), (e: TbError) => e.code === "stop_cap_reached" && /this person's page/.test(e.message));
+  assert.equal(stateOf(full.db, "person", full.ann.id), "active");
+});
+
+test("N2-1: a plain owner change from a stopped owner is refused with the path; an active owner's change shows a finding until the key is replaced; the plan's transfer passes", async () => {
+  const { loadColleagues } = await import("../src/lifecycle/view.ts");
+  const codes = (w: World, id: string) => loadColleagues(w.db, w.clock.t).byId.get(`agent:${id}`)?.findings.map((f) => f.code) ?? [];
+  const w = makeWorld();
+  const bob = store.setPerson(w.db, { name: "Bob" }, w.clock.t);
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  await assert.rejects(run("agent_set", { agent: HENRY, owner: bob.id }, ctxOf(w)), refused("use_transfer", 409));
+  assert.equal(w.db.prepare("SELECT owner_id FROM fleet_agents WHERE id = ?").get(HENRY)?.owner_id, w.ann.id, "the stop stands");
+  // the path it names works, and its key goes in the same draft
+  const out = await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: HENRY, decision: "transfer", newOwner: bob.id }] }, ctxOf(w));
+  const id = out.plans[0].id;
+  assert.equal(w.db.prepare("SELECT owner_id FROM fleet_agents WHERE id = ?").get(HENRY)?.owner_id, bob.id);
+  assert.ok(codes(w, HENRY).includes("key_after_transfer"), "until Core replaced the key");
+  w.clock.t = Date.now() + 1000; // the op stamped the change with the real clock
+  await w.tick(id);
+  approveAndDeliver(w, String(w.plan(id).draft_key), HENRY, SALES);
+  await w.tick(id);
+  assert.ok(!codes(w, HENRY).includes("key_after_transfer"));
+
+  // quiet: first owner, and a change between active owners is allowed, with the finding
+  const v = makeWorld();
+  const carol = store.setPerson(v.db, { name: "Carol" }, v.clock.t);
+  await run("agent_set", { agent: HENRY, owner: carol.id }, ctxOf(v));
+  assert.ok(codes(v, HENRY).includes("key_after_transfer"));
+  assert.ok(!codes(v, SALES).includes("key_after_transfer"));
+  const fresh = makeWorld();
+  store.setAgent(fresh.db, { agent: SALES, owner: null }, fresh.clock.t);
+  await run("agent_set", { agent: SALES, owner: fresh.ann.id }, ctxOf(fresh));
+  assert.ok(!codes(fresh, SALES).includes("key_after_transfer"), "from nobody: no old key holder");
+});
+
+test("N3-3: a transferred agent's things stay, ticked or not; N3-9: bringing a person back says the bar stays", async () => {
+  const { colleagueDetail } = await import("../src/lifecycle/view.ts");
+  const w = makeWorld();
+  const bob = store.setPerson(w.db, { name: "Bob" }, w.clock.t);
+  w.connect.add(agentItem({ id: "account_as_itself:a", kind: "account_as_itself" }));
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  const id = (await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: HENRY, decision: "transfer", newOwner: bob.id }], items: [{ product: "connect", id: "account_as_itself:a" }] }, ctxOf(w))).plans[0].id;
+  await w.tick(id);
+  assert.equal(w.item(id, "account_as_itself:a").state, "listed");
+  approveAndDeliver(w, String(w.plan(id).draft_key), HENRY);
+  await w.tick(id);
+  assert.equal(w.connect.data.handled.length, 0);
+
+  const v = makeWorld();
+  v.db.prepare("UPDATE fleet_agents SET owner_id = NULL").run();
+  v.db.prepare("INSERT INTO fleet_handles (handle, person_id, created_at) VALUES ('slack:UANN', ?, 1)").run(v.ann.id);
+  v.connect.add({ id: "channel_sender:slack:UANN", kind: "channel_sender", subject: { kind: "person", id: v.ann.id }, resource: "slack:UANN", level: "use", label: "Sender" });
+  set(v.db, "person", v.ann.id, "leaving", {}, v.clock.t);
+  const pid = v.makePlan({ kind: "person", id: v.ann.id });
+  await v.tick(pid);
+  await run("lifecycle_set", { kind: "person", id: v.ann.id, to: "active", reason: "mistake" }, ctxOf(v));
+  const d = await colleagueDetail(ctxOf(v), "person", v.ann.id);
+  assert.ok(d.notices.some((n: string) => /sender bar in Connect/.test(n)));
+});
+
+test("N2-1 review: a transfer keeps the agent stopped until the owner resumes it: the floor does not lift before the new key; an agent with its own stop can find an active owner by agent_set", async () => {
+  const { directoryFeed } = await import("../src/feed.ts");
+  const w = makeWorld();
+  const bob = store.setPerson(w.db, { name: "Bob" }, w.clock.t);
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: HENRY, decision: "transfer", newOwner: bob.id }] }, ctxOf(w));
+  assert.equal(stateOf(w.db, "agent", HENRY), "suspended");
+  const feed = directoryFeed(w.db, { accept: ["lifecycle"] }) as { agents: { id: string; floor?: boolean }[] };
+  assert.equal(feed.agents.find((a) => a.id === HENRY)?.floor, true, "refused until its key is new and the owner resumes it");
+
+  const v = makeWorld();
+  const carol = store.setPerson(v.db, { name: "Carol" }, v.clock.t);
+  set(v.db, "agent", HENRY, "leaving", {}, v.clock.t);
+  set(v.db, "person", v.ann.id, "leaving", {}, v.clock.t);
+  await run("agent_set", { agent: HENRY, owner: carol.id }, ctxOf(v));
+  assert.equal(stateOf(v.db, "agent", HENRY), "leaving", "its own stop stands");
+});
+
+test("N3-3 review: an agent both offboarded and rotated is closing: its items end", async () => {
+  const w = makeWorld();
+  w.connect.add(agentItem({ id: "account_as_itself:a", kind: "account_as_itself" }));
+  leave(w);
+  const id = w.makePlan({ kind: "agent", id: HENRY, transfers: [HENRY] });
+  await w.tick(id);
+  assert.equal(w.item(id, "account_as_itself:a").state, "pending");
+});
+
+function withSender(w: World) {
+  w.db.prepare("UPDATE fleet_agents SET owner_id = NULL").run();
+  w.db.prepare("INSERT INTO fleet_handles (handle, person_id, created_at) VALUES ('slack:UANN', ?, 1)").run(w.ann.id);
+  w.connect.add({ id: "channel_sender:slack:UANN", kind: "channel_sender", subject: { kind: "person", id: w.ann.id }, resource: "slack:UANN", level: "use", label: "Slack sender" });
+}
+
+const barPlan = (w: World) => w.db.prepare("SELECT id FROM fleet_plans WHERE purpose = 'bar'").get()?.id as string | undefined;
+
+test("N2-6: the old People form makes no plan: the bar still goes, by the job, with no Core step; the finding shows until Connect proves it", async () => {
+  const { loadColleagues } = await import("../src/lifecycle/view.ts");
+  const codes = (w: World) => loadColleagues(w.db, w.clock.t).byId.get(`person:${w.ann.id}`)?.findings.map((f) => f.code) ?? [];
+  const w = makeWorld();
+  withSender(w);
+  store.setPerson(w.db, { id: w.ann.id, name: "Ann", status: "departed" }, w.clock.t);
+  assert.equal(stateOf(w.db, "person", w.ann.id), "leaving");
+  assert.ok(codes(w).includes("sender_bar_open"));
+  scanPlans(w.db, w.clock.t, () => {});
+  assert.equal(barPlan(w), undefined, "the normal flow has its time first");
+  w.clock.t += 21_000;
+  scanPlans(w.db, w.clock.t, () => {});
+  scanPlans(w.db, w.clock.t, () => {});
+  const id = barPlan(w) as string;
+  assert.equal(w.db.prepare("SELECT COUNT(*) AS n FROM fleet_plans").get()?.n, 1, "one plan");
+  assert.equal(w.plan(id).rail, "none");
+  // Connect does not answer: no claim, the finding stays, Close is refused
+  w.connect.listScript.push(() => {
+    throw new TbError("app_error", "down", 500);
+  });
+  await w.tick(id);
+  assert.ok(codes(w).includes("sender_bar_open"));
+  assert.equal(w.plan(id).state, "running");
+  w.clock.t += 60_000;
+  await w.tick(id);
+  assert.deepEqual(w.connect.data.ended, ["channel_sender:slack:UANN"]);
+  assert.equal(w.plan(id).state, "done");
+  assert.ok(!codes(w).includes("sender_bar_open"), "proved by a fresh list");
+  assert.ok(codes(w).includes("leaving_no_plan"), "the bar is not the plan for the agents");
+  assert.equal(w.core.data.drafts.length, 0, "nothing in Portal");
+});
+
+test("N2-6: a failed plan_send, or a plan the owner made: no second plan; the normal flow bars through its own plan; a plan_send replaces an open bar plan", async () => {
+  const w = makeWorld();
+  withSender(w);
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  const own = w.makePlan({ kind: "person", id: w.ann.id });
+  w.clock.t += 21_000;
+  scanPlans(w.db, w.clock.t, () => {});
+  assert.equal(barPlan(w), undefined);
+  await w.tick(own);
+  assert.deepEqual(w.connect.data.ended, ["channel_sender:slack:UANN"]);
+
+  const v = makeWorld();
+  withSender(v);
+  set(v.db, "person", v.ann.id, "leaving", {}, v.clock.t);
+  v.clock.t += 21_000;
+  scanPlans(v.db, v.clock.t, () => {});
+  const bar = barPlan(v) as string;
+  const out = await run("plan_send", { kind: "person", id: v.ann.id }, ctxOf(v));
+  assert.equal(v.plan(bar).state, "replaced");
+  assert.equal(out.plans.length, 1);
+});
+
+test("N2-6: fire on Close while the bar is open, a named reason passes; quiet: no handles, a migrated person, Connect not installed, an owner who unticked it", async () => {
+  const { senderBarOpen } = await import("../src/plans/guards.ts");
+  const w = makeWorld();
+  withSender(w);
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  assert.throws(() => set(w.db, "person", w.ann.id, "archived", { waive: undefined }, w.clock.t + 40 * DAY_MS), refused("sender_bar_open", 409));
+  set(w.db, "person", w.ann.id, "archived", { waive: WAIVE }, w.clock.t);
+  assert.equal(stateOf(w.db, "person", w.ann.id), "archived");
+
+  const none = makeWorld();
+  none.db.prepare("UPDATE fleet_agents SET owner_id = NULL").run();
+  set(none.db, "person", none.ann.id, "leaving", {}, none.clock.t);
+  none.clock.t += 21_000;
+  scanPlans(none.db, none.clock.t, () => {});
+  assert.equal(barPlan(none), undefined, "no handle, nothing to bar");
+  assert.equal(senderBarOpen(none.db, none.ann.id), false);
+
+  const old = makeWorld();
+  withSender(old);
+  set(old.db, "person", old.ann.id, "leaving", { reason: "other" }, old.clock.t);
+  old.db.prepare("UPDATE fleet_people SET lifecycle_reason = 'migrated' WHERE id = ?").run(old.ann.id);
+  old.clock.t += 21_000;
+  scanPlans(old.db, old.clock.t, () => {});
+  assert.equal(barPlan(old), undefined, "marked before this version: the owner confirms it in a plan");
+  assert.equal(senderBarOpen(old.db, old.ann.id), true);
+
+  const gone = makeWorld();
+  withSender(gone);
+  gone.installed = [];
+  set(gone.db, "person", gone.ann.id, "leaving", {}, gone.clock.t);
+  await gone.tick(gone.makePlan({ kind: "person", id: gone.ann.id }));
+  assert.equal(senderBarOpen(gone.db, gone.ann.id), false, "not installed: nothing reaches an agent through it");
+
+  const un = makeWorld();
+  withSender(un);
+  set(un.db, "person", un.ann.id, "leaving", {}, un.clock.t);
+  await un.tick(un.makePlan({ kind: "person", id: un.ann.id, items: [] }));
+  assert.equal(senderBarOpen(un.db, un.ann.id), false, "his choice, and the step says it stays");
+});
+
+test("N2-6 review: a sender step that cannot be ended keeps the finding; a stale bar plan is made again; the record says the system made it, with no alert about a date", async () => {
+  const { senderBarOpen } = await import("../src/plans/guards.ts");
+  const w = makeWorld();
+  withSender(w);
+  (w.connect.data.rows[0] as { revocable?: boolean }).revocable = false;
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  w.clock.t += 21_000;
+  scanPlans(w.db, w.clock.t, () => {});
+  const id = barPlan(w) as string;
+  await w.tick(id);
+  assert.equal(w.item(id, "channel_sender:slack:UANN").state, "manual");
+  assert.equal(senderBarOpen(w.db, w.ann.id), true, "a step someone must do by hand bars nobody yet");
+  assert.equal(w.inbox.asks.length, 0, "the bar plan is no date alert");
+  const row = w.db.prepare("SELECT actor_kind, note FROM fleet_lifecycle_events WHERE plan_id = ? ORDER BY seq LIMIT 1").get(id);
+  assert.equal(row?.actor_kind, "system");
+  assert.match(String(row?.note), /sender bar only/);
+
+  const v = makeWorld();
+  withSender(v);
+  set(v.db, "person", v.ann.id, "leaving", {}, v.clock.t);
+  v.clock.t += 21_000;
+  scanPlans(v.db, v.clock.t, () => {});
+  const first = barPlan(v) as string;
+  v.db.prepare("UPDATE fleet_people SET lifecycle_rev = lifecycle_rev + 1 WHERE id = ?").run(v.ann.id);
+  await v.tick(first);
+  assert.equal(v.plan(first).state, "stale");
+  v.clock.t += 60_000;
+  scanPlans(v.db, v.clock.t, () => {});
+  assert.equal(v.db.prepare("SELECT COUNT(*) AS n FROM fleet_plans WHERE purpose = 'bar'").get()?.n, 2);
 });
 
 test("B10: a second plan_send carries the earlier new-key step: the agent already moved, so only the older plan knew; the draft asks for it again", async () => {
@@ -1035,4 +1318,12 @@ test("N2-2: the feed sends one epoch to a reader of the lifecycle, on full, unch
   // restoring the same archive again brings back the older restore_seen, so it counts again
   w.db.prepare("DELETE FROM fleet_settings WHERE key = 'restore_seen'").run();
   assert.notEqual((directoryFeed(w.db, { accept: ["lifecycle"] }) as { epoch: string }).epoch, after.epoch);
+});
+
+test("N2-2: after a Governance that went back, the page says what Rules still holds", async () => {
+  const { floorView } = await import("../src/lifecycle/floor.ts");
+  const read = { version: "0.7.0-dev.3", feedRevision: 9, entries: 3, lastGateAt: null };
+  assert.match(String(floorView({ ...read, unlisted: 2 }, 1, 0, false).gateNote), /Rules still holds 2 stops Governance does not list\. Clear them on the Rules page\./);
+  assert.equal(floorView({ ...read, unlisted: 0 }, 1, 0, false).gateNote, null);
+  assert.equal(floorView(read, 1, 0, false).gateNote, null);
 });
