@@ -8,7 +8,7 @@ import type { Db } from "@opt2-tealbrick/miniapp-sdk";
 import { appendEvent, noteRestore, verifyChain } from "../src/lifecycle/events.ts";
 import { setSettings } from "../src/lifecycle/settings.ts";
 import { leanPersonStatus, personStatusOf } from "../src/lifecycle/states.ts";
-import { CAP_WINDOW_MS, DAY_MS, setDates, setKeepRunning, statusRequested } from "../src/lifecycle/transitions.ts";
+import { CAP_WINDOW_MS, capState, DAY_MS, setDates, setKeepRunning, statusRequested } from "../src/lifecycle/transitions.ts";
 import { requestForNewAgents, requestReview } from "../src/reviews.ts";
 import * as store from "../src/store.ts";
 import { AGENT_A, AGENT_B, migratedDb, migrationFiles } from "./helpers.ts";
@@ -24,8 +24,9 @@ function sources(dir: string): string[] {
 
 test("one setter: only src/lifecycle/transitions.ts writes a lifecycle, a date or a keep-running tick", () => {
   const root = new URL("../src/", import.meta.url).pathname;
-  const writer = /\b(UPDATE\s+\$?\{?\w*\}?\s*SET|INSERT\s+INTO\s+fleet_(people|agents))\b[^"`]*\b(lifecycle|lifecycle_rev|lifecycle_reason|valid_from|valid_until|keep_running|migrated_note)\b/;
-  const offenders = sources(root).filter((f) => !f.endsWith("lifecycle/transitions.ts") && writer.test(readFileSync(f, "utf8")));
+  // line by line: a statement that writes names one of the columns on its line, whatever quotes or interpolation stand between
+  const writer = /\b(UPDATE\s+\S+\s+SET|INSERT\s+INTO\s+fleet_(people|agents))\b.*\b(lifecycle|lifecycle_rev|lifecycle_reason|valid_from|valid_until|keep_running|migrated_note)\b/;
+  const offenders = sources(root).filter((f) => !f.endsWith("lifecycle/transitions.ts") && readFileSync(f, "utf8").split("\n").some((l) => writer.test(l)));
   assert.deepEqual(offenders, []);
   // fire on bad: the scan finds a writer
   assert.ok(writer.test('db.prepare("UPDATE fleet_people SET lifecycle = ? WHERE id = ?")'));
@@ -51,6 +52,10 @@ test("agents: an agent proposes about others and never about itself, by id or by
   // fire on bad: about itself, by the handle Connect gave it
   db.prepare("INSERT INTO fleet_agent_handles (agent_id, handle) VALUES (?, 'slack:UAGENTA01')").run(AGENT_A.id);
   assert.throws(() => requestReview(db, { kind: "agent", id: AGENT_A.id }, { subject: { kind: "outside_agent", handle: "slack:uagenta01" }, why: "Please trust me" }), refused("no_self_request", 403));
+  // fire on bad: an empty id does not skip the handle check; an id of a contact that holds its handle is itself too
+  assert.throws(() => requestReview(db, { kind: "agent", id: AGENT_A.id }, { subject: { kind: "person", id: "", handle: "slack:UAGENTA01" }, why: "x" }), refused("no_self_request", 403));
+  const alias = store.setPerson(db, { name: "Alias", kind: "outside_agent", handles: ["slack:UAGENTA01"] }, T0);
+  assert.throws(() => requestReview(db, { kind: "agent", id: AGENT_A.id }, { subject: { kind: "outside_agent", id: alias.id }, why: "x" }), refused("no_self_request", 403));
   // the same handle asked by another agent is a normal request
   assert.equal(requestReview(db, { kind: "agent", id: AGENT_B.id }, { subject: { kind: "outside_agent", handle: "slack:UAGENTA01" }, why: "Unknown" }).status, "requested");
 });
@@ -75,6 +80,22 @@ test("T4: resume is the owner's act, needs an active owner and no passed end dat
   assert.throws(() => set(db, "agent", AGENT_A.id, "active"), refused("date_passed", 409));
   setDates(db, { kind: "agent", id: AGENT_A.id, validUntil: null, actor: OWNER }, T0);
   assert.equal(set(db, "agent", AGENT_A.id, "active").to, "active");
+});
+
+test("T6: undo keeps the guards of a move to active: no way around T4 through leaving", () => {
+  const { db, ann } = world();
+  set(db, "agent", AGENT_B.id, "suspended");
+  assert.throws(() => set(db, "agent", AGENT_B.id, "active"), refused("owner_required", 409));
+  set(db, "agent", AGENT_B.id, "leaving");
+  assert.throws(() => set(db, "agent", AGENT_B.id, "active"), refused("owner_required", 409));
+  store.setAgent(db, { agent: AGENT_B.id, owner: ann.id }, T0);
+  db.prepare("UPDATE fleet_agents SET trust = 'blocked' WHERE id = ?").run(AGENT_B.id);
+  assert.throws(() => set(db, "agent", AGENT_B.id, "active"), refused("trust_blocked", 409));
+  db.prepare("UPDATE fleet_agents SET trust = 'trusted' WHERE id = ?").run(AGENT_B.id);
+  setDates(db, { kind: "agent", id: AGENT_B.id, validUntil: new Date(T0 - 1).toISOString(), confirmPastDate: true, actor: OWNER }, T0);
+  assert.throws(() => set(db, "agent", AGENT_B.id, "active"), refused("date_passed", 409));
+  setDates(db, { kind: "agent", id: AGENT_B.id, validUntil: null, actor: OWNER }, T0);
+  assert.equal(set(db, "agent", AGENT_B.id, "active").to, "active");
 });
 
 test("transitions: same state, not in the table, unknown entry, outside agent, stale revision", () => {
@@ -170,13 +191,20 @@ test("person_set: departed is T5; active on a departed person is refused; an out
   assert.equal(store.getPerson(db, bot.id).status, "departed");
   store.setPerson(db, { id: bot.id, name: "Bot", status: "active" }, T0);
   assert.equal(store.getPerson(db, bot.id).status, "active");
-  // quiet: outside agent becomes a person with a lifecycle
+  // quiet: outside agent becomes a person with a lifecycle; status and lifecycle agree
   store.setPerson(db, { id: bot.id, name: "Bot", kind: "person" }, T0);
   assert.equal(stateOf(db, "person", bot.id), "active");
+  assert.equal(store.getPerson(db, bot.id).status, "active");
+  const gone = store.setPerson(db, { name: "Gone", kind: "outside_agent", status: "departed" }, T0);
+  store.setPerson(db, { id: gone.id, name: "Gone", kind: "person" }, T0);
+  assert.deepEqual([stateOf(db, "person", gone.id), store.getPerson(db, gone.id).status], ["leaving", "departed"]);
+  const back = store.setPerson(db, { name: "Back", kind: "outside_agent", status: "departed" }, T0);
+  store.setPerson(db, { id: back.id, name: "Back", kind: "person", status: "active" }, T0);
+  assert.deepEqual([stateOf(db, "person", back.id), store.getPerson(db, back.id).status], ["active", "active"]);
   statusRequested(db, "psn_none", "departed", OWNER, T0); // unknown: nothing
 });
 
-test("person_delete: refused while stopped or leaving; allowed after Close or while active, with an event", () => {
+test("person_delete: refused while stopped, leaving or closed, so the floor on the handles stays; allowed after the owner's named undo, with an event", () => {
   const { db, ann } = world();
   const solo = store.setPerson(db, { name: "Solo" }, T0);
   assert.equal(store.deletePerson(db, solo.id, T0), true);
@@ -187,6 +215,9 @@ test("person_delete: refused while stopped or leaving; allowed after Close or wh
   assert.throws(() => store.deletePerson(db, ann.id, T0), refused("lifecycle_open", 409));
   setKeepRunning(db, AGENT_A.id, "x", OWNER, T0);
   set(db, "person", ann.id, "archived", { waive: WAIVE });
+  assert.throws(() => store.deletePerson(db, ann.id, T0), refused("lifecycle_open", 409));
+  assert.deepEqual(store.getPerson(db, ann.id).status, "departed");
+  set(db, "person", ann.id, "proposed", { reason: "returned" });
   assert.equal(store.deletePerson(db, ann.id, T0), true);
 });
 
@@ -199,6 +230,13 @@ test("S2-7: more than 5 stops in 10 minutes need a confirm naming the count; the
   assert.throws(() => set(db, "person", last, "suspended", { confirmCount: 99 }), refused("stop_cap_reached", 409), "the count must be the right one");
   assert.equal(stateOf(db, "person", last), "active");
   assert.equal(set(db, "person", last, "suspended", { confirmCount: 6 }).to, "suspended");
+  // a future start date stops a working entry at once, so it counts and needs the same confirm
+  const later = store.setPerson(db, { name: "Later start" }, T0);
+  assert.throws(() => setDates(db, { kind: "person", id: later.id, validFrom: new Date(T0 + DAY_MS).toISOString(), actor: OWNER }, T0), refused("stop_cap_reached", 409));
+  setDates(db, { kind: "person", id: later.id, validFrom: new Date(T0 + DAY_MS).toISOString(), confirmCount: 7, actor: OWNER }, T0);
+  assert.equal(capState(db, T0).used, 7);
+  setDates(db, { kind: "person", id: later.id, validFrom: new Date(T0 + 2 * DAY_MS).toISOString(), actor: OWNER }, T0 + CAP_WINDOW_MS + 1);
+  assert.equal(capState(db, T0 + CAP_WINDOW_MS + 1).used, 0, "moving a date that already waits is no new stop");
   // a new window
   const b = store.setPerson(db, { name: "Later" }, T0);
   assert.equal(set(db, "person", b.id, "leaving", {}, T0 + CAP_WINDOW_MS + 1).to, "leaving");
