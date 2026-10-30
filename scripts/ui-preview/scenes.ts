@@ -310,7 +310,7 @@ export const scenes: Scene[] = [
       await dialog.getByRole("button", { name: "Stop", exact: true }).click();
       await dialog.getByText("Not applied: do these in Portal").waitFor();
     },
-    expect: i === 0 ? ["The mark takes effect now"] : i === 2 ? ["Not changed", "Their own logins", "The next screen says"] : i === 3 ? ["Not applied: do these in Portal"] : [],
+    expect: i === 0 ? ["The mark takes effect now"] : i === 1 ? ["Henry", "Sales helper"] : i === 2 ? ["Not changed", "Their own logins", "The next screen says"] : i === 3 ? ["Not applied: do these in Portal"] : [],
     forbid: ["last day"],
   })),
   { name: "people-old", path: "people", ops: { ...shell, overview_get: ok(overview) }, ready: "Marco Rossi" },

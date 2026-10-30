@@ -21,6 +21,10 @@ function AgentsStep({ agents, decisions, onDecide, keepReasons, onKeepReason }: 
     <div className="tb-stack">
       {agents.map((a) => (
         <div className="tb-stack" key={a.id}>
+          <h3 className="flow-agent">
+            {a.name}
+            <span className="tb-hint">{a.line}</span>
+          </h3>
           <Choices<Decision>
             label={a.name}
             value={decisions[a.id] ?? "stop"}
