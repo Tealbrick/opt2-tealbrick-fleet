@@ -219,6 +219,83 @@ const PARTIAL = planOf({
 });
 const PERSON = `person-or-agent?kind=person&id=${ID.p}`;
 
+// ── Roles (C380 T2-a) ─────────────────────────────────────────────────────
+const ROLE_OPS = ["roles_list", "role_get", "role_set", "role_assign", "role_end", "overview_get", "reviews_list"];
+const roleRow = (over: Record<string, unknown> = {}) => ({ id: "rol_01J000000000000000000000R1", name: "Contractor", description: "Works for a limited time", archived: false, members: 2, scheduled: 1, createdAt: "2026-10-30T09:00:00Z", ...over });
+const holder = (over: Record<string, unknown> = {}) => ({
+  id: "ras_01J000000000000000000000A1",
+  role: { id: "rol_01J000000000000000000000R1", name: "Contractor" },
+  subject: { kind: "person", id: ID.p, name: "Marco Rossi" },
+  reason: "contract",
+  note: null,
+  validFrom: null,
+  validUntil: "2026-12-01T09:00:00Z",
+  state: "active",
+  endedAt: null,
+  endReason: null,
+  createdAt: "2026-10-30T09:00:00Z",
+  ...over,
+});
+const roleOps = {
+  ...shell,
+  overview_get: ok(overview),
+  roles_list: ok({ roles: [roleRow(), roleRow({ id: "rol_01J000000000000000000000R2", name: "Cover for a very long role name that must wrap on a phone", members: 0, scheduled: 0 }), roleRow({ id: "rol_01J000000000000000000000R3", name: "Old role", archived: true, members: 0, scheduled: 0 })], assignments: [] }),
+  role_get: ok({
+    role: roleRow(),
+    assignments: [holder(), holder({ id: "ras_01J000000000000000000000A2", subject: { kind: "agent", id: ID.a, name: "Henry" }, state: "scheduled", validFrom: "2026-11-05T09:00:00Z", validUntil: null }), holder({ id: "ras_01J000000000000000000000A3", subject: { kind: "person", id: "per_01J00000000000000000000P2", name: "Bob Bianchi" }, state: "ended", endedAt: "2026-10-31T09:00:00Z", endReason: "expired" })],
+  }),
+};
+const rolesScenes = (): Scene[] => [
+  { name: "roles", path: "roles", personOps: ROLE_OPS, strict: true, ops: roleOps, ready: "Contractor", expect: ["A role is a record of who has it", "2 holders", "1 waiting to start", "Archived"], forbid: ["Roles Teams"] },
+  { name: "roles-empty", path: "roles", personOps: ROLE_OPS, strict: true, ops: { ...roleOps, roles_list: ok({ roles: [], assignments: [] }) }, ready: "No roles yet", expect: ["Nothing changes until a rule uses it"] },
+  { name: "roles-loading", path: "roles", personOps: ROLE_OPS, strict: true, ops: { ...roleOps, roles_list: hang }, ready: "Loading roles" },
+  { name: "roles-error", path: "roles", personOps: ROLE_OPS, strict: true, ops: { ...roleOps, roles_list: fail("internal") }, ready: "Try again" },
+  {
+    name: "roles-holders",
+    path: "roles",
+    personOps: ROLE_OPS,
+    strict: true,
+    ops: roleOps,
+    ready: "Contractor",
+    steps: (p) => button(p, /Who has Contractor/),
+    expect: ["Active until 1 Dec 2026, 09:00 UTC", "Starts 5 Nov 2026, 09:00 UTC", "the end date passed"],
+  },
+  {
+    name: "roles-give",
+    path: "roles",
+    personOps: ROLE_OPS,
+    strict: true,
+    ops: roleOps,
+    ready: "Contractor",
+    steps: (p) => button(p, "Give"),
+    expect: ["Ending this does not remove a Portal grant.", "Who", "Why", "Ends"],
+  },
+  {
+    name: "roles-end",
+    path: "roles",
+    personOps: ROLE_OPS,
+    strict: true,
+    ops: roleOps,
+    ready: "Contractor",
+    steps: async (p) => {
+      await button(p, /Who has Contractor/);
+      await button(p, /^End Contractor for Marco Rossi/);
+    },
+    expect: ["Ending this does not remove a Portal grant.", "End now"],
+  },
+  {
+    name: "roles-archive",
+    path: "roles",
+    personOps: ROLE_OPS,
+    strict: true,
+    ops: roleOps,
+    ready: "Contractor",
+    steps: (p) => button(p, "Archive"),
+    expect: ["A rule that names an archived role matches no one.", "Archiving ends no assignment and removes no Portal grant."],
+  },
+  { name: "roles-not-in-nav", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: pageOps, ready: "Ready to stop an agent?", forbid: ["Roles"] },
+];
+
 export const scenes: Scene[] = [
   { name: "summary", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: pageOps, ready: "Ready to stop an agent?", expect: ["Could not be read", "Not installed", "Rules has this change", "cannot see that switch"] },
   { name: "summary-no-stop-open", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, summary_get: ok({ ...summary, agents: { ...summary.agents, stopping: 0 }, people: { ...summary.people, leaving: 0 } }) }, ready: "Ready to stop an agent?", forbid: ["Rules has this change"] },
@@ -382,6 +459,8 @@ export const scenes: Scene[] = [
     expect: i === 0 ? ["The mark takes effect now"] : i === 1 ? ["Not changed", "Their own logins", "The next screen says"] : i === 2 ? ["Not applied: do these in Portal"] : [],
     forbid: ["last day"],
   })),
+  // ── Roles (C380 T2-a): reachable by its address; in the navigation only after its rows passed ─────────────────
+  ...rolesScenes(),
   { name: "see-what-would-stop", path: "people-and-agents", personOps: INVENTORY_OPS, strict: true, ops: invOps, ready: "Marco Rossi", steps: (p) => button(p, "See what would stop"), expect: ["This is a preview of Stop and remove access", "Could not be read", "Not installed", "Knowledge reports nothing for Henry", "A partial app lists nothing for Henry, and it cannot list everything", "Refused", "You would do this", "3 accounts have no person", "Not changed", "Reported by Connect"], assertCalls: (calls) => (calls.some((c) => c.op === "lifecycle_set") ? ["a preview called lifecycle_set"] : []) },
   { name: "see-what-would-stop-loading", path: "people-and-agents", personOps: INVENTORY_OPS, strict: true, ops: { ...invOps, plan_preview: hang }, ready: "Marco Rossi", steps: (p) => button(p, "See what would stop"), expect: ["what each app reports"] },
   { name: "see-what-would-stop-error", path: "people-and-agents", personOps: INVENTORY_OPS, strict: true, ops: { ...invOps, plan_preview: fail("internal") }, ready: "Marco Rossi", steps: async (p) => { await button(p, "See what would stop"); await p.getByText("Try again").first().waitFor(); }, forbid: ["reports nothing"] },

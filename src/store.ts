@@ -7,6 +7,7 @@ import { handleChannel, normalizeHandle, ulid } from "@opt2-tealbrick/manifest";
 import type { Db, SliceAgent } from "@opt2-tealbrick/miniapp-sdk";
 import { beforePersonDelete, initPerson, kindChanged, statusRequested } from "./lifecycle/transitions.ts";
 import { bump, fail, revision } from "./meta.ts";
+import { endAssignmentsOf } from "./roles/roles.ts";
 import { cleanText } from "./text.ts";
 import { type ContactKind, defaultTrust, NEW_AGENT_TRUST, type Source, type Trust } from "./trust.ts";
 
@@ -411,6 +412,7 @@ export function setPerson(db: Db, input: PersonInput, now = Date.now()): Person 
 export function deletePerson(db: Db, id: string, now = Date.now()): boolean {
   return db.transaction(() => {
     beforePersonDelete(db, id, OWNER, now);
+    endAssignmentsOf(db, "person", id, "deleted", OWNER, now);
     db.prepare("DELETE FROM fleet_members WHERE kind = 'person' AND subject_id = ?").run(id);
     db.prepare("DELETE FROM fleet_handles WHERE person_id = ?").run(id);
     db.prepare("UPDATE fleet_agents SET owner_id = NULL WHERE owner_id = ?").run(id);
