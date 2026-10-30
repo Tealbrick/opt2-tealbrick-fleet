@@ -18,8 +18,10 @@ import { directoryOps } from "./ops/directory.ts";
 import { lifecycleOps } from "./ops/lifecycle.ts";
 import { planOps } from "./ops/plans.ts";
 import { proposalOps } from "./ops/proposals.ts";
+import { recordOps } from "./ops/record.ts";
 import { reviewOps } from "./ops/reviews.ts";
 import { roleOps } from "./ops/roles.ts";
+import { roundOps } from "./ops/rounds.ts";
 import { topologyOps } from "./ops/topology.ts";
 import { wakePlans } from "./plans/control.ts";
 import { kickPlans, planJobs, startPlanClock } from "./plans/jobs.ts";
@@ -44,6 +46,8 @@ export const handlers = {
   ...lifecycleOps,
   ...accessOps,
   ...planOps,
+  ...roundOps,
+  ...recordOps,
   ...roleOps,
 } satisfies Record<OpId, HandlerSpec>;
 
