@@ -4,11 +4,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { validateAgainstSchema } from "@opt2-tealbrick/manifest";
 import type { Json, OpContext } from "@opt2-tealbrick/miniapp-sdk";
-import { type AccessTarget, parsePage, storeItems } from "../src/access/items.ts";
+import { type AccessTarget, itemDigest, parsePage, storeItems } from "../src/access/items.ts";
 import { handlers, manifest } from "../src/app.ts";
 import { planView } from "../src/plans/view.ts";
 import { recordReview, requestForNewAgents } from "../src/reviews.ts";
-import { accessOf, closeRound, countsOf, createRound, decide, listRounds, ROUND_OPEN_PLANS, roundDetail, sendQueued } from "../src/rounds.ts";
+import { ACCESS_SHOWN, accessOf, closeRound, countsOf, createRound, decide, listRounds, ROUND_MAX_ITEMS, ROUND_OPEN_PLANS, roundDetail, sendQueued } from "../src/rounds.ts";
 import * as store from "../src/store.ts";
 import { refused, set } from "./lifecycle-helpers.ts";
 import type { FakeStore } from "./plans-fakes.ts";
@@ -37,6 +37,11 @@ function listed(w: World, fake: FakeStore, product: AccessTarget, subject: { kin
     cursor = page.nextCursor ?? undefined;
   } while (cursor);
 }
+/** One row as an app lists it, for a person, with its own digest. */
+const itemWire = (target: AccessTarget, id: string, person: string) => {
+  const base = { id, kind: id.split(":")[0] as string, subject: { kind: "person" as const, id: person }, resource: id, direction: "held_by" as const, level: "use" as const, label: `Row ${id}`, state: "active" as const, revocable: true };
+  return { ...base, digest: itemDigest(target, base) };
+};
 const personItem = (w: World, id: string, kind = "team_grant") => ({ id, kind, subject: { kind: "person" as const, id: w.ann.id }, resource: id, level: "read" as const, label: `Grant ${id}` });
 
 /** The owner's view: the digests the page would send. */
@@ -65,6 +70,7 @@ test("R5: a round over agents asks once per entry, and the counts are read by ro
   assert.equal(countsOf(w.db, made.id).blocked, 1);
   const done = roundDetail(w.db, made.id, w.clock.t);
   assert.deepEqual(done.items.map((i) => [i.subject.name, i.status]), [["Henry", "limited"], ["Sales", "blocked"]]);
+  assert.deepEqual(done.items.map((i) => i.decidedIn), ["round", "elsewhere"], "a verdict from the Reviews page is counted, and said to be from there");
 });
 
 test("a person or agent in an open round is left out of another; a closed round frees them; closing dismisses what nobody decided", () => {
@@ -227,5 +233,79 @@ test("every step of a round is in the chain; the accessOf view is the shadow cop
   decide(w.db, OWNER, verdict(w, r.id, "person", w.ann.id), w.clock.t);
   closeRound(w.db, OWNER, r.id, w.clock.t + 1);
   const notes = w.db.prepare("SELECT note FROM fleet_lifecycle_events WHERE note LIKE '%Review round%' ORDER BY seq").all().map((e) => String(e.note));
-  assert.deepEqual(notes.map((x) => x.split(":")[0]), ["Review round started", 'Review round "People"', "Review round closed"]);
+  assert.deepEqual(notes.map((x) => (x.split(":")[0] ?? "").replace(/ rnd_\w+/, "")), ["Review round started", "Review round", "Review round closed"]);
+  assert.ok(notes.every((x) => !x.includes("People")), "the owner's name of the round is not copied into the chain: it cannot be erased");
+  assert.equal(w.db.prepare("SELECT requested_why FROM fleet_reviews WHERE requested_by_kind = 'owner'").get()?.requested_why, "Review round.", "nor into the request");
+});
+
+test("a verdict plan has no Portal step: an entry that is stopped, or whose owner leaves, is refused with its verdict undone; a queued removal is dropped when the entry is stopped later", () => {
+  const w = makeWorld();
+  w.connect.add(personItem(w, "channel_sender:s1", "channel_sender"));
+  listed(w, w.connect, "connect", { kind: "person", id: w.ann.id });
+  const r = createRound(w.db, OWNER, { title: "Ann", scope: "chosen", subjects: [{ kind: "person", id: w.ann.id }] }, w.clock.t);
+  const v = viewOf(w, r.id, "person", w.ann.id);
+  const tick = [{ product: "connect", id: "channel_sender:s1", digest: v.access[0]?.digest }];
+  // Ann owns Henry, and Ann is leaving: Henry is effectively stopped, so a plan for Ann would have a Portal step
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  const stale = viewOf(w, r.id, "person", w.ann.id);
+  assert.throws(() => decide(w.db, OWNER, verdict(w, r.id, "person", w.ann.id, { remove: [{ product: "connect", id: "channel_sender:s1", digest: stale.access[0]?.digest }], snapshotDigest: stale.snapshotDigest, accessDigest: stale.accessDigest }), w.clock.t), refused("plan_needs_portal", 409));
+  assert.deepEqual([countsOf(w.db, r.id).open, w.db.prepare("SELECT COUNT(*) AS n FROM fleet_plans").get()?.n, w.db.prepare("SELECT COUNT(*) AS n FROM fleet_reviews WHERE status = 'done'").get()?.n], [1, 0, 0], "no verdict, no plan");
+  void tick;
+  // quiet on good: without the stop the same call passes (Ann comes back)
+  set(w.db, "person", w.ann.id, "active", {}, w.clock.t + 1);
+  const again = viewOf(w, r.id, "person", w.ann.id);
+  assert.ok(decide(w.db, OWNER, verdict(w, r.id, "person", w.ann.id, { remove: [{ product: "connect", id: "channel_sender:s1", digest: again.access[0]?.digest }] }), w.clock.t).plan);
+});
+
+test("a queued removal whose entry is stopped by the time it is sent is dropped, and says so", () => {
+  const w = makeWorld();
+  w.connect.add(personItem(w, "channel_sender:s1", "channel_sender"));
+  listed(w, w.connect, "connect", { kind: "person", id: w.ann.id });
+  const blocker = w.makePlan({ kind: "person", id: w.ann.id, items: [{ product: "connect", id: "channel_sender:s1" }] });
+  const r = createRound(w.db, OWNER, { title: "Ann", scope: "people" }, w.clock.t);
+  const v = viewOf(w, r.id, "person", w.ann.id);
+  decide(w.db, OWNER, verdict(w, r.id, "person", w.ann.id, { remove: [{ product: "connect", id: "channel_sender:s1", digest: v.access[0]?.digest }] }), w.clock.t);
+  assert.equal(countsOf(w.db, r.id).removalQueued, 1);
+  w.db.prepare("UPDATE fleet_plans SET state = 'cancelled', closed_at = 1 WHERE id = ?").run(blocker);
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t + 1);
+  assert.deepEqual(sendQueued(w.db, OWNER, r.id, w.clock.t), { planned: 0, queued: 0 });
+  const item = roundDetail(w.db, r.id, w.clock.t).items[0];
+  assert.equal(item?.removal?.state, "dropped");
+  assert.match(item?.removal?.note ?? "", /Nothing was removed/);
+});
+
+test("the round says what the plan says: a plan that ended with nothing proved reads as such, never as removed", async () => {
+  const w = makeWorld();
+  w.connect.add({ id: "account_as_itself:a1", kind: "account_as_itself", subject: { kind: "agent", id: HENRY }, resource: "a1", level: "use", label: "Mail" });
+  listed(w, w.connect, "connect", { kind: "agent", id: HENRY });
+  const r = createRound(w.db, OWNER, { title: "Agents", scope: "chosen", subjects: [{ kind: "agent", id: HENRY }] }, w.clock.t);
+  const v = viewOf(w, r.id, "agent", HENRY);
+  const out = decide(w.db, OWNER, verdict(w, r.id, "agent", HENRY, { remove: [{ product: "connect", id: "account_as_itself:a1", digest: v.access[0]?.digest }] }), w.clock.t);
+  await w.until(out.plan as string, "done");
+  const removal = roundDetail(w.db, r.id, w.clock.t).items.find((i) => i.subject.id === HENRY)?.removal;
+  assert.equal(removal?.planState, "done");
+  assert.deepEqual([removal?.proved, removal?.manual, removal?.open], [0, 1, 0], "done is the plan's state; nothing was proved, one is for someone to do by hand");
+  assert.ok(removal?.headline && !/removed|confirmed/i.test(removal.headline), String(removal?.headline));
+});
+
+test("a round holds at most 200 entries and refuses the 201st with nothing written; access beyond what the entry shows cannot be ticked; who decided where is told", () => {
+  const w = makeWorld();
+  const many = Array.from({ length: ROUND_MAX_ITEMS + 1 }, (_, i) => ({ id: agentId(100 + i), name: `Bulk ${i}`, mode: "free", status: "active" }));
+  store.syncAgents(w.db, many as never, w.clock.t);
+  requestForNewAgents(w.db, many as never, w.clock.t);
+  const subjects = many.map((a) => ({ kind: "agent" as const, id: a.id }));
+  assert.throws(() => createRound(w.db, OWNER, { title: "Too many", scope: "chosen", subjects }, w.clock.t), refused("round_too_big", 409));
+  assert.equal(Number(w.db.prepare("SELECT COUNT(*) AS n FROM fleet_rounds").get()?.n), 0, "nothing written");
+  assert.equal(Number(w.db.prepare("SELECT COUNT(*) AS n FROM fleet_reviews WHERE requested_by_kind = 'owner'").get()?.n), 0);
+  assert.equal(createRound(w.db, OWNER, { title: "Just enough", scope: "chosen", subjects: subjects.slice(0, ROUND_MAX_ITEMS) }, w.clock.t).added, ROUND_MAX_ITEMS);
+  // access beyond the rows shown
+  for (let i = 0; i < ACCESS_SHOWN + 1; i++) storeItems(w.db, "connect", [parsePage("connect", { v: 1, asOf: "2026-10-30T16:00:00Z", items: [{ ...itemWire("connect", `channel_sender:z${String(i).padStart(3, "0")}`, w.ann.id) }], nextCursor: null, notShown: [], complete: true }).items[0] as never], "swp_t", w.clock.t);
+  const r = createRound(w.db, OWNER, { title: "Ann", scope: "chosen", subjects: [{ kind: "person", id: w.ann.id }] }, w.clock.t);
+  const item = roundDetail(w.db, r.id, w.clock.t).items[0];
+  assert.deepEqual([item?.accessCount, item?.access.length], [ACCESS_SHOWN + 1, ACCESS_SHOWN]);
+  const last = accessOf(w.db, "person", w.ann.id).at(-1);
+  assert.throws(() => decide(w.db, OWNER, verdict(w, r.id, "person", w.ann.id, { remove: [{ product: last?.product, id: last?.id, digest: last?.digest }] }), w.clock.t), refused("access_stale", 409), "a row the owner was not shown");
+  assert.equal(item?.decidedIn, null);
+  const done = decide(w.db, OWNER, verdict(w, r.id, "person", w.ann.id), w.clock.t);
+  assert.equal(done.item.decidedIn, "round");
 });

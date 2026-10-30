@@ -106,22 +106,23 @@ export function sweepsIn(db: Db, from: number, to: number, max: number): { sweep
 }
 
 /**
- * One pass over the change log. The state is the last row of each item; a sweep takes the state at its `finished_at`. Rows of a sweep carry its id, so the
- * rows that ended in it are listed beside the list. `maxRows` bounds the file: past it the period is too long.
+ * One pass over the change log. The state is the last row of each item; a sweep takes the state up to its `history_seq`, the last log row it had when it ended, so
+ * no clock decides which rows belong to which sweep. Rows of a sweep carry its id, so the rows that ended in it are listed beside the list. A sweep with no
+ * watermark, or one that began before the log did, has no list. `maxRows` bounds the file: past it the period is too long. The list of a sweep is the Governance
+ * copy as the sweep left it: for a store marked not read it can hold the pages that were read before it failed.
  */
 export async function sweepLists(db: Db, sweeps: readonly Row[], since: number | null, names: Names, maxRows: number): Promise<SweepList[]> {
   const out: SweepList[] = [];
-  if (sweeps.length === 0) return out;
-  const last = Number(sweeps.at(-1)?.finished_at);
+  const marks = sweeps.map((s) => (s.history_seq === null || s.history_seq === undefined ? null : Number(s.history_seq)));
+  const last = Math.max(0, ...marks.map((m) => m ?? 0));
   const state = new Map<string, Row>();
   const endedBy = new Map<string, Row[]>();
   const countsBy = new Map<string, { appeared: number; changed: number; ended: number }>();
   let next = 0;
   let rows = 0;
-  const emit = (sweep: Row) => {
-    const kept = since !== null && Number(sweep.finished_at) >= since;
+  const emit = (sweep: Row, kept: boolean) => {
     const items = kept ? [...state.values()].sort((a, b) => String(a.target).localeCompare(String(b.target)) || String(a.item_id).localeCompare(String(b.item_id))).map((r) => itemOf(r, names)) : null;
-    const ended = (endedBy.get(String(sweep.id)) ?? []).map((r) => ({ ...itemOf(r, names), endedAt: iso(r.at) as string }));
+    const ended = kept ? (endedBy.get(String(sweep.id)) ?? []).map((r) => ({ ...itemOf(r, names), endedAt: iso(r.at) as string })) : [];
     rows += (items?.length ?? 0) + ended.length;
     if (rows > maxRows) fail("record_too_big", "This period has too many rows for one file. Choose a shorter period.", 409);
     out.push({
@@ -138,16 +139,28 @@ export async function sweepLists(db: Db, sweeps: readonly Row[], since: number |
       counts: countsBy.get(String(sweep.id)) ?? { appeared: 0, changed: 0, ended: 0 },
     });
   };
+  const keptOf = (i: number): boolean => marks[i] !== null && since !== null && Number(sweeps[i]?.started_at) >= since;
+  /** A sweep with no watermark is before the log: it has no list and no rows to apply. */
+  const skipUnknown = () => {
+    while (next < sweeps.length && marks[next] === null) emit(sweeps[next++] as Row, false);
+  };
+  skipUnknown();
   let after = 0;
   for (;;) {
-    const page = db.prepare("SELECT * FROM fleet_access_history WHERE seq > ? AND at <= ? ORDER BY seq LIMIT ?").all(after, last, PAGE);
+    const page = db.prepare("SELECT * FROM fleet_access_history WHERE seq > ? AND seq <= ? ORDER BY seq LIMIT ?").all(after, last, PAGE);
     for (const r of page) {
-      while (next < sweeps.length && Number(r.at) > Number(sweeps[next]?.finished_at)) emit(sweeps[next++] as Row);
+      while (next < sweeps.length && Number(r.seq) > (marks[next] as number)) {
+        emit(sweeps[next] as Row, keptOf(next));
+        next++;
+        skipUnknown();
+      }
       const key = `${String(r.target)}\u0000${String(r.item_id)}`;
       const c = countsBy.get(String(r.sweep_id)) ?? { appeared: 0, changed: 0, ended: 0 };
       if (r.change === "ended") {
         state.delete(key);
-        endedBy.set(String(r.sweep_id), [...(endedBy.get(String(r.sweep_id)) ?? []), r]);
+        const list = endedBy.get(String(r.sweep_id)) ?? [];
+        list.push(r);
+        endedBy.set(String(r.sweep_id), list);
         c.ended++;
       } else {
         state.set(key, r);
@@ -159,6 +172,10 @@ export async function sweepLists(db: Db, sweeps: readonly Row[], since: number |
     if (page.length < PAGE) break;
     await tick();
   }
-  while (next < sweeps.length) emit(sweeps[next++] as Row);
+  while (next < sweeps.length) {
+    emit(sweeps[next] as Row, keptOf(next));
+    next++;
+    skipUnknown();
+  }
   return out;
 }

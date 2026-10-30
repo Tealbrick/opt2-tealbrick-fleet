@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Db, Json } from "@opt2-tealbrick/miniapp-sdk";
 import type { AccessEnv } from "../src/access/client.ts";
+import { noteSweepStores } from "../src/access/history.ts";
 import { storeItems } from "../src/access/items.ts";
 import { type SweepEnv, sweepTick } from "../src/access/sweep.ts";
 import { AGT, AGT2, accessEnv, answer, fakeStores, wire } from "./access-helpers.ts";
@@ -75,6 +76,10 @@ test("a sweep that could not read a store deletes nothing and logs no `ended`; t
   assert.equal(stores[0]?.state, "read");
   assert.notEqual(stores[1]?.state, "read");
   assert.equal(Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_sweep_stores WHERE sweep_id = ?").get(String(stores[1]?.sweep_id))?.n), 4, "all four stores");
+  // the watermark: how far the log went when each sweep ended, in step with the log
+  const marks = db.prepare("SELECT history_seq FROM fleet_sweeps ORDER BY finished_at").all().map((r) => Number(r.history_seq));
+  assert.deepEqual(marks, [1, 1], "the second sweep logged nothing: the same watermark");
+  assert.equal(Number(db.prepare("SELECT MAX(seq) AS s FROM fleet_access_history").get()?.s), 1);
 });
 
 test("the log and the shadow copy are one transaction: a refused write leaves neither", () => {
@@ -90,4 +95,37 @@ test("the log and the shadow copy are one transaction: a refused write leaves ne
   assert.equal(Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_access_items").get()?.n), 0);
   storeItems(db, "evolution", [item], "swp_1", 5);
   assert.equal(Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_access_history").get()?.n), 1);
+});
+
+test("the watermark of a sweep is the last log row it wrote: a later sweep never moves an earlier list", async () => {
+  const db = migratedDb();
+  const clock = { now: 4_000_000 };
+  await sweep(db, { evolution: () => answer([routine("a")]) }, clock);
+  await sweep(db, { evolution: () => answer([routine("a"), routine("b")]) }, clock);
+  await sweep(db, { evolution: () => answer([routine("b")]) }, clock);
+  const marks = db.prepare("SELECT history_seq FROM fleet_sweeps ORDER BY finished_at").all().map((r) => Number(r.history_seq));
+  assert.deepEqual(marks, [1, 2, 3]);
+  const upTo = (seq: number) => db.prepare("SELECT item_id, change FROM fleet_access_history WHERE seq <= ? ORDER BY seq").all(seq).map((r) => `${r.change}:${r.item_id}`);
+  assert.deepEqual(upTo(2), ["appeared:routine:a", "appeared:routine:b"]);
+  assert.deepEqual(upTo(3), ["appeared:routine:a", "appeared:routine:b", "ended:routine:a"]);
+});
+
+test("a store that fails on its second page: page one is in the log under the sweep, and the copy of the read state says the store was not read", async () => {
+  const db = migratedDb();
+  const clock = { now: 5_000_000 };
+  const page = (n: number) => answer([routine(`p${n}`)], { nextCursor: n === 1 ? "2" : null });
+  await sweep(db, { evolution: (_i, call) => (call === 1 ? page(1) : (() => { throw new Error("down"); })()) }, clock);
+  assert.deepEqual(log(db).map((r) => [r[0], r[1]]), [["appeared", "routine:p1"]], "what the store listed before it failed");
+  assert.notEqual(db.prepare("SELECT state FROM fleet_sweep_stores WHERE target = 'evolution'").get()?.state, "read");
+  assert.equal(Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_access_history WHERE change = 'ended'").get()?.n), 0, "nothing ended");
+});
+
+test("a finish that runs again after the commit (a restart) changes nothing: the first copy and the first watermark stand", async () => {
+  const db = migratedDb();
+  const clock = { now: 6_000_000 };
+  await sweep(db, { evolution: () => answer([routine("a")]) }, clock);
+  const [id] = db.prepare("SELECT id FROM fleet_sweeps").all().map((r) => String(r.id));
+  assert.equal(noteSweepStores(db, String(id)), null);
+  assert.equal(Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_sweep_stores").get()?.n), 4);
+  assert.equal(Number(db.prepare("SELECT history_seq FROM fleet_sweeps").get()?.history_seq), 1);
 });

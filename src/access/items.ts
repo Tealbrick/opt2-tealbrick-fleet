@@ -5,7 +5,7 @@ import { digest, normalizeHandle } from "@opt2-tealbrick/manifest";
 import type { Db, Json } from "@opt2-tealbrick/miniapp-sdk";
 import { AGENT_ID_PATTERN, HANDLE_PATTERN } from "../feed.ts";
 import { cleanText } from "../text.ts";
-import { noteListed } from "./history.ts";
+import { listedNoter } from "./history.ts";
 
 export const ACCESS_TARGETS = ["connect", "knowledge", "kanban", "evolution"] as const;
 export type AccessTarget = (typeof ACCESS_TARGETS)[number];
@@ -142,8 +142,9 @@ export function storeItems(db: Db, target: AccessTarget, items: readonly AccessI
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (target, item_id) DO UPDATE SET kind = excluded.kind, subject_kind = excluded.subject_kind, subject_id = excluded.subject_id, resource = excluded.resource, direction = excluded.direction, level = excluded.level, label = excluded.label, state = excluded.state, revocable = excluded.revocable, since = excluded.since, digest = excluded.digest, last_seen = excluded.last_seen, last_sweep = excluded.last_sweep`,
   );
+  const note = listedNoter(db, target, sweepId, now);
   for (const i of items) {
-    noteListed(db, target, i, sweepId, now);
+    note(i);
     up.run(target, i.id, i.kind, i.subject.kind, i.subject.kind === "unlinked" ? null : i.subject.id, i.resource, i.direction, i.level, i.label, i.state, i.revocable ? 1 : 0, i.since, i.digest, now, now, sweepId);
   }
 }

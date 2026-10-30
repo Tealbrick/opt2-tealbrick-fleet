@@ -10008,6 +10008,7 @@
                   },
                   "items": {
                     "type": "array",
+                    "maxItems": 200,
                     "items": {
                       "type": "object",
                       "additionalProperties": false,
@@ -10017,6 +10018,7 @@
                         "status",
                         "reason",
                         "decidedAt",
+                        "decidedIn",
                         "snapshotDigest",
                         "accessDigest",
                         "access",
@@ -10076,6 +10078,19 @@
                             }
                           ]
                         },
+                        "decidedIn": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "round",
+                                "elsewhere"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "snapshotDigest": {
                           "anyOf": [
                             {
@@ -10091,6 +10106,7 @@
                         },
                         "access": {
                           "type": "array",
+                          "maxItems": 200,
                           "items": {
                             "type": "object",
                             "additionalProperties": false,
@@ -10101,6 +10117,7 @@
                               "kind",
                               "label",
                               "level",
+                              "direction",
                               "state",
                               "revocable",
                               "digest"
@@ -10123,6 +10140,12 @@
                               },
                               "level": {
                                 "type": "string"
+                              },
+                              "direction": {
+                                "enum": [
+                                  "held_by",
+                                  "about"
+                                ]
                               },
                               "state": {
                                 "type": "string"
@@ -10150,7 +10173,11 @@
                                 "note",
                                 "plan",
                                 "planState",
-                                "count"
+                                "count",
+                                "headline",
+                                "proved",
+                                "manual",
+                                "open"
                               ],
                               "properties": {
                                 "state": {
@@ -10187,6 +10214,28 @@
                                   ]
                                 },
                                 "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "headline": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "proved": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "manual": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "open": {
                                   "type": "integer",
                                   "minimum": 0
                                 }
@@ -10333,6 +10382,7 @@
               "status",
               "reason",
               "decidedAt",
+              "decidedIn",
               "snapshotDigest",
               "accessDigest",
               "access",
@@ -10392,6 +10442,19 @@
                   }
                 ]
               },
+              "decidedIn": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "round",
+                      "elsewhere"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "snapshotDigest": {
                 "anyOf": [
                   {
@@ -10407,6 +10470,7 @@
               },
               "access": {
                 "type": "array",
+                "maxItems": 200,
                 "items": {
                   "type": "object",
                   "additionalProperties": false,
@@ -10417,6 +10481,7 @@
                     "kind",
                     "label",
                     "level",
+                    "direction",
                     "state",
                     "revocable",
                     "digest"
@@ -10439,6 +10504,12 @@
                     },
                     "level": {
                       "type": "string"
+                    },
+                    "direction": {
+                      "enum": [
+                        "held_by",
+                        "about"
+                      ]
                     },
                     "state": {
                       "type": "string"
@@ -10466,7 +10537,11 @@
                       "note",
                       "plan",
                       "planState",
-                      "count"
+                      "count",
+                      "headline",
+                      "proved",
+                      "manual",
+                      "open"
                     ],
                     "properties": {
                       "state": {
@@ -10503,6 +10578,28 @@
                         ]
                       },
                       "count": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "headline": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "proved": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "manual": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "open": {
                         "type": "integer",
                         "minimum": 0
                       }
@@ -10689,7 +10786,7 @@
     {
       "id": "record_export",
       "title": "Make the access record",
-      "description": "Make one file for a period of up to a year: what each app listed in every sweep with the rows that ended, the open and accepted differences, the time from a stop to the proof, the apps that were not read, verdicts, plans with their outcomes, and who approved. Our own apps report this data. The file makes no claim about any law or standard, and it states its limits. It changes no access. It writes one event with the digest of the file. Owner only.",
+      "description": "Make one file for a period of up to a year: what each app listed in every sweep with the rows that ended, the open and accepted differences, the time from a stop to the proof, the apps that were not read, verdicts, plans with their outcomes, and who approved. Our own apps report this data. The file makes no claim about any law or standard, and it states its limits. Dates are in ISO form; a date alone is the whole day in UTC, and the end is never in the future. It changes no access. It writes one event with the digest of the file. Owner only.",
       "crud": [
         "update"
       ],
