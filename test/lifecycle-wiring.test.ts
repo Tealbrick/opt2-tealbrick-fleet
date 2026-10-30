@@ -133,6 +133,15 @@ test("mover: members_set and an owner change write a moved event and open one sy
   assert.match(String(moved(AGENT_A.id)[0]?.note), /from Ann to Bob/);
   assert.deepEqual(JSON.parse(String(moved(AGENT_A.id)[0]?.snapshot_json)), { after: bob.id, before: ann.id });
   assert.equal(Number(db.prepare("SELECT keep_running AS k FROM fleet_agents WHERE id = ?").get(AGENT_A.id)?.k), 0, "the tick was about the old owner's key");
+  // fire on bad: taking the owner away cannot lift a stop that comes from the owner
+  const c = world();
+  set(c.db, "person", c.ann.id, "leaving");
+  assert.throws(() => setAgentMoved(c.db, { agent: AGENT_A.id, owner: null }, OWNER, T0), refused("owner_stopped", 409));
+  assert.equal(feedOf(c.db).agents.find((a) => a.id === AGENT_A.id)?.floor, true);
+  // quiet on good: an unowned agent stays unowned, and a working owner can be taken away
+  setAgentMoved(db, { agent: AGENT_B.id, owner: null }, OWNER, T0);
+  setAgentMoved(db, { agent: AGENT_A.id, owner: null }, OWNER, T0);
+  setAgentMoved(db, { agent: AGENT_A.id, owner: bob.id }, OWNER, T0);
   // fire on bad: a new owner must be active
   set(db, "person", bob.id, "leaving");
   assert.throws(() => setAgentMoved(db, { agent: AGENT_B.id, owner: bob.id }, OWNER, T0), refused("owner_inactive", 409));
