@@ -27,6 +27,7 @@ Governance (0.3.1; formerly Organization Plane) is the workspace directory and i
 - Domain logic stays in `src/*.ts` (store, reviews, proposals, access, topology, feed, lean, ...). A lane that adds a domain adds its own files, for example `src/lifecycle/`, `src/plans/`.
 - `src/ui/App.tsx`: shell, routes, nav, badges only. `src/ui/pages/<page>.tsx`: one file per directory page (`teams`, `people`, `agents`, `identities`; `directory.tsx` loads the directory, `shared.tsx` holds shared types and the delete button). Feature pages stay beside `App.tsx` (`reviews`, `topology`, `access-page`, `contact-rules`). New pages: `src/ui/pages/<page>.tsx` plus one route in `App.tsx`.
 - `test/boundaries.test.ts` still forbids server imports from `src/ui`.
+- `scripts/ui-preview.ts` + `scripts/ui-preview/scenes.ts`: the built UI with fixture ops at 1280 and 375, light and dark, for each UI PR (`node --run build && node scripts/ui-preview.ts`). It fails on sideways scroll, console errors and an op with no fixture; a `strict` scene also fails on a raw id outside Details or a word the plain-word table replaced. A page adds its scenes there.
 
 ## Operations (from `tealbrick.manifest.json`)
 
