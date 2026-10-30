@@ -2,12 +2,14 @@
 // said before a change never claims a stop, and the refusals of `lifecycle_set` read as sentences.
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { KEY_STILL_EXISTS } from "../src/findings.ts";
 import { NOT_CHANGED as SERVER_NOT_CHANGED } from "../src/plans/portal-link.ts";
+import { canChoose, choiceSummary, choicesReady, decisionsOf, hasOwnStop } from "../src/ui/pages/agent-choice.ts";
 import { featuresOf } from "../src/ui/pages/features.ts";
 import { lifecycleError, stopCapOf } from "../src/ui/pages/lifecycle-errors.ts";
 import { currentPlans, liveBanners, pollDelay } from "../src/ui/pages/plan-poll.ts";
 import { subjectFromUrl, subjectHref } from "../src/ui/pages/subject-link.ts";
-import { afterChangeText, beforeChangeText, beforeChangeTone, floorTone, NOT_CHANGED, REASONS, reasonLabel, when } from "../src/ui/pages/words.ts";
+import { afterChangeText, beforeChangeText, beforeChangeTone, floorTone, KEY_SENTENCE as KEY_SENTENCE_UI, NOT_CHANGED, REASONS, reasonLabel, when } from "../src/ui/pages/words.ts";
 
 describe("features come from the ops of this build", () => {
   it("on when every op is there", () => {
@@ -19,6 +21,37 @@ describe("features come from the ops of this build", () => {
     assert.equal(featuresOf(["summary_get"]).differences, false);
     assert.equal(featuresOf(["plan_send", "plan_get", "plan_retry"]).plans, false);
     assert.equal(featuresOf(["plan_send", "plan_get", "plan_retry", "plan_cancel"]).plans, true);
+  });
+});
+
+describe("the choice for each agent (D2)", () => {
+  const agents = [{ id: "a", lifecycle: "active" }, { id: "b", lifecycle: "active" }, { id: "c", lifecycle: "active" }, { id: "d", lifecycle: "active" }];
+  const later = { choice: "later", reason: "", newOwner: "" } as const;
+  it("the default is no choice: nothing goes to plan_send, so the agents are only paused", () => {
+    assert.deepEqual(decisionsOf(agents, {}), []);
+    assert.deepEqual(decisionsOf(agents, { a: later }), []);
+    assert.equal(choicesReady(agents, {}), true);
+    assert.equal(choiceSummary(agents, {}), "4 paused and decided later, 0 stopped and removed, 0 moved to a new owner, 0 kept running");
+  });
+  it("sends only what was chosen, in the shape of the op", () => {
+    assert.deepEqual(decisionsOf(agents, { a: { ...later, choice: "stop" }, b: { ...later, choice: "keep", reason: " on call " }, c: { ...later, choice: "transfer", newOwner: "per_2" } }), [
+      { agent: "a", decision: "stop" },
+      { agent: "b", decision: "keep", reason: "on call" },
+      { agent: "c", decision: "transfer", newOwner: "per_2" },
+    ]);
+  });
+  it("a keep needs a reason and a transfer a new owner", () => {
+    assert.equal(choicesReady(agents, { a: { ...later, choice: "keep" } }), false);
+    assert.equal(choicesReady(agents, { a: { ...later, choice: "keep", reason: "  " } }), false);
+    assert.equal(choicesReady(agents, { a: { ...later, choice: "transfer" } }), false);
+    assert.equal(choicesReady(agents, { a: { ...later, choice: "transfer", newOwner: "p" } }), true);
+  });
+  it("who can choose", () => {
+    assert.equal(canChoose({ lifecycle: "leaving" }), false);
+    assert.equal(canChoose({ lifecycle: "archived" }), false);
+    assert.equal(canChoose({ lifecycle: "suspended" }), true);
+    assert.equal(hasOwnStop({ lifecycle: "suspended" }), true);
+    assert.equal(hasOwnStop({ lifecycle: "active" }), false);
   });
 });
 
@@ -68,6 +101,9 @@ describe("words before a change", () => {
     assert.equal(floorTone({ state: "not_installed" }), "neutral");
     assert.equal(beforeChangeTone({ state: "not_read" }), "needs-you");
     assert.equal(beforeChangeTone({ state: "confirmed" }), "neutral");
+  });
+  it("the page's key sentence is the server's, word for word", () => {
+    assert.equal(KEY_SENTENCE_UI, KEY_STILL_EXISTS);
   });
   it("the page's Not changed block is the server's, word for word (the browser cannot import server code)", () => {
     assert.deepEqual([...NOT_CHANGED], [...SERVER_NOT_CHANGED]);
