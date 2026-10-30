@@ -1,6 +1,6 @@
 -- Governance 0.4.0 (C380 T2-b, DESIGN-C380 §7, §11): review rounds and the access record. Forward-only; 0001 to 0011 are never edited.
--- No row of an earlier table changes and the feed revision does not move: this adds owner-side tables only. There is no CHECK on a
--- state: src/rounds.ts and src/access/history.ts are the places that know them.
+-- No row of an earlier table changes and the feed revision does not move: this adds owner-side tables and one column (`fleet_sweeps.history_seq`,
+-- NULL on the sweeps of earlier versions). A round state is not checked here: src/rounds.ts knows it. What the history may hold is checked.
 --
 -- A review round links review requests. `fleet_reviews` refuses an UPDATE of a closed row (migration 0003), so the round id cannot live
 -- on the review. The link table holds it, and the counts of a round are read through it.
@@ -39,7 +39,13 @@ CREATE TRIGGER fleet_campaign_items_no_delete BEFORE DELETE ON fleet_campaign_it
 BEGIN
   SELECT RAISE(ABORT, 'campaign_item_append_only');
 END;
--- Who and what a row is about never changes. Only the removal fields and the seen fields move, and each moves once to a value.
+-- INSERT OR REPLACE removes the old row without firing the delete trigger: refuse an insert of a pair that exists.
+CREATE TRIGGER fleet_campaign_items_no_replace BEFORE INSERT ON fleet_campaign_items
+WHEN EXISTS (SELECT 1 FROM fleet_campaign_items WHERE round_id = NEW.round_id AND review_id = NEW.review_id)
+BEGIN
+  SELECT RAISE(ABORT, 'campaign_item_append_only');
+END;
+-- Who and what a row is about never changes. The removal, seen and plan fields are the only ones that move; src/rounds.ts moves them.
 CREATE TRIGGER fleet_campaign_items_identity BEFORE UPDATE ON fleet_campaign_items
 WHEN NEW.round_id <> OLD.round_id OR NEW.review_id <> OLD.review_id OR NEW.subject_kind <> OLD.subject_kind OR NEW.subject_id <> OLD.subject_id
   OR NEW.subject_name <> OLD.subject_name OR NEW.added_at <> OLD.added_at
@@ -54,7 +60,7 @@ CREATE TABLE fleet_access_history (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
   sweep_id TEXT NOT NULL,
   at INTEGER NOT NULL,
-  change TEXT NOT NULL,                 -- appeared | changed | ended
+  change TEXT NOT NULL CHECK (change IN ('appeared', 'changed', 'ended')),
   target TEXT NOT NULL,
   item_id TEXT NOT NULL,
   kind TEXT NOT NULL,
@@ -79,9 +85,15 @@ CREATE TRIGGER fleet_access_history_no_delete BEFORE DELETE ON fleet_access_hist
 BEGIN
   SELECT RAISE(ABORT, 'access_history_append_only');
 END;
+CREATE TRIGGER fleet_access_history_no_replace BEFORE INSERT ON fleet_access_history
+WHEN EXISTS (SELECT 1 FROM fleet_access_history WHERE seq = NEW.seq)
+BEGIN
+  SELECT RAISE(ABORT, 'access_history_append_only');
+END;
 
 -- What each store answered when a sweep ended: a copy of `fleet_read_state` per sweep. A store was read in that sweep when its `read_at`
--- is not older than the sweep and its state is `read`. `not_shown_json` is what the store said it cannot list.
+-- is not older than the sweep and its state is `read`. `not_shown_json` is what the store said it cannot list. One row per store and sweep,
+-- written once; it is read as evidence of what a sweep could see, so it is append-only too.
 CREATE TABLE fleet_sweep_stores (
   sweep_id TEXT NOT NULL,
   target TEXT NOT NULL,
@@ -92,13 +104,31 @@ CREATE TABLE fleet_sweep_stores (
   not_shown_json TEXT NOT NULL DEFAULT '[]',
   PRIMARY KEY (sweep_id, target)
 ) WITHOUT ROWID;
+CREATE TRIGGER fleet_sweep_stores_no_update BEFORE UPDATE ON fleet_sweep_stores
+BEGIN
+  SELECT RAISE(ABORT, 'sweep_stores_append_only');
+END;
+CREATE TRIGGER fleet_sweep_stores_no_delete BEFORE DELETE ON fleet_sweep_stores
+BEGIN
+  SELECT RAISE(ABORT, 'sweep_stores_append_only');
+END;
+CREATE TRIGGER fleet_sweep_stores_no_replace BEFORE INSERT ON fleet_sweep_stores
+WHEN EXISTS (SELECT 1 FROM fleet_sweep_stores WHERE sweep_id = NEW.sweep_id AND target = NEW.target)
+BEGIN
+  SELECT RAISE(ABORT, 'sweep_stores_append_only');
+END;
 
-INSERT INTO fleet_access_history (sweep_id, at, change, target, item_id, kind, subject_kind, subject_id, resource, direction, level, label, state, revocable, since, digest)
-  SELECT 'migrated', unixepoch() * 1000, 'appeared', target, item_id, kind, subject_kind, subject_id, resource, direction, level, label, state, revocable, since, digest
-  FROM fleet_access_items ORDER BY target, item_id;
+-- The last history row a sweep had when it finished. "The list at sweep S" is the history up to this number, so two sweeps in one millisecond
+-- or a clock that steps back cannot mix. NULL on a sweep of an earlier version: its list was not kept.
+ALTER TABLE fleet_sweeps ADD COLUMN history_seq INTEGER;
+
 -- Own table, so the settings of the lifecycle keep their rows. `record_since`: the time (ms) from which the history is known.
 CREATE TABLE fleet_record_meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 ) WITHOUT ROWID;
-INSERT INTO fleet_record_meta (key, value) VALUES ('record_since', CAST(unixepoch() * 1000 AS TEXT));
+INSERT INTO fleet_record_meta (key, value) VALUES ('record_since', CAST(CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER) AS TEXT));
+
+INSERT INTO fleet_access_history (sweep_id, at, change, target, item_id, kind, subject_kind, subject_id, resource, direction, level, label, state, revocable, since, digest)
+  SELECT 'migrated', CAST((SELECT value FROM fleet_record_meta WHERE key = 'record_since') AS INTEGER), 'appeared', target, item_id, kind, subject_kind, subject_id, resource, direction, level, label, state, revocable, since, digest
+  FROM fleet_access_items ORDER BY target, item_id;
