@@ -36,5 +36,5 @@ export function fakeStores(replies: Partial<Record<AccessTarget, Reply>>) {
 }
 
 export function accessEnv(callApp: OpContext["callApp"], targets: string[] = ["connect", "knowledge", "kanban", "evolution"]): AccessEnv {
-  return { callApp, companionTargets: () => targets, bridgeCaps: () => ["owner_rows"], topology: () => null, pacer: fastPacer(), declared: new Set(targets) };
+  return { callApp, companionTargets: () => targets, topology: () => ({ instances: targets.map((t) => [`ins_${t}`, t, t, "1.0.0"]) }), pacer: fastPacer(), declared: new Set(targets) };
 }

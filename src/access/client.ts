@@ -22,7 +22,7 @@ class TimedOut extends Error {}
 export class Pacer {
   #nextAt = 0;
   #active = 0;
-  #queue: (() => void)[] = [];
+  #queue: { go: () => void; late: () => boolean }[] = [];
   readonly #gapMs: number;
   readonly #jitterMs: number;
   constructor(gapMs = CALL_GAP_MS, jitterMs = CALL_JITTER_MS) {
@@ -31,13 +31,15 @@ export class Pacer {
   }
   #drain(): void {
     while (this.#active < CALLS_AT_ONCE && this.#queue.length > 0) {
+      const next = this.#queue.shift();
+      if (!next || next.late()) continue; // it timed out in the queue: no place and no gap for it
       this.#active++;
-      this.#queue.shift()?.();
+      next.go();
     }
   }
-  async #turn(): Promise<void> {
+  async #turn(late: () => boolean): Promise<void> {
     await new Promise<void>((go) => {
-      this.#queue.push(go);
+      this.#queue.push({ go, late });
       this.#drain();
     });
     const now = Date.now();
@@ -57,7 +59,7 @@ export class Pacer {
       }
     };
     let late = false;
-    const work = this.#turn().then(() => {
+    const work = this.#turn(() => late).then(() => {
       held = true;
       if (late) {
         free();
@@ -89,28 +91,39 @@ export const sharedPacer = new Pacer();
 export interface AccessEnv {
   callApp: OpContext["callApp"];
   companionTargets(): string[];
-  bridgeCaps(): readonly string[];
-  topology(): { instances: readonly (readonly unknown[])[] } | null;
+  topology(): { instances: readonly (readonly unknown[])[]; truncated?: boolean } | null;
   pacer?: Pacer;
   /** products in this version's manifest `companions` */
   declared: ReadonlySet<string>;
 }
 
+export type Presence = "present" | "not_installed" | "not_granted" | "not_known";
+
 /**
- * Before any call. Absent from the targets or from the manifest = `not_installed`, with two exceptions, because the words must be true:
- * the owner's own picture lists the app (installed, this version or grant cannot read it), or there is no current workspace copy at all.
+ * Before any call. Core lists a target only for a grant it holds (a missing edge, a licence or a target update that dropped an op
+ * removes it), so absence alone does not prove "not installed". The words must be true, and a wrong "Not installed" reads as "nothing
+ * there": `not_installed` needs the owner's whole picture to say so. With no picture (no consent, no current slice) or a cut one the
+ * store reads "could not be read". Narrower than the table in ACCESS.md, on the safe side.
  */
-export function presence(env: AccessEnv, target: AccessTarget): "present" | "not_installed" | "not_read" {
+export function presence(env: AccessEnv, target: AccessTarget): Presence {
   const inTargets = env.companionTargets().includes(target);
   if (inTargets && env.declared.has(target)) return "present";
-  let listed = false;
+  if (inTargets) return "not_granted";
+  let picture: ReturnType<AccessEnv["topology"]> = null;
   try {
-    listed = env.topology()?.instances.some((i) => i[1] === target) ?? false;
+    picture = env.topology();
   } catch {
-    listed = false;
+    picture = null;
   }
-  if (inTargets || listed) return "not_read";
-  return env.bridgeCaps().length === 0 ? "not_read" : "not_installed";
+  if (!picture || picture.truncated) return "not_known";
+  return picture.instances.some((i) => i[1] === target) ? "not_granted" : "not_installed";
+}
+
+/** The stored words of a store that was not called. */
+export function absentAnswer(p: Exclude<Presence, "present">): { state: "not_installed" | "not_read"; code: string; text: string } {
+  if (p === "not_installed") return { state: "not_installed", code: p, text: "This app is not installed." };
+  if (p === "not_granted") return { state: "not_read", code: p, text: "Governance has no permission to read this app." };
+  return { state: "not_read", code: p, text: "Governance cannot tell if this app is installed. Turn on 'See who has access' for Governance in Portal." };
 }
 
 export type ReadAnswer = { ok: true; page: ListPage } | { ok: false; state: Exclude<ReadStateName, "read">; code: string; text: string; backoffMs: number; waitMs: number };
@@ -118,6 +131,7 @@ export type ReadAnswer = { ok: true; page: ListPage } | { ok: false; state: Excl
 const stop = (state: "not_read" | "refused" | "waiting" | "not_installed", code: string, text: string, backoffMs = 0, waitMs = 0): ReadAnswer => ({ ok: false, state, code, text, backoffMs, waitMs });
 
 const NOT_READ_TEXT: Readonly<Record<string, string>> = {
+  __proto__: null as unknown as string, // a code comes from the other app: "constructor" must not find a function here
   timeout: "The app did not answer in time.",
   bad_answer: "The app gave an answer Governance cannot use.",
   unknown_tool: "This version of the app cannot report this list.",
@@ -127,8 +141,7 @@ const NOT_READ_TEXT: Readonly<Record<string, string>> = {
   caller_unverified: "The app did not accept Governance as the caller.",
   paused: "Governance is paused.",
 };
-export const notInstalledText = "This app is not installed.";
-export const notPresentText = "Governance cannot read this app at the moment.";
+const CODE = /^[a-z][a-z0-9_.-]{0,63}$/;
 
 /** The failure map. Everything not named here is `not_read`, never zero. */
 export function classify(e: unknown): ReadAnswer {
@@ -140,7 +153,7 @@ export function classify(e: unknown): ReadAnswer {
     const asked = (e.details as { retryAfterMs?: unknown } | undefined)?.retryAfterMs;
     return stop("not_read", "rate_limited", "The app asked Governance to wait.", 0, typeof asked === "number" && asked > 0 ? Math.min(asked, MAX_WAIT_MS) : DEFAULT_WAIT_MS);
   }
-  return stop("not_read", e.code, NOT_READ_TEXT[e.code] ?? "The app could not answer.");
+  return stop("not_read", CODE.test(e.code) ? e.code : "error", NOT_READ_TEXT[e.code] ?? "The app could not answer.");
 }
 
 /** One `access_list` call. Never throws. */
@@ -166,6 +179,15 @@ export interface ReadStateRow {
   notShown: NotShown[];
 }
 
+function parseNotShown(v: unknown): NotShown[] {
+  try {
+    const list = JSON.parse(String(v)) as unknown;
+    return Array.isArray(list) ? (list as NotShown[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 const toRow = (r: Record<string, unknown>): ReadStateRow => ({
   target: String(r.target),
   state: r.state as ReadStateName,
@@ -174,7 +196,7 @@ const toRow = (r: Record<string, unknown>): ReadStateRow => ({
   readAt: r.read_at === null ? null : Number(r.read_at),
   triedAt: Number(r.tried_at),
   backoffUntil: Number(r.backoff_until),
-  notShown: JSON.parse(String(r.not_shown_json)) as NotShown[],
+  notShown: parseNotShown(r.not_shown_json),
 });
 
 export const readStates = (db: Db): ReadStateRow[] => db.prepare("SELECT * FROM fleet_read_state ORDER BY target").all().map(toRow);
@@ -191,17 +213,18 @@ export function noteRead(db: Db, target: AccessTarget, notShown: readonly NotSho
   ).run(target, now, now, JSON.stringify(notShown));
 }
 
-/** A read that did not finish. `read_at` and `not_shown_json` stay: they belong to the last full read. */
+/** A read that did not finish. `read_at` and `not_shown_json` stay: they belong to the last full read. A running backoff stays too: no second hold. */
 export function noteStop(db: Db, target: AccessTarget, a: { state: Exclude<ReadStateName, "read">; code: string; text: string; backoffMs?: number }, now: number): void {
   db.prepare(
     `INSERT INTO fleet_read_state (target, state, code, text, read_at, tried_at, backoff_until, not_shown_json) VALUES (?, ?, ?, ?, NULL, ?, ?, '[]')
-     ON CONFLICT (target) DO UPDATE SET state = excluded.state, code = excluded.code, text = excluded.text, tried_at = excluded.tried_at, backoff_until = excluded.backoff_until`,
+     ON CONFLICT (target) DO UPDATE SET state = excluded.state, code = excluded.code, text = excluded.text, tried_at = excluded.tried_at, backoff_until = MAX(fleet_read_state.backoff_until, excluded.backoff_until)`,
   ).run(target, a.state, a.code, a.text, now, now + (a.backoffMs ?? 0));
 }
 
 /** In a backoff: the stored answer, with no call. A manual check may repeat a refused read, never a held one. */
 export function inBackoff(db: Db, target: AccessTarget, now: number, manual = false): ReadStateRow | null {
   const s = readStateOf(db, target);
-  if (!s || s.backoffUntil <= now) return null;
+  // Longer than any backoff can be: the clock moved. A hold is then repeated once rather than never.
+  if (!s || s.backoffUntil <= now || s.backoffUntil > now + BACKOFF_MS) return null;
   return manual && s.state !== "waiting" ? null : s;
 }

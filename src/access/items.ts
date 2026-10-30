@@ -71,6 +71,9 @@ const text = (v: unknown, max: number, why: string, min = 1): string => {
   return v as string;
 };
 
+/** A string from the list, or a bad answer. `String(x)` would let `["active"]` through and SQLite would refuse it later. */
+const oneOf = (v: unknown, list: readonly string[], why: string): string => (typeof v === "string" && list.includes(v) ? v : bad(why));
+
 function parseSubject(v: unknown): ItemSubject {
   const s = v as { kind?: unknown; id?: unknown } | null;
   if (s?.kind === "unlinked") return { kind: "unlinked" };
@@ -86,16 +89,18 @@ function parseItem(target: AccessTarget, v: unknown): AccessItem {
   const r = (v ?? {}) as Record<string, unknown>;
   const id = text(r.id, 128, "id", 3);
   if (!ITEM_ID.test(id)) bad("id");
-  const kind = String(r.kind);
-  if (!TARGET_KINDS[target].includes(kind) || !id.startsWith(`${kind}:`)) bad("kind");
+  const kind = oneOf(r.kind, TARGET_KINDS[target], "kind");
+  if (!id.startsWith(`${kind}:`)) bad("kind");
   const subject = parseSubject(r.subject);
   const resource = text(r.resource, 128, "resource");
-  if (!DIRECTIONS.includes(String(r.direction)) || !LEVELS.includes(String(r.level)) || !STATES.includes(String(r.state)) || typeof r.revocable !== "boolean") bad("field");
+  const direction = oneOf(r.direction, DIRECTIONS, "direction") as AccessItem["direction"];
+  const level = oneOf(r.level, LEVELS, "level") as AccessItem["level"];
+  const state = oneOf(r.state, STATES, "state") as AccessItem["state"];
+  if (typeof r.revocable !== "boolean") bad("revocable");
   if (r.since !== undefined && (typeof r.since !== "string" || !ISO.test(r.since))) bad("since");
-  const level = r.level as AccessItem["level"];
   if (r.digest !== itemDigest(target, { id, kind, subject, resource, level })) bad("digest");
   const label = chars(cleanText(text(r.label, LIST_LIMITS.labelChars, "label")), LIST_LIMITS.labelChars);
-  return { id, kind, subject, resource, direction: r.direction as AccessItem["direction"], level, label: label === "" ? "Unnamed" : label, state: r.state as AccessItem["state"], revocable: r.revocable as boolean, since: (r.since as string | undefined) ?? null, digest: r.digest as string };
+  return { id, kind, subject, resource, direction, level, label: label === "" ? "Unnamed" : label, state, revocable: r.revocable as boolean, since: (r.since as string | undefined) ?? null, digest: r.digest as string };
 }
 
 /** The checks of `access.list_out.1.schema.json`, by hand (a test runs the spec's fixtures through both), plus digest and kind per target. */

@@ -5,8 +5,8 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { validateAgainstSchema } from "@opt2-tealbrick/manifest";
 import { type Json, TbError } from "@opt2-tealbrick/miniapp-sdk";
-import { BACKOFF_MS, classify, DEFAULT_WAIT_MS, inBackoff, MAX_WAIT_MS, noteRead, noteStop, Pacer, presence, readPage, readStateOf } from "../src/access/client.ts";
-import { BadAnswer, itemDigest, type ListIn, onlyAsked, parsePage, personSubject, TARGET_KINDS } from "../src/access/items.ts";
+import { absentAnswer, BACKOFF_MS, classify, DEFAULT_WAIT_MS, inBackoff, MAX_WAIT_MS, noteRead, noteStop, Pacer, presence, readPage, readStateOf } from "../src/access/client.ts";
+import { BadAnswer, itemDigest, type ListIn, onlyAsked, parsePage, personSubject, shadowOf, storeItems, TARGET_KINDS } from "../src/access/items.ts";
 import * as store from "../src/store.ts";
 import { AGT, AGT2, accessEnv, answer, fakeStores, wire } from "./access-helpers.ts";
 import { migratedDb, NOSTR } from "./helpers.ts";
@@ -85,7 +85,7 @@ test("parsePage: quiet on a good row; refuses a wrong digest, another target's k
 });
 
 test("parsePage: label and reason are cleaned, nothing comes out empty", () => {
-  const p = parsePage("evolution", answer([wire("evolution", { id: "routine:a", kind: "routine", label: "Nightly‮​ digest" }), wire("evolution", { id: "routine:b", kind: "routine", label: "​" })], { notShown: [{ kind: "held_calls", reason: "Held‮ calls" }] }).output);
+  const p = parsePage("evolution", answer([wire("evolution", { id: "routine:a", kind: "routine", label: "Nightly\u202e\u200b digest" }), wire("evolution", { id: "routine:b", kind: "routine", label: "\u200b" })], { notShown: [{ kind: "held_calls", reason: "Held\u202e calls" }] }).output);
   assert.equal(p.items[0]?.label, "Nightly digest");
   assert.equal(p.items[1]?.label, "Unnamed");
   assert.equal(p.notShown[0]?.reason, "Held calls");
@@ -96,6 +96,30 @@ test("onlyAsked: a row about someone not asked for is dropped; under all nothing
   assert.deepEqual(onlyAsked(mine, [{ kind: "agent", id: AGT }]).map((i) => i.id), ["routine:a"]);
   assert.deepEqual(onlyAsked(mine, [{ kind: "agent", id: AGT }, { kind: "unlinked" }]).map((i) => i.id), ["routine:a", "routine:c"]);
   assert.equal(onlyAsked(mine, [{ kind: "all" }]).length, 3);
+});
+
+test("parsePage: a value that only looks right as a string is refused (an array is not a state); SQLite never sees it", () => {
+  const good = wire("evolution", { id: "routine:a", kind: "routine" });
+  for (const field of ["state", "direction"] as const) assert.throws(() => parsePage("evolution", answer([{ ...good, [field]: [good[field]] }]).output), BadAnswer, field);
+  assert.throws(() => parsePage("evolution", answer([{ ...good, kind: ["routine"] }]).output), BadAnswer);
+  assert.throws(() => parsePage("evolution", answer([{ ...good, level: ["use"] }]).output), BadAnswer);
+  const db = migratedDb();
+  const p = parsePage("evolution", answer([good]).output);
+  storeItems(db, "evolution", p.items, "s", 1);
+  assert.equal(shadowOf(db, "evolution", [{ kind: "agent", id: AGT }]).length, 1);
+});
+
+test("a code of the other app is data: 'constructor' finds no function, and a code with odd characters is not stored", () => {
+  for (const code of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+    const a = classify(new TbError(code, "x", 500));
+    assert.ok(!a.ok);
+    assert.equal(a.text, "The app could not answer.", code);
+  }
+  const db = migratedDb();
+  const odd = classify(new TbError("bad code\u202e", "x", 500));
+  assert.ok(!odd.ok && odd.code === "error");
+  noteStop(db, "connect", odd, 1);
+  assert.equal(readStateOf(db, "connect")?.code, "error");
 });
 
 test("failure map: each answer has one state, and only the states the table names", () => {
@@ -148,17 +172,22 @@ test("readPage: a page, a hold, a malformed answer and a hanging store each read
   assert.ok(!hung.ok && hung.state === "not_read" && hung.code === "timeout");
 });
 
-test("presence: installed, not installed and not known are three answers, and no answer calls the store", () => {
+test("presence: present, not installed, no grant and not known are four answers, and none calls the store", () => {
   const f = fakeStores({});
-  const env = (targets: string[], over: Partial<ReturnType<typeof accessEnv>> = {}) => ({ ...accessEnv(f.callApp, targets), declared: new Set(["connect", "kanban"]), ...over });
-  assert.equal(presence(env(["connect"]), "connect"), "present");
-  assert.equal(presence(env(["connect"]), "kanban"), "not_installed", "declared, no grant, the slice is current");
-  assert.equal(presence(env(["connect"]), "evolution"), "not_installed", "not in the manifest, the slice is current");
-  assert.equal(presence(env(["connect"], { bridgeCaps: () => [] }), "kanban"), "not_read", "no current workspace copy says nothing about what is installed");
-  assert.equal(presence(env(["evolution"]), "evolution"), "not_read", "a grant but not in this version's manifest: it is installed");
-  assert.equal(presence(env(["connect"], { topology: () => ({ instances: [["ins_1", "evolution", "Evolving Workflows", "0.4.3"]] }) }), "evolution"), "not_read", "the owner's picture lists it: never 'not installed'");
-  assert.equal(presence(env(["connect"], { topology: () => { throw new Error("bad"); } }), "kanban"), "not_installed", "a bad picture is no picture");
+  const picture = (...products: string[]) => ({ instances: products.map((p) => [`ins_${p}`, p, p, "1.0.0"]) });
+  const env = (targets: string[], topology: ReturnType<typeof accessEnv>["topology"]) => ({ ...accessEnv(f.callApp, targets), declared: new Set(["connect", "kanban"]), topology });
+  assert.equal(presence(env(["connect"], () => null), "connect"), "present");
+  assert.equal(presence(env(["connect"], () => picture("connect")), "kanban"), "not_installed", "the owner's whole picture does not list it");
+  assert.equal(presence(env(["connect"], () => picture("connect")), "evolution"), "not_installed", "not in the manifest either");
+  assert.equal(presence(env(["connect"], () => picture("connect", "evolution")), "evolution"), "not_granted", "listed, not in this version's manifest");
+  assert.equal(presence(env(["connect"], () => picture("connect", "kanban")), "kanban"), "not_granted", "listed with no grant: a target that dropped an op, or no edge");
+  assert.equal(presence(env(["evolution"], () => null), "evolution"), "not_granted", "a grant proves it is installed");
+  assert.equal(presence(env(["connect"], () => null), "kanban"), "not_known", "no consent, or no current slice");
+  assert.equal(presence(env(["connect"], () => ({ ...picture("connect"), truncated: true })), "kanban"), "not_known", "a cut picture proves no absence");
+  assert.equal(presence(env(["connect"], () => { throw new Error("bad"); }), "kanban"), "not_known");
   assert.equal(f.calls.length, 0);
+  assert.deepEqual(absentAnswer("not_installed").state, "not_installed");
+  assert.deepEqual([absentAnswer("not_granted").state, absentAnswer("not_known").state], ["not_read", "not_read"]);
 });
 
 test("backoff: a refused read holds, a manual check may repeat it, a held read never repeats early; a full read ends it", () => {
@@ -176,6 +205,12 @@ test("backoff: a refused read holds, a manual check may repeat it, a held read n
   const s = readStateOf(db, "connect");
   assert.equal(s?.readAt, 9000, "the old list keeps its time");
   assert.deepEqual(s?.notShown, [{ kind: "held_calls", reason: "r" }]);
+  noteStop(db, "knowledge", { state: "waiting", code: "held", text: "Wait", backoffMs: BACKOFF_MS }, 20_000);
+  noteStop(db, "knowledge", { state: "not_read", code: "not_known", text: "Blip" }, 20_001);
+  assert.ok(inBackoff(db, "knowledge", 20_002), "a blip does not end a hold's backoff: no second hold");
+  assert.equal(inBackoff(db, "knowledge", 20_000 - BACKOFF_MS - 1), null, "the clock moved back: not stuck forever");
+  db.exec("UPDATE fleet_read_state SET not_shown_json = '{bad' WHERE target = 'connect'");
+  assert.deepEqual(readStateOf(db, "connect")?.notShown, [], "one bad row does not stop the list");
 });
 
 test("Pacer: two at a time, first come first served; a hanging call frees its place at the timeout", async () => {
@@ -198,6 +233,17 @@ test("Pacer: two at a time, first come first served; a hanging call frees its pl
   await assert.rejects(p.run(hang, 10));
   await assert.rejects(p.run(hang, 10));
   assert.equal(await p.run(async () => 7, 1000), 7, "two calls that never end stop nothing");
+  // A call that timed out in the queue takes no place and never runs.
+  const q = new Pacer(0, 0);
+  let ran = 0;
+  const hold: (() => void)[] = [];
+  const busy = [q.run(() => new Promise<void>((r) => hold.push(r)), 1000), q.run(() => new Promise<void>((r) => hold.push(r)), 1000)];
+  await assert.rejects(q.run(async () => { ran++; }, 5));
+  await new Promise((r) => setTimeout(r, 5));
+  for (const h of hold) h();
+  await Promise.all(busy);
+  await q.run(async () => {}, 100);
+  assert.equal(ran, 0);
 });
 
 test("Pacer: the gap holds between starts", async () => {
