@@ -42,6 +42,15 @@ Governance (0.3.1; formerly Organization Plane) is the workspace directory and i
 - **Record:** `fleet_lifecycle_events` is append-only by trigger, with a hash chain from the first row after the migration. It is evidence of what this app wrote, no more: the app owns the file. A restore drops later rows, and a `restored` row says so.
 - **Rollback.** E3 to 0.3.2 restores the data and drops later events. Revokes done in Core or a store stay. The 0.3.2 feed has no `floor` key, and Rules dev keeps its entries (fail closed): the owner clears them on the Rules page. A restore that stays on this version follows the feed.
 
+## Inventory (C380 B9b, `src/access/`, spec 0.1.89 `tb.access/1`)
+
+- `items.ts`: one `access_list` page, checked by hand (`test/access-reader.test.ts` runs the spec's fixtures through parser and schema), the digest computed again with the product called, the shadow copy `fleet_access_items`. Never authority.
+- `client.ts`: the one client: 1 call/s, 2 at a time, jitter; `presence` before any call; the failure map; `fleet_read_state` with a backoff that survives a restart. SDK 0.1.43 drops `Retry-After`, so a 429 waits a fixed 30 s until a TbError carries `details.retryAfterMs`.
+- `sweep.ts`: jobs `access_sweep` (one call per tick, cursor in the job state, one transaction per page) and `access_sweep_cron` (every 6 h; starts a read unless one runs). Deletion rule in `deleteUnseen`.
+- `differences.ts`: findings of the inventory, computed on read (`access_after_leave`, `orphan`, `unlinked_account`), `fleet_exceptions`. `src/findings.ts` holds those of the lifecycle and the slice.
+- `preview.ts`: `plan_preview`. Keeps no state; the one write is the backoff of a refused or held read.
+- "Not installed" needs the owner's whole picture (consent on, not cut). With no picture a missing store reads "Could not be read": Core lists a target only for a grant it holds, so absence proves nothing. Companions are declared per target only at gate G5: a target rollback that drops a declared op removes the whole entry for that product.
+
 ## Operations (from `tealbrick.manifest.json`)
 
 27 operations. C380 adds five person ops, last in the manifest: `summary_get`, `colleagues_list`, `colleague_get`, `lifecycle_set`, `settings_set`; each handler refuses every caller that is not a person (`no_access` 403).
