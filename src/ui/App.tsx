@@ -13,6 +13,7 @@ import { DirectoryPage } from "./pages/directory.tsx";
 import { EveryonePage } from "./pages/everyone.tsx";
 import { FEATURES } from "./pages/features.ts";
 import { Identities } from "./pages/identities.tsx";
+import { RoundsPage } from "./pages/rounds.tsx";
 import { SubjectPage } from "./pages/subject.tsx";
 import { SUBJECT_PATH } from "./pages/subject-link.ts";
 import { SummaryPage } from "./pages/summary.tsx";
@@ -28,7 +29,9 @@ const STILLS = new URL("./stills/", import.meta.url).href;
 const OLD_ROUTES = { teams: "", topology: "topology", access: "access", reviews: "reviews", rules: "contact-rules", people: "people", agents: "agents", identities: "identities", holds: "holds" } as const;
 /** With the lifecycle ops (C380): Summary is the launch page; /people and /agents stay as routes and leave the nav for one release. */
 const NEW_ROUTES = { ...OLD_ROUTES, summary: "", everyone: "people-and-agents", subject: SUBJECT_PATH, teams: "teams" } as const;
-const ROUTES: Readonly<Record<string, string>> = FEATURES.lifecycle ? NEW_ROUTES : OLD_ROUTES;
+/** Tier 2: a route exists when the ops are there; the nav entry waits for the QA rows (features.ts). */
+const TIER2_ROUTES = { ...(FEATURES.rounds ? { rounds: "review-rounds" } : {}) };
+const ROUTES: Readonly<Record<string, string>> = { ...(FEATURES.lifecycle ? NEW_ROUTES : OLD_ROUTES), ...TIER2_ROUTES };
 const LAUNCH = FEATURES.lifecycle ? "summary" : "teams";
 const OLD_PAGES = [
   { id: "teams", label: "Teams" },
@@ -52,7 +55,11 @@ const NEW_PAGES = [
   { id: "identities", label: "Identities" },
   { id: "holds", label: "Waiting for approval" },
 ];
-const PAGES = FEATURES.lifecycle ? NEW_PAGES : OLD_PAGES;
+/** Review rounds follow Reviews. */
+function withTier2(pages: { id: string; label: string }[]): { id: string; label: string }[] {
+  return pages.flatMap((p) => [p, ...(p.id === "reviews" && FEATURES.roundsNav ? [{ id: "rounds", label: "Review rounds" }] : [])]);
+}
+const PAGES = withTier2(FEATURES.lifecycle ? NEW_PAGES : OLD_PAGES);
 
 export function App() {
   const { principal, status, signOut } = useSession();
@@ -119,6 +126,8 @@ export function App() {
         <ContactRulesPage />
       ) : nav.page === "reviews" ? (
         <ReviewsPage onChanged={() => void badge.reload()} />
+      ) : nav.page === "rounds" ? (
+        <RoundsPage />
       ) : nav.page === "identities" ? (
         <Identities />
       ) : (
