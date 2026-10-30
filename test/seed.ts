@@ -34,10 +34,6 @@ export function seed(db: Db) {
   return { ann, bo, bot, cy, support, ops };
 }
 
-<<<<<<< HEAD
-
-=======
->>>>>>> c380/b10-words
 /**
  * Rows for a database of an EARLIER schema (a migration test): raw SQL, because src/store.ts writes the current schema. The columns of migrations 0001 and 0002 only.
  */

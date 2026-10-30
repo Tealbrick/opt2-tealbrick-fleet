@@ -83,11 +83,7 @@ const json = (res: ServerResponse, status: number, body: unknown) => {
 function startServer(state: { current: Scene; theme: string; unknownOps: Set<string>; unexpected: Set<string>; calls: { op: string; input: unknown }[] }): Promise<Server> {
   const answer = (res: ServerResponse, a: Answer) => {
     if (a.kind === "hang") return; // stays open until the run closes all connections
-<<<<<<< HEAD
     if (a.kind === "error") return json(res, a.status, { error: { code: a.code, message: a.message ?? a.code, details: a.details } });
-=======
-    if (a.kind === "error") return json(res, a.status, { error: { code: a.code, message: a.message ?? a.code } });
->>>>>>> c380/b10-words
     json(res, 200, { status: "ok", output: a.value });
   };
   const server = createServer((req, res) => {

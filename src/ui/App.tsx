@@ -101,17 +101,12 @@ export function App() {
         ) : null
       }
     >
-<<<<<<< HEAD
       {!signedIn ? null : nav.page === "summary" ? (
         <SummaryPage />
       ) : nav.page === "everyone" ? (
         <EveryonePage portalHref={portalLink} />
       ) : nav.page === "holds" ? (
-        <HoldsPage list={holds} only={nav.hold} empty="No calls wait for your approval." />
-=======
-      {!signedIn ? null : nav.page === "holds" ? (
         <HoldsPage title="Waiting for approval" list={holds} only={nav.hold} empty="No calls wait for your approval." />
->>>>>>> c380/b10-words
       ) : nav.page === "topology" ? (
         <TopologyPage portalHref={portalLink} />
       ) : nav.page === "access" ? (

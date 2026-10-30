@@ -2,11 +2,7 @@
 // (loading, empty, error, narrow comes from the matrix itself) gets its own scene. Add a scene with each page.
 import type { Page } from "playwright-core";
 
-<<<<<<< HEAD
 export type Answer = { kind: "ok"; value: unknown } | { kind: "error"; status: number; code: string; message?: string; details?: unknown } | { kind: "hang" };
-=======
-export type Answer = { kind: "ok"; value: unknown } | { kind: "error"; status: number; code: string; message?: string } | { kind: "hang" };
->>>>>>> c380/b10-words
 export type Fixture = (input: unknown) => Answer;
 
 export const ok =
@@ -53,7 +49,6 @@ const overview = {
   agents: [{ id: ID.a, name: "Henry", trust: "unreviewed", mode: "free", status: "active", owner: { id: ID.p, name: "Marco Rossi" }, role: "", tags: [], teams: [], updatedAt: "2026-10-30T09:00:00Z" }],
 };
 
-<<<<<<< HEAD
 // ── lifecycle pages (C380) ──────────────────────────────────────────────────
 /** The server's words (src/lifecycle/floor.ts): a scene must show what the server sends. */
 const FLOOR_TEXT = {
@@ -230,19 +225,13 @@ export const scenes: Scene[] = [
     },
     expect: ["You stopped 5 entries"],
   },
-=======
-export const scenes: Scene[] = [
->>>>>>> c380/b10-words
   { name: "people-old", path: "people", ops: { ...shell, overview_get: ok(overview) }, ready: "Marco Rossi" },
   { name: "people-old-empty", path: "people", ops: { ...shell, overview_get: ok({ revision: 0, teams: [], people: [], agents: [] }) }, ready: "No people yet" },
   { name: "people-old-loading", path: "people", ops: { ...shell, overview_get: hang }, ready: "Loading the directory" },
   { name: "people-old-error", path: "people", ops: { ...shell, overview_get: fail("internal") }, ready: "Try again" },
-<<<<<<< HEAD
-=======
   { name: "waiting-for-approval", path: "holds", strict: true, ops: shell, ready: "No calls wait", expect: ["Waiting for approval"] },
   { name: "reviews-words", path: "reviews", strict: true, ops: { ...shell, overview_get: ok(overview), reviews_list: ok({ reviews: [], due: [], nextCursor: null, policy: { enabled: false, intervalDays: 90 } }) }, ready: "Review someone", expect: ["Reviews"] },
   { name: "access-words", path: "access", strict: true, ops: { ...shell, access_get: ok({ status: "unavailable", reason: "not_consented", note: "App access is not shown. Turn on 'See who has access' for Governance in the Portal (app settings) to show this." }) }, ready: "App access is not shown", expect: ["does not find agents you do not know about"] },
   { name: "who-owns-what", path: "topology", strict: true, ops: { ...shell, access_get: ok({ status: "unavailable", reason: "not_consented", note: "App access is not shown." }), topology_get: ok({ revision: 1, nodes: [], edges: [], sources: { contacts: { status: "unavailable", note: "Connect is not available." } } }) }, ready: "Who owns what" },
->>>>>>> c380/b10-words
   { name: "signed-out", path: "people", ops: {}, signedOut: true, ready: "Open this app from Portal" },
 ];
