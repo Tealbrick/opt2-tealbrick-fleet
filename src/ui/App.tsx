@@ -30,14 +30,14 @@ const ROUTES: Readonly<Record<string, string>> = FEATURES.lifecycle ? NEW_ROUTES
 const LAUNCH = FEATURES.lifecycle ? "summary" : "teams";
 const OLD_PAGES = [
   { id: "teams", label: "Teams" },
-  { id: "topology", label: "Topology" },
+  { id: "topology", label: "Who owns what" },
   { id: "access", label: "Access" },
-  { id: "reviews", label: "Trust reviews" },
+  { id: "reviews", label: "Reviews" },
   { id: "rules", label: "Contact rules" },
   { id: "people", label: "People" },
   { id: "agents", label: "Agents" },
   { id: "identities", label: "Identities" },
-  { id: "holds", label: "Holds" },
+  { id: "holds", label: "Waiting for approval" },
 ];
 const NEW_PAGES = [
   { id: "summary", label: "Summary" },
@@ -101,12 +101,17 @@ export function App() {
         ) : null
       }
     >
+<<<<<<< HEAD
       {!signedIn ? null : nav.page === "summary" ? (
         <SummaryPage />
       ) : nav.page === "everyone" ? (
         <EveryonePage portalHref={portalLink} />
       ) : nav.page === "holds" ? (
         <HoldsPage list={holds} only={nav.hold} empty="No calls wait for your approval." />
+=======
+      {!signedIn ? null : nav.page === "holds" ? (
+        <HoldsPage title="Waiting for approval" list={holds} only={nav.hold} empty="No calls wait for your approval." />
+>>>>>>> c380/b10-words
       ) : nav.page === "topology" ? (
         <TopologyPage portalHref={portalLink} />
       ) : nav.page === "access" ? (

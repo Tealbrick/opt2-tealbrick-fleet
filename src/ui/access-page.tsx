@@ -16,6 +16,7 @@ export function AccessPage({ portalHref }: { portalHref?: string }) {
     <section className="app-page" aria-label="Access page">
       <PageHead title="Access" lede="Which agents may use which apps, and the connections and channels each agent has. Only you see this page. Governance only shows it: access is changed in Portal." />
       {error ? <LoadFailed message={error} retrying={loading} onRetry={() => void reload()} /> : null}
+      <Notice tone="neutral">Teal Brick asks you to approve a sender's call only when the agent's runner names that sender. Governance does not find agents you do not know about.</Notice>
       {data === null ? (
         error ? null : (
           <Loading what="access" />

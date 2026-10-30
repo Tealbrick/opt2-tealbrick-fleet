@@ -184,7 +184,7 @@ describe("Topology page", () => {
       ["access_get", {}],
       ["topology_get", { layers: ["org", "contacts"] }],
     ]);
-    assert.equal(m.host.querySelector("h1")?.textContent, "Topology");
+    assert.equal(m.host.querySelector("h1")?.textContent, "Who owns what");
     assert.deepEqual(cells(m.host.querySelector('[aria-label="Relationships"]')), [
       ["Ann Example (person) psn_ann", "owns", "Front desk (agent) …00000A", "Live"],
       ["Ann Example (person) psn_ann", "leads", "Support (team) …upport", "Live"],
@@ -203,7 +203,7 @@ describe("Topology page", () => {
     const m = await mount(h(ui.TopologyPage, {}));
     const svg = m.host.querySelector('[aria-label="Network picture"] svg.topo-svg');
     assert.ok(svg, "the graph is drawn");
-    assert.match(svg.getAttribute("aria-label") ?? "", /^Topology graph, read only: 1 person, 2 agents, 1 team, 0 apps, 1 outside contact, 5 links\.$/);
+    assert.match(svg.getAttribute("aria-label") ?? "", /^Who owns what, graph, read only: 1 person, 2 agents, 1 team, 0 apps, 1 outside contact, 5 links\.$/);
     assert.deepEqual(
       [...svg.querySelectorAll("g.g-node")].map((n) => n.getAttribute("data-id")).sort(),
       [ANN, FRONT, "psn_bot", SCOUT].sort(),
@@ -337,7 +337,7 @@ describe("Topology page", () => {
     assert.equal(printed, 0);
     await click(button(m.host, "Print for a security review"));
     assert.equal(printed, 1);
-    assert.match(m.host.querySelector(".print-only")?.textContent ?? "", /^Governance topology, printed \d{1,2} [A-Z][a-z]{2} \d{4}$/);
+    assert.match(m.host.querySelector(".print-only")?.textContent ?? "", /^Governance: who owns what, printed \d{1,2} [A-Z][a-z]{2} \d{4}$/);
     assert.ok(button(m.host, "Print for a security review").className.includes("no-print"), "the button itself is not printed");
     await m.unmount();
   });
@@ -445,7 +445,7 @@ describe("Access page", () => {
     reset();
     stub.access = NOT_CONSENTED();
     const m = await mount(h(accessUi.AccessPage, { portalHref: "https://portal.example/canvas" }));
-    assert.deepEqual(statuses(m.host), ["App access is not shown. Access is not shared with this app. Turn on 'See who has access' for Governance in the Portal (app settings) to show this."]);
+    assert.deepEqual(statuses(m.host), ["Teal Brick asks you to approve a sender's call only when the agent's runner names that sender. Governance does not find agents you do not know about.", "App access is not shown. Access is not shared with this app. Turn on 'See who has access' for Governance in the Portal (app settings) to show this."]);
     assert.equal(m.host.querySelector("table"), null);
     assert.equal(m.host.querySelector('a[href="https://portal.example/canvas"]')?.textContent, "Change access in Portal");
     preview("access-unavailable", m.host);
