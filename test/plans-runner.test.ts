@@ -1011,3 +1011,78 @@ test("a handler that throws frees the key: the store ran nothing; re-list, new a
   assert.equal(w.plan(id).state, "done");
   assert.deepEqual(w.connect.data.ended, ["account_as_itself:acc1"]);
 });
+
+test("a system plan: nothing that needs the owner's confirm runs; what stands on his approval in Portal does", async () => {
+  const w = makeWorld();
+  w.db.prepare("UPDATE fleet_agents SET owner_id = NULL").run();
+  w.db.prepare("INSERT INTO fleet_handles (handle, person_id, created_at) VALUES ('slack:UANN', ?, 1)").run(w.ann.id);
+  w.connect.add({ id: "channel_sender:slack:UANN", kind: "channel_sender", subject: { kind: "person", id: w.ann.id }, resource: "slack:UANN", level: "use", label: "Slack sender" });
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  const id = w.makePlan({ kind: "person", id: w.ann.id, actor: { kind: "system", id: null } });
+  await w.tick(id);
+  assert.equal(w.item(id, "channel_sender:slack:UANN").state, "listed");
+  assert.equal(w.connect.data.handled.length, 0);
+});
+
+test("stale, and the owner had approved already: what Core did goes on the record first; T6 sees it; no Core step reads as not done", async () => {
+  const { hasAppliedStop } = await import("../src/plans/guards.ts");
+  const w = makeWorld();
+  account(w);
+  const id = await leavingPlan(w);
+  approveAndDeliver(w, keyOf(w, id), HENRY); // no tick read it
+  w.db.prepare("UPDATE fleet_agents SET lifecycle_rev = lifecycle_rev + 1 WHERE id = ?").run(HENRY);
+  await w.tick(id);
+  assert.equal(w.plan(id).state, "stale");
+  assert.equal(w.plan(id).draft_state, "applied");
+  assert.equal((w.steps(id).find((s) => s.phase === "core") as Record<string, unknown>).state, "done");
+  assert.equal(hasAppliedStop(w.db, "agent", HENRY), true);
+  assert.equal(w.connect.data.handled.length, 0);
+});
+
+test("stale with Portal down: the plan ends, and says the draft may stand", async () => {
+  const w = makeWorld();
+  const id = await leavingPlan(w);
+  w.db.prepare("UPDATE fleet_agents SET lifecycle_rev = lifecycle_rev + 1 WHERE id = ?").run(HENRY);
+  w.core.down = true;
+  await w.tick(id);
+  assert.equal(w.plan(id).state, "stale");
+  assert.equal(w.plan(id).code, "not_taken_back");
+  const { planView } = await import("../src/plans/view.ts");
+  assert.match(String(planView(w.db, id).note), /could not take this request back/);
+});
+
+test("the rail comes back in link mode: the draft is read again, and an approval there goes on as usual", async () => {
+  const w = makeWorld();
+  account(w);
+  const id = await leavingPlan(w);
+  w.core.flag = false;
+  await w.tick(id);
+  assert.equal(w.plan(id).rail, "portal_link");
+  w.core.flag = true;
+  approveAndDeliver(w, keyOf(w, id), HENRY);
+  await w.tick(id);
+  assert.equal(w.plan(id).rail, "draft");
+  assert.equal(w.plan(id).state, "done");
+});
+
+test("ended plans leave no step that reads as waiting: lost, failed", async () => {
+  const w = makeWorld();
+  account(w);
+  const id = await leavingPlan(w);
+  w.core.data.drafts = [];
+  await w.tick(id);
+  assert.equal(w.plan(id).state, "lost");
+  assert.equal((w.steps(id).find((s) => s.phase === "core") as Record<string, unknown>).state, "cancelled");
+  assert.equal(w.item(id, "account_as_itself:acc1").state, "cancelled");
+});
+
+test("a handle Connect would refuse is not sent, also for a person with many", async () => {
+  const w = makeWorld();
+  w.db.prepare("UPDATE fleet_agents SET owner_id = NULL").run();
+  for (let i = 0; i < 20; i++) w.db.prepare("INSERT INTO fleet_handles (handle, person_id, created_at) VALUES (?, ?, 1)").run(`slack:U${String(i).padStart(4, "0")}`, w.ann.id);
+  w.db.prepare("INSERT INTO fleet_handles (handle, person_id, created_at) VALUES ('NOT A HANDLE', ?, 1)").run(w.ann.id);
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  const id = w.makePlan({ kind: "person", id: w.ann.id });
+  await w.tick(id);
+  assert.equal((w.steps(id).find((s) => s.phase === "read" && s.target === "connect") as Record<string, unknown>).state, "done");
+});

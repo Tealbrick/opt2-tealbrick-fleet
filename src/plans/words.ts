@@ -1,6 +1,7 @@
 // Plain words for a plan (C380, DESIGN-C380 §10). Each sentence says only what its state proves: `done` words are for proofs, the others say who said what.
 import { TARGET_NAMES } from "../access/items.ts";
 import type { Row } from "./plan.ts";
+import { MAX_TRIES } from "./steps.ts";
 
 const NAMES: Record<string, string> = { ...TARGET_NAMES, core: "Portal" };
 export const storeName = (t: string): string => NAMES[t] ?? t;
@@ -48,9 +49,9 @@ export function itemStepText(s: Row): string {
     case "failed":
       return s.code === "still_listed" ? `${app} says this ended, but it still lists it.` : `${app} could not end this.`;
     case "changed":
-      return "This changed since you looked. Nothing was done. Look at it again.";
+      return "This changed since you looked. Nothing was done. Make a new plan to end it.";
     case "not_revocable":
-      return "Waits for the agent to stop.";
+      return Number(s.tries) >= MAX_TRIES ? `${app} still sees this agent as running. Try again when Portal shows it stopped.` : "Waits for the agent to stop.";
     case "done":
       return s.item_kind === "routine" ? `${app} shows this as paused.` : `${app} no longer lists this.`;
     case "reported":
@@ -94,7 +95,7 @@ export function headlineOf(p: Row, counts: { proved: number; said: number; manua
     case "applying":
       return p.code === "portal_stopped" ? "Portal stopped mid-way. Open Portal and check." : "Portal is applying this.";
     case "running":
-      return `Portal applied this. ${counts.open} still open.`;
+      return link ? `${counts.open} still open.` : `Portal applied this. ${counts.open} still open.`;
     case "partial":
       return p.code === "core_failed" ? "Portal stopped on a step. Open Portal and apply it again." : "Part of this did not work. Look at the open steps.";
     case "done":
@@ -107,7 +108,7 @@ export function headlineOf(p: Row, counts: { proved: number; said: number; manua
     case "rejected":
       return p.code === "partly_applied" ? "This request was rejected after Portal did part of it. Look at the steps." : "This request was rejected in Portal. Nothing in it was applied.";
     case "withdrawn":
-      return p.code === "not_taken_back" ? "Governance could not take this request back. If it is still in Portal, reject it there." : "This request was taken back.";
+      return p.code === "not_taken_back" ? NOTE_NOT_TAKEN_BACK : p.code === "partly_applied" ? "This request was taken back after Portal did part of it. Look at the steps." : "This request was taken back.";
     case "replaced":
       return "A newer plan replaced this one.";
     case "cancelled":
@@ -121,5 +122,6 @@ export function headlineOf(p: Row, counts: { proved: number; said: number; manua
   }
 }
 
+export const NOTE_NOT_TAKEN_BACK = "Governance could not take this request back. If it is still in Portal, reject it there.";
 export const NOTE_CONSENT = "To let Governance prepare this for you, turn on 'See who has access' for Governance in Portal.";
 export const NOTE_RAIL_OFF = "Portal cannot take a request from Governance here.";

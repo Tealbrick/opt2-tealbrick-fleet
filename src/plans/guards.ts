@@ -18,8 +18,10 @@ export const hasAppliedStop = (db: Db, kind: string, id: string): boolean =>
 
 /** T7: the last plan of this entry did not finish, and nobody said why. Close needs a new plan or a named reason. */
 export function lastPlanUnfinished(db: Db, kind: string, id: string): boolean {
-  const last = db.prepare("SELECT state FROM fleet_plans WHERE subject_kind = ? AND subject_id = ? AND state <> 'replaced' ORDER BY opened_at DESC, part LIMIT 1").get(kind, id);
-  return !!last && ["expired", "rejected", "lost", "failed", "stale", "withdrawn"].includes(String(last.state));
+  const last = db.prepare("SELECT group_id FROM fleet_plans WHERE subject_kind = ? AND subject_id = ? AND state <> 'replaced' ORDER BY opened_at DESC, id DESC LIMIT 1").get(kind, id);
+  if (!last) return false;
+  // Every part of a split plan: one part done says nothing about the others.
+  return !!db.prepare("SELECT 1 FROM fleet_plans WHERE group_id = ? AND state IN ('expired', 'rejected', 'lost', 'failed', 'stale', 'withdrawn') LIMIT 1").get(String(last.group_id));
 }
 
 /** T7 (Domain 6): Connect accounts tied to nobody. A person cannot close while one is unnamed: it may be theirs. The owner names one with an exception: code `unlinked_account`, subject `item`, id `<target>:<item>`. */
