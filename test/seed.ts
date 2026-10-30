@@ -33,3 +33,15 @@ export function seed(db: Db) {
   return { ann, bo, bot, cy, support, ops };
 }
 
+/**
+ * Rows for a database of an EARLIER schema (a migration test): raw SQL, because src/store.ts writes the current schema. The columns of migrations 0001 and 0002 only.
+ */
+export function seedOldSchema(db: Db): void {
+  db.exec(`
+    INSERT INTO fleet_people (id, name, email, title, status, kind, trust, source, tags, created_at, updated_at) VALUES ('psn_ann', 'Ann Example', 'ann@example.com', '', 'active', 'person', 'trusted', 'owner', '[]', 1, 2);
+    INSERT INTO fleet_handles (handle, person_id, created_at) VALUES ('slack:U012ABCDEF', 'psn_ann', 1);
+    INSERT INTO fleet_agents (id, name, mode, status, owner_id, role, tags, trust, first_seen, updated_at) VALUES ('${AGENT_A.id}', 'Agent A', 'free', 'active', 'psn_ann', '', '[]', 'trusted', 1, 2), ('${AGENT_B.id}', 'Agent B', 'bound', 'paused', NULL, '', '[]', 'trusted', 1, 2);
+    INSERT INTO fleet_teams (id, name, description, tags, created_at, updated_at) VALUES ('tm_support', 'Support', '', '[]', 1, 2);
+    INSERT INTO fleet_members (team_id, kind, subject_id, role, created_at) VALUES ('tm_support', 'person', 'psn_ann', 'lead', 1);
+    UPDATE fleet_meta SET value = value + 5 WHERE key = 'revision';`);
+}
