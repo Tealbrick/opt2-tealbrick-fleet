@@ -231,12 +231,12 @@ describe("People and agents, Stop now", () => {
     reset();
     stub.answers.colleagues_list = list();
     let first = true;
-    stub.answers.lifecycle_set = (input) => {
+    stub.answers.lifecycle_set = () => {
       if (first) {
         first = false;
         return refuse(409, "stop_cap_reached", "x", { count: 6 })();
       }
-      return ok({ colleague: DETAIL(), transition: null })(input);
+      return ok({ colleague: DETAIL(), transition: null })();
     };
     const m = await mount(h(everyone.EveryonePage, {}));
     await click(button(m.host, "Stop now"));
