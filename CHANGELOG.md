@@ -12,7 +12,8 @@ C380 plan runner, DEV only. Not for stable until Martin has read C380-DECISIONS.
 - With the rail off, no consent `topology` or an older bridge, plans run in Portal link mode, with proof from the slice.
 - An open plan reads its stores every 60 s for 30 minutes, then every 15. Three or more open plans share one read.
 - T6 is refused after an apply, T7 while a plan is open or did not finish (a named reason passes), and while a Connect account with no person is unchecked. T4 and T6 take the draft back first.
-- Companions: `access_revoke` on Knowledge and Evolving Workflows, `inbox_ask` on Operator Inbox. Connect follows when its 0.7.14 is on qa1. SDK 0.1.46, `requires.bridge` 0.2.14.
+- Companions: `access_list` and `access_revoke` on Connect, `access_revoke` on Knowledge and Evolving Workflows, `inbox_ask` on Operator Inbox. Task Board stays list-only: it has no per-agent grant to end. SDK 0.1.46, `requires.bridge` 0.2.14.
+- Blast radius: rolling Connect back under 0.7.14 removes its whole companion entry, and with it `identities_list` and `contacts_list`, until Connect is forward again.
 
 ## 0.4.0-dev.2 - 2026-10-30
 

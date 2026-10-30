@@ -9599,12 +9599,15 @@
       "product": "connect",
       "operations": [
         "identities_list",
-        "contacts_list"
+        "contacts_list",
+        "access_list",
+        "access_revoke"
       ],
       "crud": [
-        "read"
+        "read",
+        "update"
       ],
-      "purpose": "Reads agent channel identities (owner view, Rules' feed handles) and which addresses each agent first-contacted (Topology contacts layer). Never shown to agents"
+      "purpose": "Reads agent identities, first contacts and access for the owner's pages; ends an item only in a stop plan you confirmed. Never shown to agents."
     },
     {
       "product": "rules",
