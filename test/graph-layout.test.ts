@@ -151,7 +151,7 @@ describe("layoutGraph", () => {
   it("0 nodes: an empty picture (0 × 0), nothing drawn, the summary still says so", () => {
     const l = layoutGraph({ nodes: [], edges: [] });
     assert.deepEqual([l.width, l.height, l.nodes.length, l.regions.length, l.wires.length], [0, 0, 0, 0, 0]);
-    assert.equal(graphSummary(l), "Topology graph, read only: 0 people, 0 agents, 0 teams, 0 apps, 0 outside contacts, 0 links.");
+    assert.equal(graphSummary(l), "Who owns what, graph, read only: 0 people, 0 agents, 0 teams, 0 apps, 0 outside contacts, 0 links.");
     assert.equal(moreNote(l), "");
   });
 
@@ -163,7 +163,7 @@ describe("layoutGraph", () => {
     assert.deepEqual([n.x, n.y, n.initial, n.meta], [GEOMETRY.margin + GEOMETRY.pad, GEOMETRY.margin, "S", "Agent · trusted"]);
     assert.equal(l.width, n.x + n.w + GEOMETRY.margin);
     assert.equal(l.height, n.y + n.h + GEOMETRY.margin);
-    assert.equal(graphSummary(l), "Topology graph, read only: 0 people, 1 agent, 0 teams, 0 apps, 0 outside contacts, 0 links.");
+    assert.equal(graphSummary(l), "Who owns what, graph, read only: 0 people, 1 agent, 0 teams, 0 apps, 0 outside contacts, 0 links.");
   });
 
   it("an empty team is a short region that says so; a team-only workspace still draws its regions", () => {
@@ -187,7 +187,7 @@ describe("layoutGraph", () => {
     );
     assert.deepEqual([l.total.agents, l.hidden.agents, l.hidden.edges, l.wires.length], [500, 440, 440, 60], "the 60 drawn agents keep their owner wire");
     assert.equal(moreNote(l), "+440 more agents — see the table.");
-    assert.match(graphSummary(l), /^Topology graph, read only: 1 person, 60 agents, .* \+440 more agents — see the table\.$/);
+    assert.match(graphSummary(l), /^Who owns what, graph, read only: 1 person, 60 agents, .* \+440 more agents — see the table\.$/);
     // quiet on good: under the cap nothing is hidden and there is no note
     const few = layoutGraph({ nodes: agents.slice(0, 60), edges: [] });
     assert.deepEqual([few.hidden.agents, moreNote(few)], [0, ""]);

@@ -280,7 +280,7 @@ function HoldRow({ hold, busy, onDecide }: { hold: Hold; busy: boolean; onDecide
   );
 }
 
-function HoldsView({ list, empty, lede, only }: { list: HoldList; empty: string; lede?: ReactNode; only?: string | null }) {
+function HoldsView({ list, title = "Holds", empty, lede, only }: { list: HoldList; title?: string; empty: string; lede?: ReactNode; only?: string | null }) {
   const inflight = useRef(new Set<string>());
   const [busy, setBusy] = useState<readonly string[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
@@ -316,8 +316,8 @@ function HoldsView({ list, empty, lede, only }: { list: HoldList; empty: string;
   };
   const holds = list.holds === null ? null : only ? list.holds.filter((h) => h.id === only) : list.holds;
   return (
-    <section className="app-page" aria-label="Holds">
-      <Head title="Holds" lede={lede} />
+    <section className="app-page" aria-label={title}>
+      <Head title={title} lede={lede} />
       {list.error ? <LoadError message={list.error} retrying={list.loading} onRetry={retry} /> : null}
       {failure ? (
         <Notice tone="needs-you" role="alert">
@@ -344,6 +344,8 @@ function OwnHolds(props: Omit<HoldsPageProps, "list">) {
 }
 
 export interface HoldsPageProps {
+  /** the page heading; default "Holds" */
+  title?: string;
   /** the app's own sentence for "nothing waits" (what its holds usually are) */
   empty: string;
   /** one line under the heading */
