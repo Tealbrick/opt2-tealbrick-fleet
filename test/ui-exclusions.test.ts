@@ -139,6 +139,10 @@ const choose = async (scope: ParentNode, index: number, option: string) => {
 };
 
 describe("the Cannot hold both page", () => {
+  it("the roles-only line of the page is the line of the server's words", async () => {
+    const server = await import("../src/roles/exclusions.ts");
+    assert.equal(page.ROLES_ONLY_LINE, server.EXCLUSION_LINE);
+  });
   it("says it checks roles only, lists rules with who breaks them, and shows no raw id and no replaced word", async () => {
     reset();
     stub.answers.exclusions_list = list([
