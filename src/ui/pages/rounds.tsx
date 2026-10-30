@@ -12,7 +12,9 @@ type Summary = RoundGetOutput["rounds"][number];
 type Item = Detail["items"][number];
 
 /** Codes whose message the server wrote as a plain sentence. */
-const OWN = new Set(["round_closed", "already_decided", "access_stale", "not_removable", "nothing_to_review", "round_too_big", "title_required", "not_in_round", "round_not_found"]);
+const OWN = new Set(["round_closed", "already_decided", "access_stale", "not_removable", "nothing_to_review", "round_too_big", "title_required", "not_in_round", "round_not_found", "plan_needs_portal", "subject_closed", "lifecycle_stale", "nothing_to_stop", "agent_closed", "plan_open"]);
+/** The picture the owner looked at is old: read the round again, so the next try sends the new one. */
+const STALE = new Set(["access_stale", "already_decided", "round_closed", "snapshot_stale", "lifecycle_stale"]);
 export const roundError = (e: unknown): string => {
   const err = (e ?? {}) as { code?: unknown; message?: unknown };
   return typeof err.code === "string" && OWN.has(err.code) && typeof err.message === "string" && err.message ? err.message : changeError(e);
@@ -25,12 +27,13 @@ const DECISION = {
   blocked: { status: "needs-you", word: "Blocked" },
   dismissed: { status: "idle", word: "Skipped" },
 } as const;
-const PLAN_WORD: Record<string, string> = { preparing: "being made", waiting: "waiting for you", applying: "running", running: "running", partial: "needs you", done: "done, the app confirmed", reported: "done, not proved", failed: "did not run", cancelled: "cancelled", expired: "ran out of time", withdrawn: "taken back" };
+/** What the plan says, in its own words (the server wrote them): only a proved step is a removal, so "done" here is never read as removed. */
 const removalText = (r: Item["removal"]): string => {
   if (!r) return "";
-  if (r.state === "planned") return `Plan: ${PLAN_WORD[r.planState ?? ""] ?? "made"}`;
+  if (r.state === "planned") return r.headline ?? "A plan was made.";
   return r.note ?? (r.state === "queued" ? "Waiting for a free place." : "Not removed.");
 };
+const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 export const progress = (c: Summary["counts"]): string => `${c.total - c.open} of ${c.total} decided`;
 
 const load = () => callOp<RoundGetOutput>("round_get", {});
@@ -59,10 +62,10 @@ function RoundList({ onOpen }: { onOpen: (id: string) => void }) {
         <Table>
           <thead>
             <tr>
-              <th>Round</th>
-              <th>State</th>
-              <th>Decided</th>
-              <th>Started</th>
+              <th scope="col">Round</th>
+              <th scope="col">State</th>
+              <th scope="col">Decided</th>
+              <th scope="col">Started</th>
               <th>
                 <span className="sr-only">Actions</span>
               </th>
@@ -159,30 +162,43 @@ function StartDialog({ onClose, onStarted }: { onClose: () => void; onStarted: (
 function RoundView({ id, onBack }: { id: string; onBack: () => void }) {
   const { data, error, loading, reload } = useLoad(useCallback(() => callOp<RoundGetOutput>("round_get", { round: id }), [id]));
   const round = data?.round ?? null;
-  const [entry, setEntry] = useState<Item | null>(null);
+  const [entryId, setEntryId] = useState<string | null>(null);
+  const entry = round?.items.find((i) => i.review === entryId) ?? null;
+  const [sending, setSending] = useState(false);
   const [closing, setClosing] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const set = async (action: "send" | "close") => {
     setFailure(null);
+    setSending(true);
     try {
       const out = await callOp<RoundSetOutput>("round_set", { round: id, action });
-      setNote(action === "send" ? (out.planned > 0 ? `${out.planned} plans were made. ${out.queued} still wait.` : "No place is free yet. Nothing was sent.") : "The round is closed.");
+      setNote(action === "send" ? (out.planned > 0 ? `${plural(out.planned, "plan was", "plans were")} made. ${out.queued} still wait.` : "No place is free yet. Nothing was sent.") : "The round is closed.");
       await reload();
     } catch (e) {
       setFailure(roundError(e));
+    } finally {
+      setSending(false);
     }
   };
   return (
     <section className="app-page" aria-label="Review round">
       <PageHead
         title={round?.title ?? "Review round"}
-        lede={round ? `${progress(round.counts)}. ${round.counts.removalPlanned} removals are in plans, ${round.counts.removalQueued} wait for a place.` : undefined}
+        lede={round ? `${progress(round.counts)}. ${plural(round.counts.removalPlanned, "entry has", "entries have")} a removal in a plan, ${plural(round.counts.removalQueued, "waits", "wait")} for a free place.` : undefined}
         action={
           <span className="tb-row">
             <Button onClick={onBack}>All rounds</Button>
-            {round && round.state === "open" && round.counts.removalQueued > 0 ? <Button onClick={() => void set("send")}>Send waiting removals</Button> : null}
-            {round && round.state === "open" ? <Button variant="danger" onClick={() => setClosing(true)}>Close round</Button> : null}
+            {round && round.state === "open" && round.counts.removalQueued > 0 ? (
+              <Button onClick={() => void set("send")} disabled={sending}>
+                Send waiting removals
+              </Button>
+            ) : null}
+            {round && round.state === "open" ? (
+              <Button variant="danger" onClick={() => setClosing(true)} disabled={sending}>
+                Close round
+              </Button>
+            ) : null}
           </span>
         }
       />
@@ -203,14 +219,14 @@ function RoundView({ id, onBack }: { id: string; onBack: () => void }) {
         )
       ) : (
         <>
-          <Notice tone="neutral">Your review records your decision. Access you tick is removed by a plan, and the app confirms it. Governance shows what each app reports, and nothing more.</Notice>
+          <Notice tone="neutral">Your review records your decision. Access you tick goes into a plan that asks the app to remove it. The app may refuse. Governance shows what each app reports, and nothing more.</Notice>
           <Table>
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Decision</th>
-                <th>Access reported</th>
-                <th>Removal</th>
+                <th scope="col">Name</th>
+                <th scope="col">Decision</th>
+                <th scope="col">Access reported</th>
+                <th scope="col">Removal</th>
                 <th>
                   <span className="sr-only">Actions</span>
                 </th>
@@ -224,17 +240,18 @@ function RoundView({ id, onBack }: { id: string; onBack: () => void }) {
                   </td>
                   <td>
                     <Tag status={DECISION[i.status].status}>{DECISION[i.status].word}</Tag>
+                    {i.decidedIn === "elsewhere" ? <span className="tb-hint"> On the Reviews page</span> : null}
                   </td>
                   <td>{i.accessCount === 0 ? "Nothing reported" : String(i.accessCount)}</td>
                   <td>{removalText(i.removal)}</td>
-                  <td>{i.status === "open" && round.state === "open" ? <Button size="sm" onClick={() => setEntry(i)} aria-label={`Review ${i.subject.name}`}>Review</Button> : null}</td>
+                  <td>{i.status === "open" && round.state === "open" ? <Button size="sm" onClick={() => setEntryId(i.review)} aria-label={`Review ${i.subject.name}`}>Review</Button> : null}</td>
                 </tr>
               ))}
             </tbody>
           </Table>
         </>
       )}
-      {entry && round ? <EntryDialog round={round.id} item={entry} onClose={() => setEntry(null)} onDone={reload} /> : null}
+      {entry && round ? <EntryDialog round={round.id} item={entry} onClose={() => setEntryId(null)} onDone={reload} /> : null}
       {closing ? (
         <Dialog
           open
@@ -295,6 +312,7 @@ function EntryDialog({ round, item, onClose, onDone }: { round: string; item: It
       await onDone();
     } catch (e) {
       setFailure(roundError(e));
+      if (typeof (e as { code?: unknown } | null)?.code === "string" && STALE.has((e as { code: string }).code)) await onDone();
     } finally {
       setBusy(false);
     }
@@ -327,7 +345,7 @@ function EntryDialog({ round, item, onClose, onDone }: { round: string; item: It
         <div className="tb-stack">
           <p>Your review is recorded.</p>
           <p>{result.item.removal ? removalText(result.item.removal) : "You asked to remove nothing."}</p>
-          {result.plan ? <p className="tb-soft">The plan runs now. Open the person or agent to follow it. Access is gone only when the app confirms it.</p> : null}
+          {result.plan ? <p className="tb-soft">Follow the plan on the page of this person or agent. Access is gone only when the app confirms it.</p> : null}
         </div>
       ) : (
         <div className="tb-stack">
@@ -348,6 +366,7 @@ function EntryDialog({ round, item, onClose, onDone }: { round: string; item: It
                   .map((a) => (
                     <div className="tb-row" key={`${a.product}:${a.id}`}>
                       <span>{a.label}</span>
+                      {a.direction === "about" ? <span className="tb-hint">Others can reach this entry's things.</span> : null}
                       <Tag status={a.state === "active" ? "live" : "idle"}>{a.state === "active" ? "Active" : a.state === "paused" ? "Paused" : a.state === "scheduled" ? "Scheduled" : "Not in use"}</Tag>
                       {a.revocable ? <Switch label={`Remove ${a.label}`} checked={ticked[`${a.product}:${a.id}`] === true} onCheckedChange={(on) => setTicked((t) => ({ ...t, [`${a.product}:${a.id}`]: on }))} /> : <span className="tb-hint">This app cannot end this from here.</span>}
                     </div>
@@ -355,6 +374,8 @@ function EntryDialog({ round, item, onClose, onDone }: { round: string; item: It
               </div>
             ))
           )}
+          {item.accessCount > item.access.length ? <p className="tb-soft">{`${item.accessCount - item.access.length} more rows are not shown. They cannot be ticked here.`}</p> : null}
+          {!item.snapshotDigest ? <Notice tone="needs-you">This entry was decided already. Close this and read the round again.</Notice> : null}
           {item.subject.kind === "agent" && item.access.length > 0 ? <p className="tb-soft">If the agent runs, an app may refuse to end some access. The plan then says that you must act by hand.</p> : null}
           <Choices<"trusted" | "limited" | "blocked"> label="Your review" value={verdict} onChange={setVerdict} options={VERDICTS} />
           <Field label="Why" hint="Required. Kept with the record.">
