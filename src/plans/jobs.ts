@@ -5,6 +5,7 @@ import { startSweep } from "../access/sweep.ts";
 import { planCtxOf } from "./context.ts";
 import { scanPlans } from "./control.ts";
 import { runDue } from "./runner.ts";
+import { BAR_WAIT_MS } from "./steps.ts";
 
 export const PLANS_JOB = "plans_tick";
 export const PLANS_CRON = "* * * * *";
@@ -30,6 +31,10 @@ export const planJobs: Record<string, { run: JobHandler; timeoutMs?: number; max
 export const startPlanClock = (ctx: { schedule: JobContext["schedule"]; jobs: JobContext["jobs"] }): void => {
   const job = ctx.schedule({ job: PLANS_JOB }, { cron: PLANS_CRON }, { key: PLANS_JOB });
   if (job?.status === "failed") ctx.jobs.resume(job.id);
+};
+/** After a person is marked leaving: the run that makes the sender bar if no plan came. The clock job would do it within a minute more. */
+export const kickBarRun = (ctx: { jobs?: JobContext["jobs"] }, now: number): void => {
+  ctx.jobs?.enqueue(PLANS_JOB, {}, { at: now + BAR_WAIT_MS + 1000 });
 };
 export const kickPlans = (ctx: { jobs: JobContext["jobs"] }): void => {
   ctx.jobs.enqueue(PLANS_JOB, {});

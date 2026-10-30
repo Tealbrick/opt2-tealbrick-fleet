@@ -5,7 +5,7 @@ import { loadSubject } from "../lifecycle/transitions.ts";
 import { askRail } from "./core-rail.ts";
 import { createPlan, getPlan, movePlan, notePlan, OPEN_SQL, type Row, stepsOf } from "./plan.ts";
 import { cancelUnsent, isAppliedHere, type PlanCtx } from "./runner.ts";
-import { ASK_AGAIN_STATES, isOpenPlan, REISSUE_MS } from "./steps.ts";
+import { ASK_AGAIN_STATES, BAR_WAIT_MS, isOpenPlan, REISSUE_MS } from "./steps.ts";
 
 export interface CloseResult {
   /** parts Portal really took back */
@@ -108,8 +108,31 @@ export function retryPlan(db: Db, p: Row, now: number): void {
   });
 }
 
+/**
+ * N2-6: a person marked leaving is barred, whatever else happens. The owner's T5 is the approval (§5 phase A). The old People form makes no plan, a plan_send can fail, a tab can die:
+ * this makes the bar's own plan when no plan came. After a short wait, so the normal flow's plan_send goes first and one plan does it all.
+ */
+function owedBars(db: Db, now: number, warn: (m: string, f?: Record<string, string>) => void): void {
+  const rows = db
+    .prepare(
+      `SELECT p.id FROM fleet_people p WHERE p.lifecycle = 'leaving' AND COALESCE(p.lifecycle_reason, '') <> 'migrated' AND p.lifecycle_at <= ?
+         AND EXISTS (SELECT 1 FROM fleet_handles h WHERE h.person_id = p.id)
+         AND NOT EXISTS (SELECT 1 FROM fleet_plans x WHERE x.subject_kind = 'person' AND x.subject_id = p.id AND x.opened_at >= p.lifecycle_at) LIMIT 20`,
+    )
+    .all(now - BAR_WAIT_MS);
+  for (const r of rows) {
+    try {
+      createPlan(db, { kind: "person", id: String(r.id), barOnly: true, actor: { kind: "owner", id: null } }, now);
+    } catch (err) {
+      // An older plan still open: it ends by itself as stale, and the next run makes this one.
+      if (!(err instanceof TbError)) warn("sender bar plan failed", { reason: err instanceof Error ? err.message.slice(0, 200) : "error" });
+    }
+  }
+}
+
 /** One run of the job: plans the system owes, and expired system plans due again. Synchronous, nothing is called. */
 export function scanPlans(db: Db, now: number, warn: (m: string, f?: Record<string, string>) => void): void {
+  owedBars(db, now, warn);
   const owed = db
     .prepare(
       `SELECT e.id, e.subject_kind, e.subject_id, e.at FROM fleet_lifecycle_events e

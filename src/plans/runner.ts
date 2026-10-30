@@ -243,7 +243,7 @@ const parseTicks = (p: Row): Tick[] | null => (typeof p.wanted_json === "string"
 /** §2 "Agent's things": what a stop ends unless the owner ticked otherwise. A suspension keeps accounts; `about` is off by default. */
 function endsByDefault(purpose: string, item: AccessItem): boolean {
   if (item.direction === "about") return false;
-  if (purpose === "leave") return true;
+  if (purpose === "leave" || purpose === "bar") return true;
   if (purpose === "suspend") return item.kind === "routine" || item.kind === "scheduled_post";
   return false;
 }
@@ -259,7 +259,7 @@ function absorb(pc: PlanCtx, p: Row, target: string, items: readonly AccessItem[
     if (!isOpenPlan(String(getPlan(db, id)?.state))) return;
     let n = Number(db.prepare("SELECT COALESCE(MAX(n), -1) + 1 AS n FROM fleet_plan_steps WHERE plan_id = ?").get(id)?.n);
     for (const item of items) {
-      if (item.subject.kind === "unlinked") continue;
+      if (item.subject.kind === "unlinked" || (p.purpose === "bar" && item.kind !== "channel_sender")) continue;
       const { kind: subjectKind, id: subjectId } = item.subject;
       if (db.prepare("SELECT 1 FROM fleet_plan_steps WHERE plan_id = ? AND target = ? AND item_id = ?").get(id, target, item.id)) continue;
       const tick = ticks?.find((t) => t.product === target && t.id === item.id);

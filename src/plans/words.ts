@@ -101,7 +101,7 @@ export function headlineOf(p: Row, counts: { proved: number; said: number; manua
     case "applying":
       return p.code === "portal_stopped" ? "Portal stopped mid-way. Open Portal and check." : "Portal is applying this.";
     case "running":
-      return link ? `${counts.open} still open.` : `Portal applied this. ${counts.open} still open.`;
+      return link || p.rail === "none" ? `${counts.open} still open.` : `Portal applied this. ${counts.open} still open.`;
     case "partial":
       return p.code === "core_failed" ? "Portal stopped on a step. Open Portal and apply it again." : "Part of this did not work. Look at the open steps.";
     case "done":

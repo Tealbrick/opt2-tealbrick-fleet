@@ -981,3 +981,104 @@ test("D2 review: plan_send when the entry moves during the call to Portal: the o
   });
   assert.equal(w.plan(id).state, "replaced");
 });
+
+function withSender(w: World) {
+  w.db.prepare("UPDATE fleet_agents SET owner_id = NULL").run();
+  w.db.prepare("INSERT INTO fleet_handles (handle, person_id, created_at) VALUES ('slack:UANN', ?, 1)").run(w.ann.id);
+  w.connect.add({ id: "channel_sender:slack:UANN", kind: "channel_sender", subject: { kind: "person", id: w.ann.id }, resource: "slack:UANN", level: "use", label: "Slack sender" });
+}
+const barPlan = (w: World) => w.db.prepare("SELECT id FROM fleet_plans WHERE purpose = 'bar'").get()?.id as string | undefined;
+
+test("N2-6: the old People form makes no plan: the bar still goes, by the job, with no Core step; the finding shows until Connect proves it", async () => {
+  const { loadColleagues } = await import("../src/lifecycle/view.ts");
+  const codes = (w: World) => loadColleagues(w.db, w.clock.t).byId.get(`person:${w.ann.id}`)?.findings.map((f) => f.code) ?? [];
+  const w = makeWorld();
+  withSender(w);
+  store.setPerson(w.db, { id: w.ann.id, name: "Ann", status: "departed" }, w.clock.t);
+  assert.equal(stateOf(w.db, "person", w.ann.id), "leaving");
+  assert.ok(codes(w).includes("sender_bar_open"));
+  scanPlans(w.db, w.clock.t, () => {});
+  assert.equal(barPlan(w), undefined, "the normal flow has its time first");
+  w.clock.t += 21_000;
+  scanPlans(w.db, w.clock.t, () => {});
+  scanPlans(w.db, w.clock.t, () => {});
+  const id = barPlan(w) as string;
+  assert.equal(w.db.prepare("SELECT COUNT(*) AS n FROM fleet_plans").get()?.n, 1, "one plan");
+  assert.equal(w.plan(id).rail, "none");
+  // Connect does not answer: no claim, the finding stays, Close is refused
+  w.connect.listScript.push(() => {
+    throw new TbError("app_error", "down", 500);
+  });
+  await w.tick(id);
+  assert.ok(codes(w).includes("sender_bar_open"));
+  assert.equal(w.plan(id).state, "running");
+  w.clock.t += 60_000;
+  await w.tick(id);
+  assert.deepEqual(w.connect.data.ended, ["channel_sender:slack:UANN"]);
+  assert.equal(w.plan(id).state, "done");
+  assert.ok(!codes(w).includes("sender_bar_open"), "proved by a fresh list");
+  assert.ok(codes(w).includes("leaving_no_plan"), "the bar is not the plan for the agents");
+  assert.equal(w.core.data.drafts.length, 0, "nothing in Portal");
+});
+
+test("N2-6: a failed plan_send, or a plan the owner made: no second plan; the normal flow bars through its own plan; a plan_send replaces an open bar plan", async () => {
+  const w = makeWorld();
+  withSender(w);
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  const own = w.makePlan({ kind: "person", id: w.ann.id });
+  w.clock.t += 21_000;
+  scanPlans(w.db, w.clock.t, () => {});
+  assert.equal(barPlan(w), undefined);
+  await w.tick(own);
+  assert.deepEqual(w.connect.data.ended, ["channel_sender:slack:UANN"]);
+
+  const v = makeWorld();
+  withSender(v);
+  set(v.db, "person", v.ann.id, "leaving", {}, v.clock.t);
+  v.clock.t += 21_000;
+  scanPlans(v.db, v.clock.t, () => {});
+  const bar = barPlan(v) as string;
+  const out = await run("plan_send", { kind: "person", id: v.ann.id }, ctxOf(v));
+  assert.equal(v.plan(bar).state, "replaced");
+  assert.equal(out.plans.length, 1);
+});
+
+test("N2-6: fire on Close while the bar is open, a named reason passes; quiet: no handles, a migrated person, Connect not installed, an owner who unticked it", async () => {
+  const { senderBarOpen } = await import("../src/plans/guards.ts");
+  const w = makeWorld();
+  withSender(w);
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  assert.throws(() => set(w.db, "person", w.ann.id, "archived", { waive: undefined }, w.clock.t + 40 * DAY_MS), refused("sender_bar_open", 409));
+  set(w.db, "person", w.ann.id, "archived", { waive: WAIVE }, w.clock.t);
+  assert.equal(stateOf(w.db, "person", w.ann.id), "archived");
+
+  const none = makeWorld();
+  none.db.prepare("UPDATE fleet_agents SET owner_id = NULL").run();
+  set(none.db, "person", none.ann.id, "leaving", {}, none.clock.t);
+  none.clock.t += 21_000;
+  scanPlans(none.db, none.clock.t, () => {});
+  assert.equal(barPlan(none), undefined, "no handle, nothing to bar");
+  assert.equal(senderBarOpen(none.db, none.ann.id), false);
+
+  const old = makeWorld();
+  withSender(old);
+  set(old.db, "person", old.ann.id, "leaving", { reason: "other" }, old.clock.t);
+  old.db.prepare("UPDATE fleet_people SET lifecycle_reason = 'migrated' WHERE id = ?").run(old.ann.id);
+  old.clock.t += 21_000;
+  scanPlans(old.db, old.clock.t, () => {});
+  assert.equal(barPlan(old), undefined, "marked before this version: the owner confirms it in a plan");
+  assert.equal(senderBarOpen(old.db, old.ann.id), true);
+
+  const gone = makeWorld();
+  withSender(gone);
+  gone.installed = [];
+  set(gone.db, "person", gone.ann.id, "leaving", {}, gone.clock.t);
+  await gone.tick(gone.makePlan({ kind: "person", id: gone.ann.id }));
+  assert.equal(senderBarOpen(gone.db, gone.ann.id), false, "not installed: nothing reaches an agent through it");
+
+  const un = makeWorld();
+  withSender(un);
+  set(un.db, "person", un.ann.id, "leaving", {}, un.clock.t);
+  await un.tick(un.makePlan({ kind: "person", id: un.ann.id, items: [] }));
+  assert.equal(senderBarOpen(un.db, un.ann.id), false, "his choice, and the step says it stays");
+});

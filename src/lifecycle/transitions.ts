@@ -7,7 +7,7 @@
 import { canonicalize } from "@opt2-tealbrick/manifest";
 import { type Db, type Json, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { bump, fail, revision } from "../meta.ts";
-import { hasAppliedStop, hasOpenPlan, lastPlanUnfinished, unnamedAccounts } from "../plans/guards.ts";
+import { hasAppliedStop, hasOpenPlan, lastPlanUnfinished, senderBarOpen, unnamedAccounts } from "../plans/guards.ts";
 import { cleanText } from "../text.ts";
 import type { Trust } from "../trust.ts";
 import { appendEvent, SNAPSHOT_MAX, stopsSince } from "./events.ts";
@@ -123,6 +123,7 @@ export function guardOf(db: Db, s: Subject, to: Lifecycle, opts: { waive?: strin
     if (coolingEnd(s, days) > now && !cleanText(opts.waive ?? "")) return no("cooling_not_over", `You can close this after the cooling period of ${days} days. To close it now, give a reason.`);
     if (s.kind === "agent" && s.runtime === "active") return no("plan_open", "This agent still runs. Pause it in Portal first.");
     if (s.kind === "person") {
+      if (senderBarOpen(db, s.id) && !cleanText(opts.waive ?? "")) return no("sender_bar_open", "Messages from this person can still reach agents. Wait for Connect to show the bar, or give a reason to close it now.");
       const unnamed = unnamedAccounts(db, s.id, now);
       if (unnamed > 0) return no("unlinked_accounts", `${unnamed} accounts in Connect have no person. Check them. If none is this person's, accept that with a reason.`);
       const open = undecidedAgents(db, s.id);
