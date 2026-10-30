@@ -894,7 +894,7 @@
               "minLength": 1,
               "maxLength": 64
             },
-            "description": "Optional extras the reader understands. \"agent_handles\": every agents[] entry also carries handles (canonical channel handles Connect issued to the agent, sorted, at most 16). \"lifecycle\": agents[] and person contacts[] also carry the effective lifecycle, and agents[] and contacts[] carry floor (true: the reader refuses this entry before any rule). Unknown values are ignored."
+            "description": "Optional extras the reader understands. \"agent_handles\": every agents[] entry also carries handles (canonical channel handles Connect issued to the agent, sorted, at most 16). \"lifecycle\": agents[] and person contacts[] also carry the effective lifecycle, and agents[] and contacts[] carry floor (true: the reader refuses this entry before any rule). \"roles\": the answer also carries a top-level roles list: each role that is not archived with its id, name and the agents and contacts that hold it now (started, not ended). Unknown values are ignored."
           }
         }
       },
@@ -1110,6 +1110,55 @@
                     },
                     "floor": {
                       "type": "boolean"
+                    }
+                  }
+                }
+              },
+              "roles": {
+                "type": "array",
+                "maxItems": 200,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "members"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80
+                    },
+                    "members": {
+                      "type": "array",
+                      "maxItems": 4000,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "kind",
+                          "id"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "enum": [
+                              "agent",
+                              "contact"
+                            ]
+                          },
+                          "id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          }
+                        }
+                      }
                     }
                   }
                 }

@@ -276,7 +276,7 @@ export function kindChanged(db: Db, id: string, name: string, from: string, to: 
   }
   const cur = db.prepare("SELECT lifecycle FROM fleet_people WHERE id = ?").get(id)?.lifecycle;
   if (cur !== "active") fail("lifecycle_open", "This person is not active. Bring the person back first.", 409);
-  endAssignmentsOf(db, "person", id, "closed", { kind: "owner", id: null }, now); // an outside agent has no roles
+  endAssignmentsOf(db, "person", id, "kind_changed", { kind: "owner", id: null }, now); // an outside agent has no roles
   db.prepare("UPDATE fleet_people SET lifecycle = NULL, lifecycle_rev = ?, lifecycle_at = ? WHERE id = ?").run(revision(db), now, id);
   appendEvent(db, { subject: { kind: "person", id, name }, kind: "transition", from: "active", to: null, actor: { kind: "owner", id: null }, reason: "other", note: "Changed from person to outside agent.", at: now });
 }

@@ -13,7 +13,7 @@ import { cleanText } from "../text.ts";
 
 export const ROLE_REASONS = ["new_role", "project", "cover", "contract", "access_review", "other"] as const;
 export type RoleReason = (typeof ROLE_REASONS)[number];
-export type EndReason = "owner" | "expired" | "closed" | "deleted";
+export type EndReason = "owner" | "expired" | "closed" | "deleted" | "kind_changed" | "not_started";
 export type SubjectKind = "person" | "agent";
 export type AssignmentState = "active" | "scheduled" | "ended";
 
@@ -50,8 +50,11 @@ export interface AssignmentView {
 const iso = (ms: unknown): string | null => (ms === null || ms === undefined ? null : new Date(Number(ms)).toISOString());
 const isoDay = (ms: number | null): string => (ms === null ? "no date" : new Date(ms).toISOString().slice(0, 10));
 
+/** ISO 8601 only: a date (taken as 00:00 UTC) or a date with a time and a zone. `Date.parse` alone reads "1" as a year and local-time strings by the server's zone. */
+const ISO = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2}))?$/;
 function parseDate(raw: string | null | undefined, what: string): number | null {
   if (raw === null || raw === undefined) return null;
+  if (!ISO.test(raw)) fail("input_invalid", `${what} is not a date: use a date, or a date and time with a zone`, 400);
   const ms = Date.parse(raw);
   if (!Number.isFinite(ms) || ms < 0 || ms > MAX_DATE_MS) fail("input_invalid", `${what} is not a date`, 400);
   return ms;
@@ -142,18 +145,32 @@ export interface RoleInput {
 
 const WORKSPACE = { kind: "workspace", id: "", name: "Governance" };
 
+const sameName = (a: string, b: string): boolean => a.normalize("NFC").toLowerCase() === b.normalize("NFC").toLowerCase();
+
+/** One live role per name. The index on lower(name) folds ASCII only, so the check here folds every letter (the index stays as the net). `exceptId`: the role being saved. */
+function assertNameFree(db: Db, name: string, exceptId: string | null): void {
+  for (const r of db.prepare("SELECT id, name FROM fleet_roles WHERE archived_at IS NULL").all()) {
+    if (String(r.id) !== exceptId && sameName(String(r.name), name)) fail("role_name_taken", "Another role has this name.", 409);
+  }
+}
+
+function assertRoom(db: Db): void {
+  const live = Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_roles WHERE archived_at IS NULL").get()?.n ?? 0);
+  if (live >= ROLE_CAPS.roles) fail("too_many_roles", `A workspace has at most ${ROLE_CAPS.roles} roles. Archive one first.`, 409);
+}
+
 /** Create (no id) or change a role: its name, its description, and archive or bring it back. Every change moves the revision (the name is in the feed). */
 export function setRole(db: Db, input: RoleInput, actorId: string | null, now = Date.now()): RoleView {
   return db.transaction(() => {
     const actor = SYSTEM_OR_OWNER(actorId);
     let id = input.id;
-    const name = input.name === undefined ? undefined : cleanText(input.name);
+    const name = input.name === undefined ? undefined : cleanText(input.name).normalize("NFC");
     if (name !== undefined && (name.length < 1 || name.length > ROLE_CAPS.nameMax)) fail("input_invalid", `A role name has 1 to ${ROLE_CAPS.nameMax} characters.`, 400);
     const description = input.description === undefined ? undefined : cleanText(input.description).slice(0, ROLE_CAPS.descriptionMax);
     if (id === undefined) {
       if (name === undefined) fail("input_invalid", "Name the role.", 400);
-      const live = Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_roles WHERE archived_at IS NULL").get()?.n ?? 0);
-      if (live >= ROLE_CAPS.roles) fail("too_many_roles", `A workspace has at most ${ROLE_CAPS.roles} roles. Archive one first.`, 409);
+      assertRoom(db);
+      assertNameFree(db, name as string, null);
       id = `rol_${ulid(now)}`;
       try {
         db.prepare("INSERT INTO fleet_roles (id, name, description, archived_at, created_at, updated_at) VALUES (?, ?, ?, NULL, ?, ?)").run(id, name as string, description ?? "", now, now);
@@ -167,6 +184,9 @@ export function setRole(db: Db, input: RoleInput, actorId: string | null, now = 
       if (!cur) fail("role_not_found", "No such role.", 404);
       const wasArchived = (cur as Record<string, unknown>).archived_at !== null;
       const archive = input.archived === undefined ? wasArchived : input.archived;
+      // a role that goes live again counts against the cap and needs a free name, like a new one
+      if (wasArchived && !archive) assertRoom(db);
+      if (!archive) assertNameFree(db, name ?? String((cur as Record<string, unknown>).name), id);
       try {
         db.prepare("UPDATE fleet_roles SET name = COALESCE(?, name), description = COALESCE(?, description), archived_at = ?, updated_at = ? WHERE id = ?").run(name ?? null, description ?? null, archive ? (wasArchived ? ((cur as Record<string, unknown>).archived_at as number) : now) : null, now, id);
       } catch (e) {
@@ -281,11 +301,12 @@ export function endAssignment(db: Db, id: string, actorId: string | null, now = 
 }
 
 /** T7 and a delete: every open assignment of the subject ends, one event each, one revision move. Returns how many. */
-export function endAssignmentsOf(db: Db, kind: SubjectKind, id: string, why: "closed" | "deleted", actor: { kind: "owner" | "system"; id: string | null }, now: number): number {
+const END_TEXT: Record<"closed" | "deleted" | "kind_changed", string> = { closed: "the entry was closed.", deleted: "the entry was deleted.", kind_changed: "the person became an outside agent, who has no roles." };
+export function endAssignmentsOf(db: Db, kind: SubjectKind, id: string, why: "closed" | "deleted" | "kind_changed", actor: { kind: "owner" | "system"; id: string | null }, now: number): number {
   const rows = db.prepare(`${ASSIGNMENT_SQL} WHERE a.subject_kind = ? AND a.subject_id = ? AND a.ended_at IS NULL ORDER BY a.id`).all(kind, id);
   if (rows.length === 0) return 0;
   bump(db);
-  for (const a of rows) endOne(db, a, why, why === "closed" ? "the entry was closed." : "the entry was deleted.", actor, now);
+  for (const a of rows) endOne(db, a, why, END_TEXT[why], actor, now);
   return rows.length;
 }
 
@@ -304,7 +325,10 @@ export function feedRoles(db: Db, agentIds: ReadonlySet<string>, contactIds: Rea
   if (roles.length > ROLE_CAPS.roles) throw new TbError("feed_too_large", `the directory has more than ${ROLE_CAPS.roles} roles`, 503);
   const members = new Map<string, FeedRole["members"]>();
   for (const r of db
-    .prepare("SELECT a.role_id, a.subject_kind, a.subject_id FROM fleet_role_assignments a JOIN fleet_roles r ON r.id = a.role_id WHERE a.ended_at IS NULL AND a.started_at IS NOT NULL AND r.archived_at IS NULL ORDER BY a.role_id, a.subject_kind, a.subject_id")
+    // an agent that left Portal is no member, even while a team still names it (the feed lists it so a reader can drop that team member)
+    .prepare(
+      "SELECT a.role_id, a.subject_kind, a.subject_id FROM fleet_role_assignments a JOIN fleet_roles r ON r.id = a.role_id WHERE a.ended_at IS NULL AND a.started_at IS NOT NULL AND r.archived_at IS NULL AND NOT (a.subject_kind = 'agent' AND EXISTS (SELECT 1 FROM fleet_agents g WHERE g.id = a.subject_id AND g.status = 'removed')) ORDER BY a.role_id, a.subject_kind, a.subject_id",
+    )
     .all()) {
     const id = String(r.subject_id);
     const isAgent = r.subject_kind === "agent";

@@ -1,10 +1,12 @@
 // C380 T2-a: flat roles. The rules of an assignment, the feed, the date timer (end by itself, restart, a wrong clock), T7, delete, and what an agent can see.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Db } from "@opt2-tealbrick/miniapp-sdk";
+import { validateAgainstSchema } from "@opt2-tealbrick/manifest";
+import type { Db, Json } from "@opt2-tealbrick/miniapp-sdk";
+import { manifest } from "../src/app.ts";
 import { type DirectoryFeed, directoryFeed } from "../src/feed.ts";
 import { leanDirectory } from "../src/lean.ts";
-import { tickRoles } from "../src/roles/expiry.ts";
+import { startRolesTimer, tickRoles } from "../src/roles/expiry.ts";
 import { assignRole, endAssignment, getRole, ROLE_CAPS, setRole } from "../src/roles/roles.ts";
 import * as store from "../src/store.ts";
 import { checkFeed, FEED_SCHEMA } from "./feed-contract.ts";
@@ -264,4 +266,110 @@ test("only src/roles/ writes the role tables, and no agent op file reaches them"
   // the one reader outside src/roles is the migration-free feed, and it goes through feedRoles
   const readers = files.filter((f) => !f.includes("/src/roles/") && /fleet_role/.test(readFileSync(f, "utf8")));
   assert.deepEqual(readers, []);
+});
+
+// ── review fixes (C380 T2-a, PR 2 review) ───────────────────────────────────
+test("the manifest's output schema of directory_feed accepts the roles list (the SDK validates every answer), together with the other extras, and refuses a malformed one", () => {
+  const out = (manifest.operations.find((o) => o.id === "directory_feed") as unknown as { output: Parameters<typeof validateAgainstSchema>[0] }).output;
+  const { db, ann } = world();
+  const r = role(db);
+  give(db, r.id, { kind: "person", id: ann.id });
+  give(db, r.id, { kind: "agent", id: AGENT_A.id });
+  const doc = feed(db, ["lifecycle", "agent_handles", "roles"]) as unknown as Json;
+  const v = validateAgainstSchema(out, doc);
+  assert.deepEqual(v.ok ? [] : v.errors, []);
+  assert.equal(((doc as unknown as Full).roles ?? []).length, 1, "the answer did carry roles");
+  assert.equal(validateAgainstSchema(out, feed(db, ["lifecycle"]) as unknown as Json).ok, true, "and without roles");
+  const bad = { ...(doc as object), roles: [{ id: "r", members: [{ kind: "team", id: "x" }] }] } as unknown as Json;
+  assert.equal(validateAgainstSchema(out, bad).ok, false, "fire: a member kind outside agent and contact");
+});
+
+test("unarchive counts against the cap and needs a free name; a name folds every letter, not only ASCII", () => {
+  const { db } = world();
+  const first = role(db, "Ärzte");
+  assert.throws(() => role(db, "ärzte"), refused("role_name_taken", 409), "a non-ASCII letter folds too");
+  assert.throws(() => role(db, "Ärzte"), refused("role_name_taken", 409), "the same name in another Unicode form");
+  assert.equal(role(db, "Café").name, "Café", "a stored name is in one form");
+  setRole(db, { id: first.id, archived: true }, null, T0);
+  const again = role(db, "ärzte");
+  assert.throws(() => setRole(db, { id: first.id, archived: false }, null, T0), refused("role_name_taken", 409), "the name is taken by the live role");
+  setRole(db, { id: again.id, archived: true }, null, T0);
+  // the cap: 200 live roles; an archived one cannot come back as the 201st
+  const full = world();
+  const ins = full.db.prepare("INSERT INTO fleet_roles (id, name, created_at, updated_at) VALUES (?, ?, 1, 1)");
+  full.db.transaction(() => {
+    for (let i = 0; i < ROLE_CAPS.roles; i++) ins.run(`rol_c${i}`, `Role ${i}`);
+  });
+  const old = full.db.prepare("INSERT INTO fleet_roles (id, name, created_at, updated_at, archived_at) VALUES ('rol_old', 'Old', 1, 1, 5)").run();
+  assert.equal(Number(old.changes), 1);
+  assert.throws(() => setRole(full.db, { id: "rol_old", archived: false }, null, T0), refused("too_many_roles", 409));
+  assert.throws(() => role(full.db, "One more"), refused("too_many_roles", 409));
+  setRole(full.db, { id: "rol_c0", archived: true }, null, T0);
+  assert.equal(setRole(full.db, { id: "rol_old", archived: false }, null, T0).archived, false, "quiet: with room it comes back");
+});
+
+test("dates are ISO 8601: a bare number, a local-time string and a word are refused; a date alone is 00:00 UTC", () => {
+  const { db, ann } = world();
+  const r = role(db);
+  for (const bad of ["1", "tomorrow", "12/12/2030", "Dec 12 2030 10:00", "2030-12-12 10:00", "2030-12-12T10:00"]) {
+    assert.throws(() => give(db, r.id, { kind: "person", id: ann.id }, { validUntil: bad }), refused("input_invalid", 400), bad);
+  }
+  const a = give(db, r.id, { kind: "person", id: ann.id }, { validUntil: "2030-12-12" });
+  assert.equal(a.validUntil, "2030-12-12T00:00:00.000Z");
+  endAssignment(db, a.id, null, T0);
+  assert.equal(give(db, r.id, { kind: "person", id: ann.id }, { validUntil: "2030-12-12T10:00:00+02:00" }).validUntil, "2030-12-12T08:00:00.000Z");
+});
+
+test("a start date: a subject that began to leave since it was given never gets the role; the tick counts only rows it changed", () => {
+  const { db } = world();
+  const r = role(db);
+  const from = T0 + 5 * MIN;
+  const a = give(db, r.id, { kind: "agent", id: AGENT_A.id }, { validFrom: iso(from) });
+  set(db, "agent", AGENT_A.id, "leaving");
+  const seen = new Set<string>();
+  tickRoles(db, seen, from + 1);
+  assert.deepEqual(tickRoles(db, seen, from + 31_000), { started: 1, ended: 0 }, "the row changed (it ended unstarted)");
+  const row = db.prepare("SELECT started_at, end_reason FROM fleet_role_assignments WHERE id = ?").get(a.id);
+  assert.deepEqual([row?.started_at, row?.end_reason], [null, "not_started"]);
+  assert.deepEqual(events(db, AGENT_A.id).slice(-1), ["system: Role Contractor did not start: the entry is leaving, closed or gone."]);
+  assert.equal(feed(db).roles?.[0]?.members.length, 0);
+  // a row the owner ended between the two ticks is not counted
+  const b = give(db, r.id, { kind: "agent", id: AGENT_B.id }, { validFrom: iso(from + 60 * MIN) });
+  const seen2 = new Set<string>();
+  tickRoles(db, seen2, from + 61 * MIN);
+  endAssignment(db, b.id, "per_owner", from + 61 * MIN + 1);
+  assert.deepEqual(tickRoles(db, seen2, from + 61 * MIN + 31_000), { started: 0, ended: 0 });
+});
+
+test("a person who becomes an outside agent: the event says so, not 'closed'; an agent that left Portal is no member, even named by a team", () => {
+  const { db } = world();
+  const r = role(db);
+  const x = store.setPerson(db, { name: "Becomes" }, T0);
+  give(db, r.id, { kind: "person", id: x.id });
+  store.setPerson(db, { id: x.id, name: "Becomes", kind: "outside_agent", handles: ["slack:UBECOME01"] }, T0);
+  assert.ok(events(db, x.id).includes("owner: Role Contractor ended: the person became an outside agent, who has no roles."));
+  assert.equal(db.prepare("SELECT end_reason FROM fleet_role_assignments WHERE subject_id = ?").get(x.id)?.end_reason, "kind_changed");
+  // a removed agent named by a team stays in the feed for the team, and holds no role
+  const team = store.setTeam(db, { name: "Support" }, T0);
+  store.setMembers(db, { team: team.id, people: [], agents: [{ id: AGENT_A.id, role: "member" }] }, T0);
+  give(db, r.id, { kind: "agent", id: AGENT_A.id });
+  assert.equal(feed(db).roles?.[0]?.members.length, 1);
+  db.prepare("UPDATE fleet_agents SET status = 'removed' WHERE id = ?").run(AGENT_A.id);
+  const f = feed(db);
+  assert.ok(f.agents.some((a) => a.id === AGENT_A.id), "the agent is still listed for its team");
+  assert.equal(f.roles?.[0]?.members.length, 0, "but it holds no role");
+});
+
+test("after a start, an end date that passed during the downtime ends within seconds: two ticks, five seconds apart", async () => {
+  const { db, ann } = world();
+  const r = role(db);
+  const a = give(db, r.id, { kind: "person", id: ann.id }, { validUntil: iso(Date.now() + 1_000) }, Date.now());
+  db.prepare("UPDATE fleet_role_assignments SET valid_until = ? WHERE id = ?").run(Date.now() - 60_000, a.id);
+  const stop = startRolesTimer(db, { warn() {} }, 60_000, 10);
+  try {
+    await new Promise((res) => setTimeout(res, 120));
+    assert.equal(db.prepare("SELECT end_reason FROM fleet_role_assignments WHERE id = ?").get(a.id)?.end_reason, "expired");
+  } finally {
+    stop();
+  }
 });
