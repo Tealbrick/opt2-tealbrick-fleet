@@ -5363,8 +5363,7 @@
         ],
         "properties": {
           "generatedAt": {
-            "type": "string",
-            "maxLength": 40
+            "type": "string"
           },
           "revision": {
             "type": "integer",
@@ -5459,12 +5458,10 @@
               ],
               "properties": {
                 "product": {
-                  "type": "string",
-                  "maxLength": 64
+                  "type": "string"
                 },
                 "name": {
-                  "type": "string",
-                  "maxLength": 120
+                  "type": "string"
                 },
                 "state": {
                   "enum": [
@@ -5474,14 +5471,12 @@
                   ]
                 },
                 "text": {
-                  "type": "string",
-                  "maxLength": 300
+                  "type": "string"
                 },
                 "at": {
                   "anyOf": [
                     {
-                      "type": "string",
-                      "maxLength": 40
+                      "type": "string"
                     },
                     {
                       "type": "null"
@@ -5520,14 +5515,12 @@
                   ]
                 },
                 "text": {
-                  "type": "string",
-                  "maxLength": 300
+                  "type": "string"
                 },
                 "path": {
                   "anyOf": [
                     {
-                      "type": "string",
-                      "maxLength": 200
+                      "type": "string"
                     },
                     {
                       "type": "null"
@@ -5588,14 +5581,12 @@
                 ]
               },
               "text": {
-                "type": "string",
-                "maxLength": 300
+                "type": "string"
               },
               "version": {
                 "anyOf": [
                   {
-                    "type": "string",
-                    "maxLength": 40
+                    "type": "string"
                   },
                   {
                     "type": "null"
@@ -5627,8 +5618,7 @@
               "lastGateAt": {
                 "anyOf": [
                   {
-                    "type": "string",
-                    "maxLength": 40
+                    "type": "string"
                   },
                   {
                     "type": "null"
@@ -5638,8 +5628,7 @@
               "gateNote": {
                 "anyOf": [
                   {
-                    "type": "string",
-                    "maxLength": 300
+                    "type": "string"
                   },
                   {
                     "type": "null"
@@ -5672,12 +5661,10 @@
                     ],
                     "properties": {
                       "id": {
-                        "type": "string",
-                        "maxLength": 64
+                        "type": "string"
                       },
                       "name": {
-                        "type": "string",
-                        "maxLength": 200
+                        "type": "string"
                       }
                     }
                   },
@@ -5781,12 +5768,10 @@
                   ]
                 },
                 "id": {
-                  "type": "string",
-                  "maxLength": 64
+                  "type": "string"
                 },
                 "name": {
-                  "type": "string",
-                  "maxLength": 200
+                  "type": "string"
                 },
                 "lifecycle": {
                   "enum": [
@@ -5840,12 +5825,10 @@
                       ],
                       "properties": {
                         "id": {
-                          "type": "string",
-                          "maxLength": 64
+                          "type": "string"
                         },
                         "name": {
-                          "type": "string",
-                          "maxLength": 200
+                          "type": "string"
                         }
                       }
                     },
@@ -5855,8 +5838,7 @@
                   ]
                 },
                 "line": {
-                  "type": "string",
-                  "maxLength": 200
+                  "type": "string"
                 },
                 "findings": {
                   "type": "array",
@@ -5869,12 +5851,10 @@
                     ],
                     "properties": {
                       "code": {
-                        "type": "string",
-                        "maxLength": 40
+                        "type": "string"
                       },
                       "text": {
-                        "type": "string",
-                        "maxLength": 300
+                        "type": "string"
                       }
                     }
                   },
@@ -5883,8 +5863,7 @@
                 "validFrom": {
                   "anyOf": [
                     {
-                      "type": "string",
-                      "maxLength": 40
+                      "type": "string"
                     },
                     {
                       "type": "null"
@@ -5894,8 +5873,7 @@
                 "validUntil": {
                   "anyOf": [
                     {
-                      "type": "string",
-                      "maxLength": 40
+                      "type": "string"
                     },
                     {
                       "type": "null"
@@ -5908,8 +5886,7 @@
                 "at": {
                   "anyOf": [
                     {
-                      "type": "string",
-                      "maxLength": 40
+                      "type": "string"
                     },
                     {
                       "type": "null"
@@ -5923,8 +5900,7 @@
           "nextCursor": {
             "anyOf": [
               {
-                "type": "string",
-                "maxLength": 16
+                "type": "string"
               },
               {
                 "type": "null"
@@ -6018,12 +5994,10 @@
                 ]
               },
               "id": {
-                "type": "string",
-                "maxLength": 64
+                "type": "string"
               },
               "name": {
-                "type": "string",
-                "maxLength": 200
+                "type": "string"
               },
               "lifecycle": {
                 "enum": [
@@ -6077,12 +6051,10 @@
                     ],
                     "properties": {
                       "id": {
-                        "type": "string",
-                        "maxLength": 64
+                        "type": "string"
                       },
                       "name": {
-                        "type": "string",
-                        "maxLength": 200
+                        "type": "string"
                       }
                     }
                   },
@@ -6092,8 +6064,7 @@
                 ]
               },
               "line": {
-                "type": "string",
-                "maxLength": 200
+                "type": "string"
               },
               "findings": {
                 "type": "array",
@@ -6106,12 +6077,10 @@
                   ],
                   "properties": {
                     "code": {
-                      "type": "string",
-                      "maxLength": 40
+                      "type": "string"
                     },
                     "text": {
-                      "type": "string",
-                      "maxLength": 300
+                      "type": "string"
                     }
                   }
                 },
@@ -6120,8 +6089,7 @@
               "validFrom": {
                 "anyOf": [
                   {
-                    "type": "string",
-                    "maxLength": 40
+                    "type": "string"
                   },
                   {
                     "type": "null"
@@ -6131,8 +6099,7 @@
               "validUntil": {
                 "anyOf": [
                   {
-                    "type": "string",
-                    "maxLength": 40
+                    "type": "string"
                   },
                   {
                     "type": "null"
@@ -6145,8 +6112,7 @@
               "at": {
                 "anyOf": [
                   {
-                    "type": "string",
-                    "maxLength": 40
+                    "type": "string"
                   },
                   {
                     "type": "null"
@@ -6154,8 +6120,7 @@
                 ]
               },
               "title": {
-                "type": "string",
-                "maxLength": 200
+                "type": "string"
               },
               "rev": {
                 "type": "integer",
@@ -6164,8 +6129,7 @@
               "reason": {
                 "anyOf": [
                   {
-                    "type": "string",
-                    "maxLength": 40
+                    "type": "string"
                   },
                   {
                     "type": "null"
@@ -6175,8 +6139,7 @@
               "note": {
                 "anyOf": [
                   {
-                    "type": "string",
-                    "maxLength": 500
+                    "type": "string"
                   },
                   {
                     "type": "null"
@@ -6186,8 +6149,7 @@
               "keepReason": {
                 "anyOf": [
                   {
-                    "type": "string",
-                    "maxLength": 200
+                    "type": "string"
                   },
                   {
                     "type": "null"
@@ -6206,12 +6168,10 @@
                   ],
                   "properties": {
                     "id": {
-                      "type": "string",
-                      "maxLength": 64
+                      "type": "string"
                     },
                     "name": {
-                      "type": "string",
-                      "maxLength": 200
+                      "type": "string"
                     },
                     "role": {
                       "enum": [
@@ -6252,12 +6212,10 @@
                       ]
                     },
                     "id": {
-                      "type": "string",
-                      "maxLength": 64
+                      "type": "string"
                     },
                     "name": {
-                      "type": "string",
-                      "maxLength": 200
+                      "type": "string"
                     },
                     "lifecycle": {
                       "enum": [
@@ -6311,12 +6269,10 @@
                           ],
                           "properties": {
                             "id": {
-                              "type": "string",
-                              "maxLength": 64
+                              "type": "string"
                             },
                             "name": {
-                              "type": "string",
-                              "maxLength": 200
+                              "type": "string"
                             }
                           }
                         },
@@ -6326,8 +6282,7 @@
                       ]
                     },
                     "line": {
-                      "type": "string",
-                      "maxLength": 200
+                      "type": "string"
                     },
                     "findings": {
                       "type": "array",
@@ -6340,12 +6295,10 @@
                         ],
                         "properties": {
                           "code": {
-                            "type": "string",
-                            "maxLength": 40
+                            "type": "string"
                           },
                           "text": {
-                            "type": "string",
-                            "maxLength": 300
+                            "type": "string"
                           }
                         }
                       },
@@ -6354,8 +6307,7 @@
                     "validFrom": {
                       "anyOf": [
                         {
-                          "type": "string",
-                          "maxLength": 40
+                          "type": "string"
                         },
                         {
                           "type": "null"
@@ -6365,8 +6317,7 @@
                     "validUntil": {
                       "anyOf": [
                         {
-                          "type": "string",
-                          "maxLength": 40
+                          "type": "string"
                         },
                         {
                           "type": "null"
@@ -6379,8 +6330,7 @@
                     "at": {
                       "anyOf": [
                         {
-                          "type": "string",
-                          "maxLength": 40
+                          "type": "string"
                         },
                         {
                           "type": "null"
@@ -6413,14 +6363,12 @@
                       ]
                     },
                     "label": {
-                      "type": "string",
-                      "maxLength": 80
+                      "type": "string"
                     },
                     "blocked": {
                       "anyOf": [
                         {
-                          "type": "string",
-                          "maxLength": 400
+                          "type": "string"
                         },
                         {
                           "type": "null"
@@ -6453,8 +6401,7 @@
                       "coolingEndsAt": {
                         "anyOf": [
                           {
-                            "type": "string",
-                            "maxLength": 40
+                            "type": "string"
                           },
                           {
                             "type": "null"
@@ -6467,8 +6414,7 @@
                       "limits": {
                         "type": "array",
                         "items": {
-                          "type": "string",
-                          "maxLength": 300
+                          "type": "string"
                         },
                         "maxItems": 16
                       }
@@ -6502,14 +6448,12 @@
                         "const": false
                       },
                       "headline": {
-                        "type": "string",
-                        "maxLength": 200
+                        "type": "string"
                       },
                       "portalUrl": {
                         "anyOf": [
                           {
-                            "type": "string",
-                            "maxLength": 500
+                            "type": "string"
                           },
                           {
                             "type": "null"
@@ -6531,8 +6475,7 @@
                           ],
                           "properties": {
                             "id": {
-                              "type": "string",
-                              "maxLength": 120
+                              "type": "string"
                             },
                             "agent": {
                               "type": "object",
@@ -6543,12 +6486,10 @@
                               ],
                               "properties": {
                                 "id": {
-                                  "type": "string",
-                                  "maxLength": 64
+                                  "type": "string"
                                 },
                                 "name": {
-                                  "type": "string",
-                                  "maxLength": 200
+                                  "type": "string"
                                 }
                               }
                             },
@@ -6561,8 +6502,7 @@
                               ]
                             },
                             "text": {
-                              "type": "string",
-                              "maxLength": 300
+                              "type": "string"
                             },
                             "state": {
                               "enum": [
@@ -6572,8 +6512,7 @@
                               ]
                             },
                             "proof": {
-                              "type": "string",
-                              "maxLength": 300
+                              "type": "string"
                             }
                           }
                         },
@@ -6586,16 +6525,14 @@
                       "notChanged": {
                         "type": "array",
                         "items": {
-                          "type": "string",
-                          "maxLength": 300
+                          "type": "string"
                         },
                         "maxItems": 16
                       },
                       "note": {
                         "anyOf": [
                           {
-                            "type": "string",
-                            "maxLength": 300
+                            "type": "string"
                           },
                           {
                             "type": "null"
@@ -6632,14 +6569,12 @@
                     ]
                   },
                   "text": {
-                    "type": "string",
-                    "maxLength": 300
+                    "type": "string"
                   },
                   "version": {
                     "anyOf": [
                       {
-                        "type": "string",
-                        "maxLength": 40
+                        "type": "string"
                       },
                       {
                         "type": "null"
@@ -6671,8 +6606,7 @@
                   "lastGateAt": {
                     "anyOf": [
                       {
-                        "type": "string",
-                        "maxLength": 40
+                        "type": "string"
                       },
                       {
                         "type": "null"
@@ -6682,8 +6616,7 @@
                   "gateNote": {
                     "anyOf": [
                       {
-                        "type": "string",
-                        "maxLength": 300
+                        "type": "string"
                       },
                       {
                         "type": "null"
@@ -6706,18 +6639,15 @@
                       ],
                       "properties": {
                         "agent": {
-                          "type": "string",
-                          "maxLength": 200
+                          "type": "string"
                         },
                         "product": {
-                          "type": "string",
-                          "maxLength": 64
+                          "type": "string"
                         },
                         "crud": {
                           "type": "array",
                           "items": {
-                            "type": "string",
-                            "maxLength": 10
+                            "type": "string"
                           },
                           "maxItems": 4
                         }
@@ -6733,8 +6663,7 @@
               "notices": {
                 "type": "array",
                 "items": {
-                  "type": "string",
-                  "maxLength": 300
+                  "type": "string"
                 },
                 "maxItems": 8
               },
@@ -6755,18 +6684,15 @@
                   ],
                   "properties": {
                     "id": {
-                      "type": "string",
-                      "maxLength": 40
+                      "type": "string"
                     },
                     "kind": {
-                      "type": "string",
-                      "maxLength": 20
+                      "type": "string"
                     },
                     "from": {
                       "anyOf": [
                         {
-                          "type": "string",
-                          "maxLength": 40
+                          "type": "string"
                         },
                         {
                           "type": "null"
@@ -6776,8 +6702,7 @@
                     "to": {
                       "anyOf": [
                         {
-                          "type": "string",
-                          "maxLength": 40
+                          "type": "string"
                         },
                         {
                           "type": "null"
@@ -6793,8 +6718,7 @@
                     "reason": {
                       "anyOf": [
                         {
-                          "type": "string",
-                          "maxLength": 40
+                          "type": "string"
                         },
                         {
                           "type": "null"
@@ -6804,8 +6728,7 @@
                     "note": {
                       "anyOf": [
                         {
-                          "type": "string",
-                          "maxLength": 500
+                          "type": "string"
                         },
                         {
                           "type": "null"
@@ -6813,8 +6736,7 @@
                       ]
                     },
                     "at": {
-                      "type": "string",
-                      "maxLength": 40
+                      "type": "string"
                     }
                   }
                 },
@@ -6999,12 +6921,10 @@
                 ]
               },
               "id": {
-                "type": "string",
-                "maxLength": 64
+                "type": "string"
               },
               "name": {
-                "type": "string",
-                "maxLength": 200
+                "type": "string"
               },
               "lifecycle": {
                 "enum": [
@@ -7058,12 +6978,10 @@
                     ],
                     "properties": {
                       "id": {
-                        "type": "string",
-                        "maxLength": 64
+                        "type": "string"
                       },
                       "name": {
-                        "type": "string",
-                        "maxLength": 200
+                        "type": "string"
                       }
                     }
                   },
@@ -7073,8 +6991,7 @@
                 ]
               },
               "line": {
-                "type": "string",
-                "maxLength": 200
+                "type": "string"
               },
               "findings": {
                 "type": "array",
@@ -7087,12 +7004,10 @@
                   ],
                   "properties": {
                     "code": {
-                      "type": "string",
-                      "maxLength": 40
+                      "type": "string"
                     },
                     "text": {
-                      "type": "string",
-                      "maxLength": 300
+                      "type": "string"
                     }
                   }
                 },
@@ -7101,8 +7016,7 @@
               "validFrom": {
                 "anyOf": [
                   {
-                    "type": "string",
-                    "maxLength": 40
+                    "type": "string"
                   },
                   {
                     "type": "null"
@@ -7112,8 +7026,7 @@
               "validUntil": {
                 "anyOf": [
                   {
-                    "type": "string",
-                    "maxLength": 40
+                    "type": "string"
                   },
                   {
                     "type": "null"
@@ -7126,8 +7039,7 @@
               "at": {
                 "anyOf": [
                   {
-                    "type": "string",
-                    "maxLength": 40
+                    "type": "string"
                   },
                   {
                     "type": "null"
@@ -7135,8 +7047,7 @@
                 ]
               },
               "title": {
-                "type": "string",
-                "maxLength": 200
+                "type": "string"
               },
               "rev": {
                 "type": "integer",
@@ -7145,8 +7056,7 @@
               "reason": {
                 "anyOf": [
                   {
-                    "type": "string",
-                    "maxLength": 40
+                    "type": "string"
                   },
                   {
                     "type": "null"
@@ -7156,8 +7066,7 @@
               "note": {
                 "anyOf": [
                   {
-                    "type": "string",
-                    "maxLength": 500
+                    "type": "string"
                   },
                   {
                     "type": "null"
@@ -7167,8 +7076,7 @@
               "keepReason": {
                 "anyOf": [
                   {
-                    "type": "string",
-                    "maxLength": 200
+                    "type": "string"
                   },
                   {
                     "type": "null"
@@ -7187,12 +7095,10 @@
                   ],
                   "properties": {
                     "id": {
-                      "type": "string",
-                      "maxLength": 64
+                      "type": "string"
                     },
                     "name": {
-                      "type": "string",
-                      "maxLength": 200
+                      "type": "string"
                     },
                     "role": {
                       "enum": [
@@ -7233,12 +7139,10 @@
                       ]
                     },
                     "id": {
-                      "type": "string",
-                      "maxLength": 64
+                      "type": "string"
                     },
                     "name": {
-                      "type": "string",
-                      "maxLength": 200
+                      "type": "string"
                     },
                     "lifecycle": {
                       "enum": [
@@ -7292,12 +7196,10 @@
                           ],
                           "properties": {
                             "id": {
-                              "type": "string",
-                              "maxLength": 64
+                              "type": "string"
                             },
                             "name": {
-                              "type": "string",
-                              "maxLength": 200
+                              "type": "string"
                             }
                           }
                         },
@@ -7307,8 +7209,7 @@
                       ]
                     },
                     "line": {
-                      "type": "string",
-                      "maxLength": 200
+                      "type": "string"
                     },
                     "findings": {
                       "type": "array",
@@ -7321,12 +7222,10 @@
                         ],
                         "properties": {
                           "code": {
-                            "type": "string",
-                            "maxLength": 40
+                            "type": "string"
                           },
                           "text": {
-                            "type": "string",
-                            "maxLength": 300
+                            "type": "string"
                           }
                         }
                       },
@@ -7335,8 +7234,7 @@
                     "validFrom": {
                       "anyOf": [
                         {
-                          "type": "string",
-                          "maxLength": 40
+                          "type": "string"
                         },
                         {
                           "type": "null"
@@ -7346,8 +7244,7 @@
                     "validUntil": {
                       "anyOf": [
                         {
-                          "type": "string",
-                          "maxLength": 40
+                          "type": "string"
                         },
                         {
                           "type": "null"
@@ -7360,8 +7257,7 @@
                     "at": {
                       "anyOf": [
                         {
-                          "type": "string",
-                          "maxLength": 40
+                          "type": "string"
                         },
                         {
                           "type": "null"
@@ -7394,14 +7290,12 @@
                       ]
                     },
                     "label": {
-                      "type": "string",
-                      "maxLength": 80
+                      "type": "string"
                     },
                     "blocked": {
                       "anyOf": [
                         {
-                          "type": "string",
-                          "maxLength": 400
+                          "type": "string"
                         },
                         {
                           "type": "null"
@@ -7434,8 +7328,7 @@
                       "coolingEndsAt": {
                         "anyOf": [
                           {
-                            "type": "string",
-                            "maxLength": 40
+                            "type": "string"
                           },
                           {
                             "type": "null"
@@ -7448,8 +7341,7 @@
                       "limits": {
                         "type": "array",
                         "items": {
-                          "type": "string",
-                          "maxLength": 300
+                          "type": "string"
                         },
                         "maxItems": 16
                       }
@@ -7483,14 +7375,12 @@
                         "const": false
                       },
                       "headline": {
-                        "type": "string",
-                        "maxLength": 200
+                        "type": "string"
                       },
                       "portalUrl": {
                         "anyOf": [
                           {
-                            "type": "string",
-                            "maxLength": 500
+                            "type": "string"
                           },
                           {
                             "type": "null"
@@ -7512,8 +7402,7 @@
                           ],
                           "properties": {
                             "id": {
-                              "type": "string",
-                              "maxLength": 120
+                              "type": "string"
                             },
                             "agent": {
                               "type": "object",
@@ -7524,12 +7413,10 @@
                               ],
                               "properties": {
                                 "id": {
-                                  "type": "string",
-                                  "maxLength": 64
+                                  "type": "string"
                                 },
                                 "name": {
-                                  "type": "string",
-                                  "maxLength": 200
+                                  "type": "string"
                                 }
                               }
                             },
@@ -7542,8 +7429,7 @@
                               ]
                             },
                             "text": {
-                              "type": "string",
-                              "maxLength": 300
+                              "type": "string"
                             },
                             "state": {
                               "enum": [
@@ -7553,8 +7439,7 @@
                               ]
                             },
                             "proof": {
-                              "type": "string",
-                              "maxLength": 300
+                              "type": "string"
                             }
                           }
                         },
@@ -7567,16 +7452,14 @@
                       "notChanged": {
                         "type": "array",
                         "items": {
-                          "type": "string",
-                          "maxLength": 300
+                          "type": "string"
                         },
                         "maxItems": 16
                       },
                       "note": {
                         "anyOf": [
                           {
-                            "type": "string",
-                            "maxLength": 300
+                            "type": "string"
                           },
                           {
                             "type": "null"
@@ -7613,14 +7496,12 @@
                     ]
                   },
                   "text": {
-                    "type": "string",
-                    "maxLength": 300
+                    "type": "string"
                   },
                   "version": {
                     "anyOf": [
                       {
-                        "type": "string",
-                        "maxLength": 40
+                        "type": "string"
                       },
                       {
                         "type": "null"
@@ -7652,8 +7533,7 @@
                   "lastGateAt": {
                     "anyOf": [
                       {
-                        "type": "string",
-                        "maxLength": 40
+                        "type": "string"
                       },
                       {
                         "type": "null"
@@ -7663,8 +7543,7 @@
                   "gateNote": {
                     "anyOf": [
                       {
-                        "type": "string",
-                        "maxLength": 300
+                        "type": "string"
                       },
                       {
                         "type": "null"
@@ -7687,18 +7566,15 @@
                       ],
                       "properties": {
                         "agent": {
-                          "type": "string",
-                          "maxLength": 200
+                          "type": "string"
                         },
                         "product": {
-                          "type": "string",
-                          "maxLength": 64
+                          "type": "string"
                         },
                         "crud": {
                           "type": "array",
                           "items": {
-                            "type": "string",
-                            "maxLength": 10
+                            "type": "string"
                           },
                           "maxItems": 4
                         }
@@ -7714,8 +7590,7 @@
               "notices": {
                 "type": "array",
                 "items": {
-                  "type": "string",
-                  "maxLength": 300
+                  "type": "string"
                 },
                 "maxItems": 8
               },
@@ -7736,18 +7611,15 @@
                   ],
                   "properties": {
                     "id": {
-                      "type": "string",
-                      "maxLength": 40
+                      "type": "string"
                     },
                     "kind": {
-                      "type": "string",
-                      "maxLength": 20
+                      "type": "string"
                     },
                     "from": {
                       "anyOf": [
                         {
-                          "type": "string",
-                          "maxLength": 40
+                          "type": "string"
                         },
                         {
                           "type": "null"
@@ -7757,8 +7629,7 @@
                     "to": {
                       "anyOf": [
                         {
-                          "type": "string",
-                          "maxLength": 40
+                          "type": "string"
                         },
                         {
                           "type": "null"
@@ -7774,8 +7645,7 @@
                     "reason": {
                       "anyOf": [
                         {
-                          "type": "string",
-                          "maxLength": 40
+                          "type": "string"
                         },
                         {
                           "type": "null"
@@ -7785,8 +7655,7 @@
                     "note": {
                       "anyOf": [
                         {
-                          "type": "string",
-                          "maxLength": 500
+                          "type": "string"
                         },
                         {
                           "type": "null"
@@ -7794,8 +7663,7 @@
                       ]
                     },
                     "at": {
-                      "type": "string",
-                      "maxLength": 40
+                      "type": "string"
                     }
                   }
                 },
@@ -7817,8 +7685,7 @@
                   "from": {
                     "anyOf": [
                       {
-                        "type": "string",
-                        "maxLength": 40
+                        "type": "string"
                       },
                       {
                         "type": "null"
@@ -7828,8 +7695,7 @@
                   "to": {
                     "anyOf": [
                       {
-                        "type": "string",
-                        "maxLength": 40
+                        "type": "string"
                       },
                       {
                         "type": "null"
@@ -7837,8 +7703,7 @@
                     ]
                   },
                   "event": {
-                    "type": "string",
-                    "maxLength": 40
+                    "type": "string"
                   }
                 }
               },
@@ -7917,12 +7782,10 @@
                     ],
                     "properties": {
                       "id": {
-                        "type": "string",
-                        "maxLength": 64
+                        "type": "string"
                       },
                       "name": {
-                        "type": "string",
-                        "maxLength": 200
+                        "type": "string"
                       }
                     }
                   },
