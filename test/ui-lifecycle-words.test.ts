@@ -5,17 +5,46 @@ import { describe, it } from "node:test";
 import { NOT_CHANGED as SERVER_NOT_CHANGED } from "../src/plans/portal-link.ts";
 import { featuresOf } from "../src/ui/pages/features.ts";
 import { lifecycleError, stopCapOf } from "../src/ui/pages/lifecycle-errors.ts";
+import { currentPlans, liveBanners, pollDelay } from "../src/ui/pages/plan-poll.ts";
 import { subjectFromUrl, subjectHref } from "../src/ui/pages/subject-link.ts";
 import { afterChangeText, beforeChangeText, beforeChangeTone, floorTone, NOT_CHANGED, REASONS, reasonLabel, when } from "../src/ui/pages/words.ts";
 
 describe("features come from the ops of this build", () => {
   it("on when every op is there", () => {
-    assert.deepEqual(featuresOf(["summary_get", "colleagues_list", "colleague_get", "lifecycle_set", "plan_preview", "findings_list"]), { lifecycle: true, preview: true, differences: true });
+    assert.deepEqual(featuresOf(["summary_get", "colleagues_list", "colleague_get", "lifecycle_set", "plan_preview", "findings_list"]), { lifecycle: true, preview: true, differences: true, plans: false });
   });
   it("off when one op is missing", () => {
     assert.equal(featuresOf(["summary_get", "colleagues_list", "colleague_get"]).lifecycle, false);
     assert.equal(featuresOf(["summary_get"]).preview, false);
     assert.equal(featuresOf(["summary_get"]).differences, false);
+    assert.equal(featuresOf(["plan_send", "plan_get", "plan_retry"]).plans, false);
+    assert.equal(featuresOf(["plan_send", "plan_get", "plan_retry", "plan_cancel"]).plans, true);
+  });
+});
+
+describe("the plan polls only while it moves", () => {
+  const plan = (over: Record<string, unknown>) => ({ closedAt: null, reviewUrl: null, mode: "draft", ...over }) as never;
+  it("2 s until the request is ready, 30 s after, stops when all ended", () => {
+    assert.equal(pollDelay([plan({})]), 2000);
+    assert.equal(pollDelay([plan({ reviewUrl: "https://x" })]), 30000);
+    assert.equal(pollDelay([plan({ mode: "portal_link" })]), 30000);
+    assert.equal(pollDelay([plan({ closedAt: "2026-10-30T00:00:00Z" })]), null);
+    assert.equal(pollDelay([]), 30000, "no plan: no fast loop");
+  });
+  const p = (over: Record<string, unknown>) => ({ closedAt: null, reviewUrl: null, mode: "draft", groupId: "g1", openedAt: "2026-10-30T10:00:00Z", id: "p1", state: "waiting", ...over });
+  it("an old ended plan does not stand for this stop; an open one always does; a split stays together", () => {
+    const ended = p({ closedAt: "2026-10-30T11:00:00Z" });
+    assert.deepEqual(currentPlans([ended], "2026-10-30T12:00:00Z"), []);
+    assert.deepEqual(currentPlans([ended], "2026-10-30T09:00:00Z"), [ended]);
+    assert.deepEqual(currentPlans([p({})], "2026-10-30T12:00:00Z"), [p({})]);
+    assert.equal(currentPlans([p({ id: "a" }), p({ id: "b" }), p({ id: "old", groupId: "g0" })], null).length, 2);
+  });
+  it("a waiting alert ends when its plan moved on; other alerts stay", () => {
+    const b = (kind: string) => ({ plan: "p1", kind, text: "x" });
+    assert.equal(liveBanners({ plans: [p({})], banners: [b("waiting")] }).length, 1);
+    assert.equal(liveBanners({ plans: [p({ state: "running" })], banners: [b("waiting")] }).length, 0);
+    assert.equal(liveBanners({ plans: [], banners: [b("waiting")] }).length, 0);
+    assert.equal(liveBanners({ plans: [], banners: [b("expired")] }).length, 1);
   });
 });
 

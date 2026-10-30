@@ -5,7 +5,9 @@ import { Button, Dialog, Field, Notice, Select, Textarea } from "@opt2-tealbrick
 import { useState } from "react";
 import type { ColleagueGetOutput, LifecycleSetInput, LifecycleSetOutput } from "#kit";
 import { changeError } from "../common.tsx";
+import { FEATURES } from "./features.ts";
 import { type LifecycleErrorInfo, lifecycleError, stopCapOf } from "./lifecycle-errors.ts";
+import { sendPlan } from "./plan-live.tsx";
 import { NotChanged, PlanResult } from "./plan-result.tsx";
 import { NOTE_HINT, type Reason, reasonOptions } from "./words.ts";
 
@@ -16,6 +18,7 @@ export function StopNow({ subject, portalHref, onClose, onChanged }: { subject: 
   const [failure, setFailure] = useState<LifecycleErrorInfo | null>(null);
   const [capUsed, setCapUsed] = useState<number | null>(null);
   const [result, setResult] = useState<LifecycleSetOutput["colleague"] | null>(null);
+  const [sendFailure, setSendFailure] = useState<string | null>(null);
   const stop = async () => {
     if (!reason) return;
     setBusy(true);
@@ -25,6 +28,7 @@ export function StopNow({ subject, portalHref, onClose, onChanged }: { subject: 
     if (capUsed !== null) input.confirmCount = capUsed;
     try {
       const out = await callOp<LifecycleSetOutput>("lifecycle_set", input);
+      if (FEATURES.plans) setSendFailure(await sendPlan({ kind: subject.kind, id: subject.id }));
       setResult(out.colleague);
       await onChanged();
     } catch (e) {
@@ -70,7 +74,7 @@ export function StopNow({ subject, portalHref, onClose, onChanged }: { subject: 
       }
     >
       {result ? (
-        <PlanResult colleague={result} portalHref={portalHref} />
+        <PlanResult colleague={result} portalHref={portalHref} sendFailure={sendFailure} />
       ) : (
         <div className="tb-stack">
           {failure ? (
