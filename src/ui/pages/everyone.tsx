@@ -126,7 +126,7 @@ export function EveryonePage({ portalHref }: { portalHref?: string }) {
           {data.total > data.items.length ? <p className="tb-hint">{`This list shows ${data.items.length} of ${data.total}.`}</p> : null}
         </>
       )}
-      {stop ? <StopNow agent={stop} portalHref={portalHref} onClose={() => setStop(null)} onChanged={reload} /> : null}
+      {stop ? <StopNow subject={stop} portalHref={portalHref} onClose={() => setStop(null)} onChanged={reload} /> : null}
     </section>
   );
 }

@@ -17,7 +17,7 @@ const LABEL: Record<Reason, string> = {
   returned: "They came back",
   other: "Other",
 };
-export const reasonLabel = (r: string): string => LABEL[r as Reason] ?? "Other";
+export const reasonLabel = (r: string): string => (r === "migrated" ? "Marked as departed before this version" : (LABEL[r as Reason] ?? "Other"));
 
 /** The reasons offered for a change to `to`. A list, never free text: this row is kept (business F13). */
 const STOP: Reason[] = ["left", "contract_ended", "role_changed", "security", "other"];
@@ -32,9 +32,9 @@ export const NOT_CHANGED: readonly string[] = [
   "Their own logins, such as Slack, Google or a bank.",
   "The agent's machine and its native tools.",
   "Copies of data that were already made.",
-  "Other people who use the shared Portal login. Change the Portal login if they had it.",
-  "Engine steps that run after an agent step.",
-  "Scheduled posts, until you approve the stop in Portal.",
+  "Other people with the shared Portal login. Change the Portal login if they had it.",
+  "Engine steps after an agent step.",
+  "Scheduled posts before you approve.",
 ];
 
 /**

@@ -9,7 +9,7 @@ import { type LifecycleErrorInfo, lifecycleError, stopCapOf } from "./lifecycle-
 import { NotChanged, PlanResult } from "./plan-result.tsx";
 import { NOTE_HINT, type Reason, reasonOptions } from "./words.ts";
 
-export function StopNow({ agent, portalHref, onClose, onChanged }: { agent: { id: string; name: string }; portalHref?: string; onClose: () => void; onChanged: () => void | Promise<void> }) {
+export function StopNow({ subject, portalHref, onClose, onChanged }: { subject: { kind: "agent" | "person"; id: string; name: string }; portalHref?: string; onClose: () => void; onChanged: () => void | Promise<void> }) {
   const [reason, setReason] = useState<Reason | "">("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -20,7 +20,7 @@ export function StopNow({ agent, portalHref, onClose, onChanged }: { agent: { id
     if (!reason) return;
     setBusy(true);
     setFailure(null);
-    const input: LifecycleSetInput = { kind: "agent", id: agent.id, to: "suspended", reason };
+    const input: LifecycleSetInput = { kind: subject.kind, id: subject.id, to: "suspended", reason };
     if (note.trim()) input.note = note.trim();
     if (capUsed !== null) input.confirmCount = capUsed;
     try {
@@ -38,7 +38,7 @@ export function StopNow({ agent, portalHref, onClose, onChanged }: { agent: { id
   return (
     <Dialog
       open
-      title={result ? `${agent.name}: what happens now` : `Stop ${agent.name}`}
+      title={result ? `${subject.name}: what happens now` : `Stop ${subject.name}`}
       onClose={onClose}
       busy={busy}
       footer={
@@ -67,7 +67,7 @@ export function StopNow({ agent, portalHref, onClose, onChanged }: { agent: { id
               {failure.message}
             </Notice>
           ) : null}
-          <p className="tb-soft">Governance records this now. The agent is paused only when you approve in Portal. Scheduled posts due while it is paused are cancelled, not moved.</p>
+          <p className="tb-soft">{subject.kind === "agent" ? "Governance records this now. The agent is paused only when you approve in Portal. Scheduled posts due while it is paused are cancelled, not moved." : "Governance records this now, for this person and their agents. Their agents are paused only when you approve in Portal. Scheduled posts due while an agent is paused are cancelled, not moved."}</p>
           <Field label="Reason">
             <Select placeholder="Choose a reason" options={reasonOptions("suspended")} value={reason} onValueChange={(v) => setReason(v as Reason)} />
           </Field>
