@@ -11,7 +11,7 @@ type Row = Record<string, unknown>;
 export const CAPS = { events: 5000, verdicts: 5000, plans: 500, steps: 5000, exceptions: 2000, stops: 500, rounds: 200 } as const;
 const OUTCOME_CHARS = 1000;
 const iso = (ms: unknown): string | null => (ms === null || ms === undefined ? null : new Date(Number(ms)).toISOString());
-const cap = (rows: Row[], max: number, what: string): Row[] => (rows.length > max ? fail("record_too_big", `This period holds too many ${what} for one file. Choose a shorter period.`, 409) : rows);
+const cap = (rows: Row[], max: number, what: string): Row[] => (rows.length > max ? fail("record_too_big", `This period has too many ${what} for one file. Choose a shorter period.`, 409) : rows);
 const nameFor = (names: Names, kind: unknown, id: unknown): string | null => (kind === "agent" ? names.agents : names.people).get(String(id)) ?? null;
 const subjectOf = (names: Names, kind: unknown, id: unknown, fallback?: unknown) => ({ kind: String(kind), id: String(id), name: nameFor(names, kind, id) ?? (fallback === undefined || fallback === null ? null : String(fallback)) });
 
@@ -73,7 +73,7 @@ export function plansIn(db: Db, from: number, to: number, names: Names) {
   return plans.map((p) => {
     const rows = db.prepare("SELECT * FROM fleet_plan_steps WHERE plan_id = ? ORDER BY n").all(String(p.id));
     steps += rows.length;
-    if (steps > CAPS.steps) fail("record_too_big", "This period holds too many plan steps for one file. Choose a shorter period.", 409);
+    if (steps > CAPS.steps) fail("record_too_big", "This period has too many plan steps for one file. Choose a shorter period.", 409);
     return {
       id: String(p.id),
       group: String(p.group_id),

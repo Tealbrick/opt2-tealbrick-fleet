@@ -100,7 +100,7 @@ const storesOf = (db: Db, sweep: Row): SweepStore[] =>
 /** The sweeps that finished in [from, to], oldest first. Past `max` the period is too long for one file. */
 export function sweepsIn(db: Db, from: number, to: number, max: number): { sweeps: Row[]; notFinished: number } {
   const sweeps = db.prepare("SELECT * FROM fleet_sweeps WHERE finished_at IS NOT NULL AND finished_at >= ? AND finished_at <= ? ORDER BY finished_at, id LIMIT ?").all(from, to, max + 1);
-  if (sweeps.length > max) fail("record_too_big", "This period holds too many sweeps for one file. Choose a shorter period.", 409);
+  if (sweeps.length > max) fail("record_too_big", "This period has too many sweeps for one file. Choose a shorter period.", 409);
   const open = db.prepare("SELECT COUNT(*) AS n FROM fleet_sweeps WHERE finished_at IS NULL AND started_at >= ? AND started_at <= ?").get(from, to);
   return { sweeps, notFinished: Number(open?.n ?? 0) };
 }
@@ -123,7 +123,7 @@ export async function sweepLists(db: Db, sweeps: readonly Row[], since: number |
     const items = kept ? [...state.values()].sort((a, b) => String(a.target).localeCompare(String(b.target)) || String(a.item_id).localeCompare(String(b.item_id))).map((r) => itemOf(r, names)) : null;
     const ended = (endedBy.get(String(sweep.id)) ?? []).map((r) => ({ ...itemOf(r, names), endedAt: iso(r.at) as string }));
     rows += (items?.length ?? 0) + ended.length;
-    if (rows > maxRows) fail("record_too_big", "This period holds too many rows for one file. Choose a shorter period.", 409);
+    if (rows > maxRows) fail("record_too_big", "This period has too many rows for one file. Choose a shorter period.", 409);
     out.push({
       id: String(sweep.id),
       startedAt: iso(sweep.started_at) as string,
