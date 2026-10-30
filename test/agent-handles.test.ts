@@ -209,6 +209,7 @@ test("timer: refreshes outside calls, first after a short delay, and stops on on
 
 test("feed: without accept the answer is byte-for-byte the old shape; with accept every agent carries handles", async () => {
   const db = seeded();
+  db.prepare("DELETE FROM fleet_handles WHERE handle = ?").run(BUZZ); // C380 S3-15: a handle a person also holds is dropped from the agent; here no person holds it
   const oldShape = JSON.stringify(await feedOp(db, {})); // before any handle exists
   await refreshAgentHandles(db, fakeConnect([[{ agent: AGENT_A.id, identity: SLACK_A }, { agent: AGENT_A.id, identity: BUZZ }]]).callApp);
   const plain = await feedOp(db, {});
