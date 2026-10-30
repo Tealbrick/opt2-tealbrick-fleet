@@ -404,7 +404,7 @@ export function ReviewsPage({ onChanged }: { onChanged?: () => void }) {
     return (
       <section className="app-page" aria-label="Reviews">
         <PageHead title="Reviews" />
-        {error ? <LoadFailed message={error} retrying={list.loading || dirLoad.loading} onRetry={() => void reload()} /> : <Loading what="trust reviews" />}
+        {error ? <LoadFailed message={error} retrying={list.loading || dirLoad.loading} onRetry={() => void reload()} /> : <Loading what="reviews" />}
       </section>
     );
   const open = l.reviews.filter((r) => r.status === "requested");
