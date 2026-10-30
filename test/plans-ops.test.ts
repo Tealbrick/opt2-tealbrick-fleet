@@ -2,11 +2,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { validateAgainstSchema } from "@opt2-tealbrick/manifest";
-import type { Json, OpContext, TbError } from "@opt2-tealbrick/miniapp-sdk";
+import { type Json, type OpContext, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { handlers, manifest } from "../src/app.ts";
 import { DAY_MS } from "../src/lifecycle/transitions.ts";
 import { scanPlans } from "../src/plans/control.ts";
 import { getPlan } from "../src/plans/plan.ts";
+import * as store from "../src/store.ts";
 import { OWNER, refused, SYSTEM, set, stateOf, WAIVE } from "./lifecycle-helpers.ts";
 import { agentItem, approveAndDeliver, HENRY, leave, makeWorld, SALES, type World } from "./plans-world.ts";
 
@@ -113,6 +114,185 @@ test("T6 with Portal down: refused, because the draft could still be applied", a
   await assert.rejects(run("lifecycle_set", { kind: "agent", id: HENRY, to: "active", reason: "mistake" }, ctxOf(w)), refused("portal_unavailable", 503));
   assert.equal(stateOf(w.db, "agent", HENRY), "leaving");
   assert.equal(w.plan(id).state, "waiting");
+});
+
+test("T4 with a new end date in the same call: its own date lets it pass; the try-first does not refuse it, and the draft goes", async () => {
+  const w = makeWorld();
+  set(w.db, "agent", HENRY, "suspended", {}, w.clock.t);
+  w.db.prepare("UPDATE fleet_agents SET valid_until = ? WHERE id = ?").run(Date.now() - 1000, HENRY);
+  const id = w.makePlan({ kind: "agent", id: HENRY });
+  await w.tick(id);
+  await assert.rejects(run("lifecycle_set", { kind: "agent", id: HENRY, to: "active", reason: "returned" }, ctxOf(w)), refused("date_passed", 409));
+  assert.equal(w.plan(id).state, "waiting", "refused: nothing taken back");
+  assert.equal(w.core.open().length, 1);
+  const until = new Date(Date.now() + 86_400_000).toISOString();
+  await run("lifecycle_set", { kind: "agent", id: HENRY, to: "active", reason: "returned", validUntil: until }, ctxOf(w));
+  assert.equal(stateOf(w.db, "agent", HENRY), "active");
+  assert.equal(w.plan(id).state, "withdrawn");
+  assert.equal(w.core.open().length, 0);
+});
+
+test("a lifecycle_set whose own check would fail after the withdraw: tried first, nothing is taken back; a bad date, a bad decision", async () => {
+  const w = makeWorld();
+  leave(w);
+  const id = w.makePlan({ kind: "agent", id: HENRY });
+  await w.tick(id);
+  const rev = store.revision(w.db);
+  await assert.rejects(run("lifecycle_set", { kind: "agent", id: HENRY, to: "active", reason: "mistake", validUntil: "not a date" }, ctxOf(w)), refused("input_invalid", 400));
+  assert.equal(w.plan(id).state, "waiting");
+  assert.equal(w.core.open().length, 1);
+  assert.equal(store.revision(w.db), rev, "the try wrote nothing");
+  assert.equal(stateOf(w.db, "agent", HENRY), "leaving");
+});
+
+test("the entry moves during the call to Portal, so the change fails after the withdraw: the owner reads that the request is gone and the entry did not change", async () => {
+  const w = makeWorld();
+  leave(w);
+  const id = w.makePlan({ kind: "agent", id: HENRY });
+  await w.tick(id);
+  const real = w.core.withdraw.bind(w.core);
+  w.core.withdraw = async (k) => {
+    const a = await real(k);
+    w.db.prepare("UPDATE fleet_agents SET owner_id = NULL WHERE id = ?").run(HENRY); // someone took the owner away meanwhile
+    return a;
+  };
+  await assert.rejects(run("lifecycle_set", { kind: "agent", id: HENRY, to: "active", reason: "mistake" }, ctxOf(w)), (e: TbError) => {
+    assert.equal(e.code, "owner_required");
+    assert.match(e.message, /taken back already, and this entry did not change/);
+    return true;
+  });
+  assert.equal(stateOf(w.db, "agent", HENRY), "leaving");
+  const view = (await run("plan_get", { plan: id }, ctxOf(w))).plans[0];
+  assert.equal(view.state, "withdrawn");
+  assert.match(view.note, /still marked as stopped/);
+});
+
+async function splitWorld() {
+  const w = makeWorld();
+  const { agentId } = await import("./plans-world.ts");
+  const ids = Array.from({ length: 101 }, (_, i) => agentId(i + 10));
+  store.syncAgents(w.db, [...w.db.prepare("SELECT id, name, mode, status FROM fleet_agents").all(), ...ids.map((id) => ({ id, name: id, mode: "free", status: "active" }))] as never, w.clock.t);
+  for (const id of ids) {
+    store.setAgent(w.db, { agent: id, owner: w.ann.id }, w.clock.t);
+    w.core.addAgent(id, 0, 0);
+  }
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  const first = w.makePlan({ kind: "person", id: w.ann.id });
+  const parts = w.db.prepare("SELECT id FROM fleet_plans WHERE group_id = ? ORDER BY part").all(first).map((r) => String(r.id));
+  for (const id of parts) await w.tick(id);
+  return { w, parts, first };
+}
+
+test("split, plan_cancel with Portal down for the second part: part 1 is cancelled, part 2 stays open; each part says its true state; a second cancel finishes it", async () => {
+  const { w, parts, first } = await splitWorld();
+  const real = w.core.withdraw.bind(w.core);
+  let calls = 0;
+  w.core.withdraw = async (k) => {
+    calls++;
+    if (calls === 2) throw new TbError("portal_unavailable", "down", 503);
+    return real(k);
+  };
+  const out = await run("plan_cancel", { plan: first }, ctxOf(w));
+  validOut("plan_cancel", out);
+  const [a, b] = out.plans;
+  assert.equal(a.state, "cancelled");
+  assert.match(a.note, /do not all have the same state/);
+  assert.match(a.note, /still marked as stopped/);
+  assert.equal(out.left, 1);
+  assert.equal(b.state, "waiting");
+  assert.equal(b.canCancel, true);
+  assert.match(b.note, /could still be applied/);
+  assert.equal(w.core.open().length, 1, "one part still stands, and the page says so");
+  // the next tick reads the draft; what the owner needs to know stays
+  await w.tick(parts[1] as string);
+  assert.match((await run("plan_get", { plan: parts[1] }, ctxOf(w))).plans[1].note, /could still be applied/);
+  w.core.withdraw = real;
+  const again = await run("plan_cancel", { plan: first }, ctxOf(w));
+  assert.deepEqual(again.plans.map((p: { state: string }) => p.state), ["cancelled", "cancelled"]);
+  assert.equal(w.core.open().length, 0);
+  assert.equal(parts.length, 2);
+});
+
+test("plan_cancel with Portal down for the only part: an error, nothing moved; the note stays after a tick", async () => {
+  const w = makeWorld();
+  leave(w);
+  const id = w.makePlan({ kind: "agent", id: HENRY });
+  await w.tick(id);
+  const real = w.core.withdraw.bind(w.core);
+  w.core.withdraw = async () => {
+    throw new TbError("portal_unavailable", "down", 503);
+  };
+  await assert.rejects(run("plan_cancel", { plan: id }, ctxOf(w)), refused("portal_unavailable", 503));
+  assert.equal(w.plan(id).state, "waiting");
+  await w.tick(id);
+  assert.match((await run("plan_get", { plan: id }, ctxOf(w))).plans[0].note, /could still be applied/);
+  w.core.withdraw = real;
+  const out = await run("plan_cancel", { plan: id }, ctxOf(w));
+  assert.equal(out.left, 0);
+  assert.equal(out.plans[0].state, "cancelled");
+  assert.doesNotMatch(String(out.plans[0].note), /could still be applied/);
+});
+
+test("the rail is gone and T6 goes on: the error text never says Portal took back what it did not", async () => {
+  const w = makeWorld();
+  leave(w);
+  const id = w.makePlan({ kind: "agent", id: HENRY });
+  await w.tick(id);
+  w.core.flag = false;
+  const real = w.core.withdraw.bind(w.core);
+  w.core.withdraw = async (k) => {
+    w.db.prepare("UPDATE fleet_agents SET owner_id = NULL WHERE id = ?").run(HENRY);
+    return real(k);
+  };
+  await assert.rejects(run("lifecycle_set", { kind: "agent", id: HENRY, to: "active", reason: "mistake" }, ctxOf(w)), (e: TbError) => {
+    assert.equal(e.code, "owner_required");
+    assert.doesNotMatch(e.message, /taken back already/);
+    return true;
+  });
+  assert.equal(w.plan(id).code, "not_taken_back");
+});
+
+test("split, T6 with Portal down for one part: the state does not move; the error counts what went; the page says the same", async () => {
+  const { w, first, parts } = await splitWorld();
+  const real = w.core.withdraw.bind(w.core);
+  let calls = 0;
+  w.core.withdraw = async (k) => {
+    calls++;
+    if (calls === 2) throw new TbError("portal_unavailable", "down", 503);
+    return real(k);
+  };
+  await assert.rejects(run("lifecycle_set", { kind: "person", id: w.ann.id, to: "active", reason: "mistake" }, ctxOf(w)), (e: TbError) => {
+    assert.equal(e.code, "portal_unavailable");
+    assert.match(e.message, /1 of 2 open parts were taken back already. Nothing else changed/);
+    return true;
+  });
+  assert.equal(stateOf(w.db, "person", w.ann.id), "leaving");
+  assert.equal(w.plan(first).state, "withdrawn");
+  assert.equal(w.plan(parts[1] as string).state, "waiting");
+  // the owner tries again: the rest goes, and the state moves
+  w.core.withdraw = real;
+  await run("lifecycle_set", { kind: "person", id: w.ann.id, to: "active", reason: "mistake" }, ctxOf(w));
+  assert.equal(stateOf(w.db, "person", w.ann.id), "active");
+  assert.equal(w.core.open().length, 0);
+});
+
+test("split, plan_retry: all parts or none. A part whose Core step failed refuses the whole Try again, and no part moved", async () => {
+  const { w, first, parts } = await splitWorld();
+  w.core.failAgent = null;
+  const p2 = parts[1] as string;
+  w.connect.add(agentItem({ id: "account_as_itself:a", kind: "account_as_itself", agent: String(w.steps(first).find((s) => s.phase === "core")?.agent_id) }));
+  for (const id of parts) await w.tick(id);
+  // part 1 refused by Rules on a store step; part 2's Core step failed
+  approveAndDeliver(w, String(w.plan(first).draft_key), String(w.steps(first).find((s) => s.phase === "core")?.agent_id));
+  w.connect.revokeScript.push({ kind: "deny" });
+  await w.tick(first);
+  w.core.failStep = "agents.pause";
+  w.core.apply(String(w.plan(p2).draft_key));
+  await w.tick(p2);
+  assert.equal(w.plan(p2).state, "partial");
+  const before = String(w.item(first, "account_as_itself:a").state);
+  await assert.rejects(run("plan_retry", { plan: first }, ctxOf(w)), refused("apply_in_portal", 409));
+  assert.equal(w.item(first, "account_as_itself:a").state, before, "part 1 did not move");
 });
 
 test("a T6 refused by its own guard takes nothing back", async () => {

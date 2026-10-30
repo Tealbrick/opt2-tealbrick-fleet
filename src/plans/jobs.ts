@@ -1,6 +1,7 @@
 // The runner on SDK jobs. One clock job runs each minute and ticks each plan that is due; a person op starts one more at once. Each plan's slot is taken by a compare-and-set, so two
 // runs never tick one plan. A process that dies mid-tick leaves the tables as they were at that step, and the next run goes on from them.
 import type { JobContext, JobHandler } from "@opt2-tealbrick/miniapp-sdk";
+import { startSweep } from "../access/sweep.ts";
 import { planCtxOf } from "./context.ts";
 import { scanPlans } from "./control.ts";
 import { runDue } from "./runner.ts";
@@ -14,7 +15,7 @@ export const planJobs: Record<string, { run: JobHandler; timeoutMs?: number; max
     maxAttempts: 100,
     run: async (_input, ctx: JobContext) => {
       try {
-        const pc = planCtxOf(ctx as never);
+        const pc = { ...planCtxOf(ctx as never), startSweep: () => void startSweep(ctx, "schedule") };
         scanPlans(ctx.db, pc.now(), pc.warn);
         await runDue(pc);
       } catch (e) {

@@ -7,14 +7,15 @@
 import { normalizeHandle } from "@opt2-tealbrick/manifest";
 import type { Db } from "@opt2-tealbrick/miniapp-sdk";
 import type { AccessTarget } from "../access/items.ts";
-import { LIST_LIMITS, personSubject } from "../access/items.ts";
+import { LIST_LIMITS, personSubject, storeItems } from "../access/items.ts";
+import { lastSweepAt } from "../access/sweep.ts";
 import { HANDLE_PATTERN } from "../feed.ts";
 import { loadSubject } from "../lifecycle/transitions.ts";
 import { type AccessItem, type AccessPort, type ListSubject, revokeBatchMax } from "./access-port.ts";
 import { type AlertPort, alertOnce, retryPendingAlerts } from "./alerts.ts";
 import { askRail, type OwnerDraftGetResult, type OwnerDraftsApi, proveCoreStep, readableDraft, type SliceView } from "./core-rail.ts";
 import { addStep, type CoreOp, getPlan, movePlan, moveStep, notePlan, OPEN_SQL, type Row, recordPlan, stepsOf, type Tick } from "./plan.ts";
-import { APPLYING_STUCK_MS, DRAFT_TITLE, ENDS_BY_PAUSE, FAST_WINDOW_MS, HOLD_RECHECK_MS, isFinalStep, isOpenPlan, LIST_BACKOFF_MS, MAX_TRIES, POLL_FAST_MS, POLL_SLOW_MS, stateFromSteps, stuckStep, TICK_LEASE_MS } from "./steps.ts";
+import { APPLYING_STUCK_MS, DRAFT_TITLE, ENDS_BY_PAUSE, FAST_WINDOW_MS, HOLD_RECHECK_MS, isFinalStep, isOpenPlan, LIST_BACKOFF_MS, MANY_PLANS, MAX_TRIES, POLL_FAST_MS, POLL_SLOW_MS, stateFromSteps, stuckStep, TICK_LEASE_MS } from "./steps.ts";
 
 export interface PlanCtx {
   db: Db;
@@ -23,6 +24,10 @@ export interface PlanCtx {
   slice: SliceView;
   alerts: AlertPort;
   now(): number;
+  /** Set when 3 or more plans are open: one full read serves them all, and the ticks read a store only when that decides a step. */
+  sweep?: (() => void) | undefined;
+  /** Starts one full read of the stores; a running one is enough. */
+  startSweep?: (() => void) | undefined;
   signal?: AbortSignal | undefined;
   warn(msg: string, fields?: Record<string, string>): void;
 }
@@ -167,7 +172,8 @@ async function syncDraft(pc: PlanCtx, p: Row, steps: readonly Row[]): Promise<vo
     endPlan(pc, id, state, "failed", { code: "core_mismatch", detail: "Portal answered about other steps. Nothing more runs. Open Portal and check." }, now);
     return;
   }
-  const fields = { draft_id: get.draftId, draft_state: get.state, review_url: get.reviewUrl, core_digest: get.digest, expires_at: get.expiresAt ? Date.parse(get.expiresAt) : null, code: null, rail: "draft", rail_code: null };
+  // Applied after all: the note about a cancel that did not reach Portal has said what it could.
+  const fields = { ...(get.state === "applied" ? { close_note: null } : {}), draft_id: get.draftId, draft_state: get.state, review_url: get.reviewUrl, core_digest: get.digest, expires_at: get.expiresAt ? Date.parse(get.expiresAt) : null, code: null, rail: "draft", rail_code: null };
   switch (get.state) {
     case "open":
     case "submitted":
@@ -285,7 +291,7 @@ function prove(pc: PlanCtx, steps: readonly Row[], items: readonly AccessItem[],
         if (s.state === "claimed") moveStep(pc.db, s, "reported", { detail: "The app says this ended. This version cannot list it." }, now);
         continue;
       }
-      moveStep(pc.db, s, "done", { code: s.state === "pending" ? "already_gone" : null, detail: null }, now);
+      if (moveStep(pc.db, s, "done", { code: s.state === "pending" ? "already_gone" : null, detail: null }, now)) pc.db.prepare("DELETE FROM fleet_access_items WHERE target = ? AND item_id = ?").run(String(s.target), String(s.item_id));
       continue;
     }
     if (it.digest !== s.item_digest) {
@@ -396,7 +402,8 @@ async function runTarget(pc: PlanCtx, p: Row, target: string, phases: readonly s
   const after = stepsOf(db, id);
   // Once when Core applied: what an agent gained while the draft waited is part of this stop. The read step's `batch` keeps that this was done.
   const firstAfterCore = phases.includes("after") && Number(read.batch) === 0;
-  const needsList = firstAfterCore || !isFinalStep(String(read.state)) || openToSend(pc, p, after, phases, target).length > 0 || after.some((s) => s.target === target && (s.state === "sending" || s.state === "claimed"));
+  // §4: while a plan is open each tick reads its stores again (every 60 s for 30 min, then every 15), so Differences and the person's page move with it. With 3 or more open plans one sweep does that.
+  const needsList = pc.sweep === undefined ? true : firstAfterCore || !isFinalStep(String(read.state)) || openToSend(pc, p, after, phases, target).length > 0 || after.some((s) => s.target === target && (s.state === "sending" || s.state === "claimed"));
   if (!needsList || Number(read.retry_at) > now) return;
   for (let pass = 0; pass < 2; pass++) {
     const asked = subjectsOf(db, p, steps);
@@ -419,6 +426,8 @@ async function runTarget(pc: PlanCtx, p: Row, target: string, phases: readonly s
       return;
     }
     moveStep(db, cur, "done", { code: null, detail: JSON.stringify(answer.notShown).slice(0, 500), retry_at: 0, ...(phases.includes("after") ? { batch: 1 } : {}) }, at);
+    // The owner's copy for Differences: never authority, and a row goes only when a list proved it gone (`prove`).
+    db.transaction(() => storeItems(db, target as AccessTarget, answer.items, null, at));
     absorb(pc, p, target, answer.items);
     const open = stepsOf(db, id).filter((s) => s.target === target && s.op === "access_revoke" && ["pending", "sending", "claimed", "failed", "not_revocable"].includes(String(s.state)) && !stuckStep(s as never));
     prove(pc, open, answer.items, answer.notShown);
@@ -539,6 +548,19 @@ export function releaseTicks(db: Db): void {
 export async function runDue(pc: PlanCtx, limit = 50): Promise<number> {
   const db = pc.db;
   const now = pc.now();
+  const open = db.prepare(`SELECT MAX(MAX(opened_at, COALESCE(applying_since, 0), COALESCE(applied_at, 0))) AS newest, COUNT(*) AS n FROM fleet_plans WHERE state IN (${OPEN_SQL})`).get();
+  const many = Number(open?.n ?? 0) >= MANY_PLANS;
+  const startSweep = pc.startSweep;
+  // §4: the same pace as a tick, from the plan that moved last.
+  if (many && startSweep && now - Number(lastSweepAt(db) ?? 0) >= (now - Number(open?.newest ?? 0) < FAST_WINDOW_MS ? POLL_FAST_MS : POLL_SLOW_MS)) {
+    try {
+      startSweep();
+    } catch (e) {
+      // A read that could not start stops no plan.
+      pc.warn("plans sweep not started", { reason: e instanceof Error ? e.message.slice(0, 200) : "error" });
+    }
+  }
+  const ctx: PlanCtx = many ? { ...pc, sweep: () => {} } : { ...pc, sweep: undefined };
   const due = db.prepare(`SELECT id, next_at FROM fleet_plans WHERE state IN (${OPEN_SQL}) AND next_at <= ? AND ticking_until <= ? ORDER BY next_at, id LIMIT ?`).all(now, now, limit);
   let n = 0;
   for (const r of due) {
@@ -548,7 +570,7 @@ export async function runDue(pc: PlanCtx, limit = 50): Promise<number> {
     const took = db.prepare("UPDATE fleet_plans SET next_at = ?, ticking_until = ? WHERE id = ? AND next_at = ? AND ticking_until <= ?").run(now + POLL_FAST_MS, now + TICK_LEASE_MS, id, Number(r.next_at), now);
     if (took.changes !== 1) continue;
     try {
-      const res = await tick(pc, id);
+      const res = await tick(ctx, id);
       // A wake during this tick set `next_at` to 0: it stays, so the next run looks again.
       db.prepare("UPDATE fleet_plans SET next_at = CASE WHEN next_at = 0 THEN 0 ELSE ? END, ticking_until = 0 WHERE id = ?").run(res.open ? pc.now() + res.afterMs : 0, id);
       n++;

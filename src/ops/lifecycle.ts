@@ -16,11 +16,11 @@ import {
   type SummaryGetOutput,
 } from "#kit";
 import { setSettings } from "../lifecycle/settings.ts";
-import { type Actor, assertCap, guardOf, loadSubject, setDates, setKeepRunning, transition } from "../lifecycle/transitions.ts";
+import { type Actor, assertCap, loadSubject, setDates, setKeepRunning, transition } from "../lifecycle/transitions.ts";
 import { colleagueDetail, colleaguesList, grantsOf, readTopology, summaryGet } from "../lifecycle/view.ts";
 import { fail } from "../meta.ts";
 import { planCtxOf } from "../plans/context.ts";
-import { closeOpenPlans } from "../plans/control.ts";
+import { assertAllClosed, type CloseResult, closeOpenPlans } from "../plans/control.ts";
 import { openPlansOf } from "../plans/plan.ts";
 import { op } from "./op.ts";
 
@@ -28,6 +28,8 @@ import { op } from "./op.ts";
 export function assertOwner(caller: { type: string }): void {
   if (caller.type !== "person") throw new TbError("no_access", "Only the owner can do this.", 403);
 }
+
+class TriedOnly extends Error {}
 
 export const lifecycleOps = {
   [OP.summaryGet]: op<SummaryGetInput, SummaryGetOutput>({
@@ -59,15 +61,7 @@ export const lifecycleOps = {
       const now = Date.now();
       const db = ctx.db;
       const topology = readTopology(ctx);
-      // T4, T6 (§2): the draft is taken back first, and only then the state moves. A change its own guard refuses takes nothing back. An apply that won the race ends this here.
-      if (input.to === "active" || input.to === "proposed") {
-        const s = loadSubject(db, input.kind, input.id);
-        if (s && input.expectedRev !== undefined && s.rev !== input.expectedRev) fail("lifecycle_stale", "This entry changed since you looked. Open it again.", 409);
-        const problem = s ? guardOf(db, s, input.to, { waive: input.waive }, now) : null;
-        if (problem) throw new TbError(problem.code, problem.message, problem.status);
-        await closeOpenPlans(planCtxOf(ctx as never), openPlansOf(db, input.kind, input.id), "withdrawn");
-      }
-      const made = db.transaction(() => {
+      const change = () => db.transaction(() => {
         // Checked before anything here moves the revision of this entry.
         if (input.expectedRev !== undefined && (loadSubject(db, input.kind, input.id) ?? fail("not_found", "No such entry.", 404)).rev !== input.expectedRev) fail("lifecycle_stale", "This entry changed since you looked. Open it again.", 409);
         const decide = () => {
@@ -82,12 +76,12 @@ export const lifecycleOps = {
           if (input.validFrom === undefined && input.validUntil === undefined) return;
           setDates(db, { kind: input.kind, id: input.id, ...(input.validFrom !== undefined ? { validFrom: input.validFrom } : {}), ...(input.validUntil !== undefined ? { validUntil: input.validUntil } : {}), confirmPastDate: input.confirmPastDate, confirmCount: input.confirmCount, noCap: stopping, actor }, now);
         };
-        const change = () => (input.to === undefined ? null : transition(db, { kind: input.kind, id: input.id, to: input.to, reason: input.reason ?? "other", note: input.note, actor, confirmCount: input.confirmCount, waive: input.waive, grants: input.to === "leaving" ? grantsOf(db, topology, input.kind, input.id) : [] }, now));
+        const move = () => (input.to === undefined ? null : transition(db, { kind: input.kind, id: input.id, to: input.to, reason: input.reason ?? "other", note: input.note, actor, confirmCount: input.confirmCount, waive: input.waive, grants: input.to === "leaving" ? grantsOf(db, topology, input.kind, input.id) : [] }, now));
         // One call passes the cap once. A stop goes first and counts for its dates and decisions. Otherwise the dates and decisions go first:
         // a resume can need a new end date, and a close needs the decisions. Stop decisions with no stop of their own pass the cap here.
         const stopping = input.to === "suspended" || input.to === "leaving";
         if (stopping) {
-          const out = change();
+          const out = move();
           dates();
           decide();
           return out;
@@ -95,9 +89,33 @@ export const lifecycleOps = {
         dates();
         if (input.decisions?.some((d) => d.decision === "stop")) assertCap(db, input.confirmCount, now);
         decide();
-        const out = change();
+        const out = move();
         return out;
       });
+      // T4, T6 (§2): the draft is taken back first, and only then the state moves. So the whole change is tried first and rolled back: what it would refuse takes nothing back, with its own dates and decisions counted. No await in the try.
+      const undoing = input.to === "active" || input.to === "proposed";
+      const open = undoing ? openPlansOf(db, input.kind, input.id) : [];
+      let closed: CloseResult | null = null;
+      if (open.length > 0) {
+        try {
+          db.transaction(() => {
+            change();
+            throw new TriedOnly();
+          });
+        } catch (e) {
+          if (!(e instanceof TriedOnly)) throw e;
+        }
+        closed = await closeOpenPlans(planCtxOf(ctx as never), open, "withdrawn");
+        assertAllClosed(closed);
+      }
+      let made: ReturnType<typeof change>;
+      try {
+        made = change();
+      } catch (e) {
+        // The entry moved during the call to Portal. The owner reads what is true: the request is gone, the entry is not changed.
+        if (closed && closed.withdrawn > 0 && e instanceof TbError) throw new TbError(e.code, `${e.message} The request in Portal was taken back already, and this entry did not change.`, e.httpStatus);
+        throw e;
+      }
       return { colleague: await colleagueDetail(ctx, input.kind, input.id), transition: made ? { from: made.from, to: made.to, event: made.event } : null };
     },
   }),

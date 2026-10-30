@@ -3,9 +3,10 @@ import { type HandlerSpec, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { OP, type OpId, type PlanCancelInput, type PlanCancelOutput, type PlanGetInput, type PlanGetOutput, type PlanRetryInput, type PlanRetryOutput, type PlanSendInput, type PlanSendOutput } from "#kit";
 import { bannerAlerts } from "../plans/alerts.ts";
 import { planCtxOf } from "../plans/context.ts";
-import { closeOpenPlans, retryPlan } from "../plans/control.ts";
+import { assertAllClosed, closeOpenPlans, retryPlan } from "../plans/control.ts";
 import { kickPlans } from "../plans/jobs.ts";
 import { checkPlan, createPlan, getPlan, OPEN_SQL, openPlansOf, type Row } from "../plans/plan.ts";
+import { isOpenPlan } from "../plans/steps.ts";
 import { planView } from "../plans/view.ts";
 import { assertOwner } from "./lifecycle.ts";
 import { op } from "./op.ts";
@@ -23,7 +24,7 @@ export const planOps = {
       const pc = planCtxOf(ctx as never);
       const asked = { kind: input.kind, id: input.id, expectedRev: input.expectedRev, transfers: input.transfers, items: input.items, expiresInSec: input.expiresInSec, actor: { kind: "owner" as const, id: ctx.caller.id } };
       checkPlan(ctx.db, asked);
-      await closeOpenPlans(pc, openPlansOf(ctx.db, input.kind, input.id), "replaced");
+      assertAllClosed(await closeOpenPlans(pc, openPlansOf(ctx.db, input.kind, input.id), "replaced"));
       const made = createPlan(ctx.db, asked, pc.now());
       kickPlans(ctx as never);
       return { plans: viewAll(ctx.db, made.ids) };
@@ -50,7 +51,10 @@ export const planOps = {
       const finished = ["done", "reported"];
       const mine = rows.filter((p) => !finished.includes(String(p.state)));
       if (mine.length === 0) throw new TbError("plan_finished", "This plan is finished.", 409);
-      for (const p of mine) retryPlan(ctx.db, p, now);
+      // All parts or none: one transaction with no await.
+      ctx.db.transaction(() => {
+        for (const p of mine) retryPlan(ctx.db, p, now);
+      });
       kickPlans(ctx as never);
       return { plans: viewAll(ctx.db, rows.map((r) => String(r.id))) };
     },
@@ -59,8 +63,10 @@ export const planOps = {
     async run(input, ctx) {
       assertOwner(ctx.caller);
       const rows = groupOf(ctx.db, input.plan);
-      await closeOpenPlans(planCtxOf(ctx as never), rows.filter((p) => ["preparing", "waiting", "applying", "running", "partial"].includes(String(p.state))), "cancelled");
-      return { plans: viewAll(ctx.db, rows.map((r) => String(r.id))) };
+      const closed = await closeOpenPlans(planCtxOf(ctx as never), rows.filter((p) => isOpenPlan(String(p.state))), "cancelled");
+      // Nothing moved: an error, as for any other caller. Some parts moved: an answer, with the count and each part's state.
+      if (closed.withdrawn + closed.ended === 0) assertAllClosed(closed);
+      return { left: closed.left, plans: viewAll(ctx.db, rows.map((r) => String(r.id))) };
     },
   }),
 } satisfies Partial<Record<OpId, HandlerSpec>>;
