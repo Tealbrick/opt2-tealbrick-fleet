@@ -33,7 +33,8 @@ import {
 } from "#kit";
 import { assertFeedCaller, directoryFeed } from "../feed.ts";
 import { identitiesView } from "../identities.ts";
-import { leanDirectory, leanTeamGet, leanTeamsList } from "../lean.ts";
+import { leanDirectory, leanResolveSender, leanTeamGet, leanTeamsList } from "../lean.ts";
+import { setAgentMoved, setMembersMoved } from "../lifecycle/moved.ts";
 import * as store from "../store.ts";
 import { op } from "./op.ts";
 
@@ -64,7 +65,7 @@ export const directoryOps = {
   }),
   [OP.resolveSender]: op<ResolveSenderInput, ResolveSenderOutput>({
     async run(input, ctx) {
-      return store.resolveSender(ctx.db, input.handle);
+      return leanResolveSender(ctx.db, input.handle);
     },
   }),
   [OP.overviewGet]: op<OverviewGetInput, OverviewGetOutput>({
@@ -96,12 +97,12 @@ export const directoryOps = {
   }),
   [OP.membersSet]: op<MembersSetInput, MembersSetOutput>({
     async run(input, ctx) {
-      return { team: store.setMembers(ctx.db, input) };
+      return { team: setMembersMoved(ctx.db, input, { kind: "owner", id: ctx.caller.id }) };
     },
   }),
   [OP.agentSet]: op<AgentSetInput, AgentSetOutput>({
     async run(input, ctx) {
-      return { agent: store.setAgent(ctx.db, input) };
+      return { agent: setAgentMoved(ctx.db, input, { kind: "owner", id: ctx.caller.id }) };
     },
   }),
   [OP.identitiesView]: op<IdentitiesViewInput, IdentitiesViewOutput>({
