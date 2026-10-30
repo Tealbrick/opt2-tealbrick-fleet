@@ -6,6 +6,8 @@ export const OPEN_PLAN_STATES = ["preparing", "waiting", "applying", "running", 
 /** Nothing runs any more, and the owner can ask again with plan_retry. */
 export const ENDED_PLAN_STATES = ["done", "reported", "expired", "rejected", "withdrawn", "replaced", "cancelled", "stale", "failed", "lost"] as const;
 export type PlanState = (typeof OPEN_PLAN_STATES)[number] | (typeof ENDED_PLAN_STATES)[number];
+/** Ended, and the same plan may ask Core again. A stale, withdrawn or replaced plan may not: the entry moved on. */
+export const ASK_AGAIN_STATES: readonly string[] = ["expired", "rejected", "lost", "failed", "cancelled"];
 export const isOpenPlan = (s: string): boolean => (OPEN_PLAN_STATES as readonly string[]).includes(s);
 
 export type StepState =
