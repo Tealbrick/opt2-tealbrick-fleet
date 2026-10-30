@@ -26,7 +26,7 @@ function AgentsStep({ agents, decisions, onDecide, keepReasons, onKeepReason }: 
             value={decisions[a.id] ?? "stop"}
             onChange={(v) => onDecide(a.id, v)}
             options={[
-              { value: "stop", title: "Stop and remove", body: "The agent stops. Its access goes when you approve in Portal." },
+              { value: "stop", title: "Stop and remove", body: "Governance marks it to stop. It is paused and loses its access when you do the steps in Portal." },
               { value: "keep", title: "Keep running", body: KEEP_SENTENCE },
             ]}
           />
@@ -44,15 +44,17 @@ function AgentsStep({ agents, decisions, onDecide, keepReasons, onKeepReason }: 
 export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague; portalHref?: string; onClose: () => void; onChanged: () => void | Promise<void> }) {
   const [reason, setReason] = useState<Reason | "">("");
   const [note, setNote] = useState("");
-  const [decisions, setDecisions] = useState<Record<string, Decision>>({});
+  const [decisions, setDecisions] = useState<Record<string, Decision>>(() => Object.fromEntries(c.agents.filter((a) => a.keepRunning).map((a) => [a.id, "keep" as const])));
   const [keepReasons, setKeepReasons] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [step, setStep] = useState(0);
   const [result, setResult] = useState<Colleague | null>(null);
   const sent = useRef(false);
   const [capCount, setCapCount] = useState<number | null>(null);
   const person = c.kind === "person";
-  const agents = person ? c.agents : [];
+  // an agent already leaving or closed has its own state: no decision to make here
+  const agents = person ? c.agents.filter((a) => a.lifecycle === "proposed" || a.lifecycle === "active" || a.lifecycle === "suspended") : [];
   const keeps = agents.filter((a) => decisions[a.id] === "keep");
   const keepsNamed = keeps.every((a) => (keepReasons[a.id] ?? "").trim());
 
@@ -73,6 +75,9 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
     } catch (e) {
       const cap = stopCapOf(e);
       if (cap !== null) setCapCount(cap);
+      // the page was old: read it again, so the next try sends the new state
+      const code = (e as { code?: unknown } | null)?.code;
+      if (code === "lifecycle_stale" || code === "agent_not_owned") await onChanged();
       setFailure(lifecycleError(e, changeError).message);
       return false;
     } finally {
@@ -80,20 +85,26 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
     }
   };
 
-  const steps: FlowStep[] = [
+  const resultStep: FlowStep = {
+    name: "Result",
+    nextLabel: "Done",
+    render: () => (result ? <PlanResult colleague={result} portalHref={portalHref} showNotChanged={false} /> : <p className="tb-soft">Nothing has changed yet.</p>),
+  };
+  // once sent, only the result is left: going back could not change what was sent
+  const steps: FlowStep[] = result ? [resultStep] : [
     {
       name: "Why",
       canNext: Boolean(reason),
       render: () => (
         <div className="tb-stack">
-          <p className="tb-soft">{person ? `This stops ${c.name}'s agents and access in Teal Brick. It does not end their employment or their own logins.` : `This stops ${c.name} and removes its access in Teal Brick.`}</p>
+          <p className="tb-soft">{person ? `This marks ${c.name}'s agents to stop, and lists what to do in Portal to stop them and remove their access in Teal Brick. It does not end their employment or their own logins.` : `This marks ${c.name} to stop, and lists what to do in Portal to stop it and remove its access in Teal Brick.`}</p>
           <Field label="Reason">
             <Select placeholder="Choose a reason" options={reasonOptions("leaving")} value={reason} onValueChange={(v) => setReason(v as Reason)} />
           </Field>
           <Field label="Note" hint={NOTE_HINT}>
             <Textarea rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
           </Field>
-          <Notice tone="neutral">This stops now. There is no last-day date.</Notice>
+          <Notice tone="neutral">The mark takes effect now. There is no last-day date.</Notice>
         </div>
       ),
     },
@@ -138,12 +149,8 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
         </div>
       ),
     },
-    {
-      name: "Result",
-      nextLabel: "Done",
-      render: () => (result ? <PlanResult colleague={result} portalHref={portalHref} showNotChanged={false} /> : <p className="tb-soft">Nothing has changed yet.</p>),
-    },
+    resultStep,
   ];
 
-  return <StepFlow open size="lg" title={person ? `Stop ${c.name}'s agents and access` : `Stop and remove ${c.name}`} steps={steps} busy={busy} onClose={onClose} onFinish={onClose} />;
+  return <StepFlow open size="lg" step={Math.min(step, steps.length - 1)} onStepChange={setStep} title={person ? `Stop ${c.name}'s agents and access` : `Stop and remove ${c.name}`} steps={steps} busy={busy} onClose={onClose} onFinish={onClose} />;
 }

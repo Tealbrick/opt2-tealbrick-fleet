@@ -1,7 +1,7 @@
 // One person or agent (DESIGN-C380 §10): the one-line state, what no longer matches, what is left to do in Portal, the moves
 // the server allows (with the reason when one is blocked), and the history. Raw ids and the three axes sit under Details only.
 import { callOp } from "@opt2-tealbrick/miniapp-sdk/client";
-import { Button, ButtonLink, EmptyState, Notice, Table, Tag, TextLink } from "@opt2-tealbrick/ui";
+import { appName, Button, ButtonLink, EmptyState, Notice, Table, Tag, TextLink } from "@opt2-tealbrick/ui";
 import { useCallback, useEffect, useState } from "react";
 import type { ColleagueGetOutput } from "#kit";
 import { LoadFailed, Loading, PageHead, useLoad } from "../common.tsx";
@@ -66,14 +66,14 @@ function Subject({ kind, id, portalHref }: { kind: SubjectKind; id: string; port
               ))}
             </section>
           ) : null}
-          {c.plan || c.lifecycle !== "active" ? (
+          {c.plan ? (
             <section className="tb-stack" aria-label="What happens now">
               <h2 className="sub-head">What happens now</h2>
               <PlanResult colleague={c} portalHref={portalHref} showLine={false} />
             </section>
           ) : null}
           {c.kind === "person" && c.agents.length ? <OwnedAgents agents={c.agents} /> : null}
-          {c.grantsBefore?.length ? <GrantsBefore grants={c.grantsBefore} /> : null}
+          {c.grantsBefore?.length ? <GrantsBefore c={c} grants={c.grantsBefore} /> : null}
           <History items={c.history} />
           <details className="details">
             <summary>Details</summary>
@@ -177,7 +177,9 @@ function OwnedAgents({ agents }: { agents: Colleague["agents"] }) {
   );
 }
 
-function GrantsBefore({ grants }: { grants: NonNullable<Colleague["grantsBefore"]> }) {
+/** The snapshot holds ids: names come from this page, or the row says "An agent". */
+function GrantsBefore({ c, grants }: { c: Colleague; grants: NonNullable<Colleague["grantsBefore"]> }) {
+  const nameOf = (id: string) => (id === c.id ? c.name : (c.agents.find((a) => a.id === id)?.name ?? "An agent"));
   return (
     <section className="tb-stack" aria-label="What it could use before">
       <h2 className="sub-head">What it could use before</h2>
@@ -185,7 +187,7 @@ function GrantsBefore({ grants }: { grants: NonNullable<Colleague["grantsBefore"
       <ul className="ready">
         {grants.map((g) => (
           <li key={`${g.agent}:${g.product}`}>
-            <span>{`${g.agent}: ${g.product}`}</span>
+            <span>{`${nameOf(g.agent)}: ${appName(g.product)}`}</span>
             <Tag>{g.crud.join(", ")}</Tag>
           </li>
         ))}
@@ -195,7 +197,14 @@ function GrantsBefore({ grants }: { grants: NonNullable<Colleague["grantsBefore"
 }
 
 const FROM_TO: Record<string, string> = { proposed: "New, not reviewed", active: "Active", suspended: "Stopped", leaving: "Leaving", archived: "Closed", not_started: "Not started" };
-const stateWord = (s: string | null) => (s ? (FROM_TO[s] ?? s) : "");
+const stateWord = (s: string | null) => (s ? (FROM_TO[s] ?? "another state") : "");
+const changeWord = (h: Colleague["history"][number]) => {
+  if (h.kind === "moved") return "Owner or team changed";
+  if (h.kind === "migrated") return "Set by the update";
+  if (h.kind === "restored") return "Restored from a backup";
+  if (h.kind !== "transition") return "Changed";
+  return h.from ? `${stateWord(h.from)} to ${stateWord(h.to)}` : `Added as ${stateWord(h.to)}`;
+};
 
 function History({ items }: { items: Colleague["history"] }) {
   return (
@@ -217,7 +226,7 @@ function History({ items }: { items: Colleague["history"] }) {
             {items.map((h) => (
               <tr key={h.id}>
                 <td>{when(h.at)}</td>
-                <td>{h.kind === "transition" ? `${stateWord(h.from)} to ${stateWord(h.to)}` : h.kind === "moved" ? "Owner or team changed" : h.kind === "migrated" ? "Set by the update" : h.kind === "restored" ? "Restored from a backup" : "Changed"}</td>
+                <td>{changeWord(h)}</td>
                 <td>{h.actor === "owner" ? "You" : "Governance"}</td>
                 <td>
                   {h.reason ? reasonLabel(h.reason) : ""}

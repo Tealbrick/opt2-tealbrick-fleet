@@ -14,7 +14,7 @@ import * as r from "../src/reviews.ts";
 import * as store from "../src/store.ts";
 import { cleanText } from "../src/text.ts";
 import { AGENT_A, AGENT_B, migratedDb, migrationFiles, NOSTR } from "./helpers.ts";
-import { seed } from "./seed.ts";
+import { seed, seedOldSchema } from "./seed.ts";
 
 const RULES_PATH = new URL("./contracts/rules.0.4.1.manifest.json", import.meta.url);
 const RULES_SHA = "3e334f4715efed335e9736c50577445776f9d6b5d131746b894b0227ec0d1f41";
@@ -773,7 +773,7 @@ test("hold_outward_for_team: sent to Rules as a draft that Rules' schema accepts
 
 test("migration 0006 keeps every 0.2.4 proposal row and only widens the template CHECK", async () => {
   const db = migratedDb(5); // as 0.2.4 + 0005 left it
-  seed(db);
+  seedOldSchema(db);
   const rules = fakeRules();
   await send(db, rules, "hold_outward_for_agent", { agent: AGENT_A.id });
   rules.down = true;

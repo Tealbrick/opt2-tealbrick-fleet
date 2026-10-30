@@ -12,7 +12,7 @@ import { cachedAgentHandles, directoryFeed } from "../src/feed.ts";
 import * as store from "../src/store.ts";
 import { checkFeed, FEED_FIXTURES, FEED_SCHEMA, FEED_SCHEMA_AGENT_HANDLES } from "./feed-contract.ts";
 import { AGENT_A, AGENT_B, migratedDb, migrationFiles, NOSTR } from "./helpers.ts";
-import { seed } from "./seed.ts";
+import { seed, seedOldSchema } from "./seed.ts";
 
 const RULES = { type: "app", id: "ins_01J0000000000000000000000R", name: "Rules & Approvals", mode: null, product: "rules", listed: true };
 const log = { debug() {}, info() {}, warn() {}, error() {} };
@@ -209,6 +209,7 @@ test("timer: refreshes outside calls, first after a short delay, and stops on on
 
 test("feed: without accept the answer is byte-for-byte the old shape; with accept every agent carries handles", async () => {
   const db = seeded();
+  db.prepare("DELETE FROM fleet_handles WHERE handle = ?").run(BUZZ); // C380 S3-15: a handle a person also holds is dropped from the agent; here no person holds it
   const oldShape = JSON.stringify(await feedOp(db, {})); // before any handle exists
   await refreshAgentHandles(db, fakeConnect([[{ agent: AGENT_A.id, identity: SLACK_A }, { agent: AGENT_A.id, identity: BUZZ }]]).callApp);
   const plain = await feedOp(db, {});
@@ -275,13 +276,13 @@ test("C88: directory_feed and the fleet_facts hook never call Connect; no agent 
 
 test("migration 0005 applies on a 0.2.x database with data and keeps it", () => {
   const db = migratedDb(4);
-  seed(db);
+  seedOldSchema(db);
   const rev = store.revision(db);
   const teams = db.prepare("SELECT count(*) AS n FROM fleet_teams").get()?.n;
   // apply 0005 like the SDK does
   const full = migratedDb();
   assert.ok(full.prepare("SELECT name FROM sqlite_master WHERE name = 'fleet_agent_handles'").get(), "the table exists after all migrations");
-  for (const m of migrationFiles().slice(4)) db.exec(`BEGIN;\n${m.sql}\nCOMMIT;`);
+  for (const m of migrationFiles().slice(4, 7)) db.exec(`BEGIN;\n${m.sql}\nCOMMIT;`);
   assert.equal(store.revision(db), rev, "the migration does not move the revision");
   assert.equal(db.prepare("SELECT count(*) AS n FROM fleet_teams").get()?.n, teams);
   assert.equal(db.prepare("SELECT value FROM fleet_meta WHERE key = 'agent_handles_at'").get()?.value, 0);

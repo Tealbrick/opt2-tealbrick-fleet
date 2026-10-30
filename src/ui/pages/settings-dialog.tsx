@@ -24,7 +24,15 @@ export function SettingsDialog({ settings, onClose, onChanged }: { settings: Sum
   const save = async () => {
     setBusy(true);
     setFailure(null);
-    const input: SettingsSetInput = { coolingDays: dayCount, defaultOwner: owner === NONE ? null : owner };
+    // only what changed: an owner who is no longer active must not block a change of the cooling period
+    const input: SettingsSetInput = {};
+    if (dayCount !== settings.coolingDays) input.coolingDays = dayCount;
+    if (owner !== (settings.defaultOwner?.id ?? NONE)) input.defaultOwner = owner === NONE ? null : owner;
+    if (Object.keys(input).length === 0) {
+      setBusy(false);
+      onClose();
+      return;
+    }
     try {
       const out = await callOp<SettingsSetOutput>("settings_set", input);
       await onChanged();
@@ -71,7 +79,7 @@ export function SettingsDialog({ settings, onClose, onChanged }: { settings: Sum
             </Notice>
           ) : null}
           {people.error ? <LoadFailed message={people.error} retrying={people.loading} onRetry={() => void people.reload()} /> : null}
-          <Field label="Default owner" hint="This person takes every agent with no owner now, and each new agent. You can change the owner of one agent later.">
+          <Field label="Default owner" hint={(people.data?.total ?? 0) > (people.data?.items.length ?? 0) ? `This list shows ${people.data?.items.length} of ${people.data?.total} active people.` : "This person takes every agent with no owner now, and each new agent. You can change the owner of one agent later."}>
             <Select options={options} value={owner} onValueChange={setOwner} />
           </Field>
           <Field label="Cooling period, in days" hint="From 1 to 365. You can close an entry after this time, or earlier with a named reason." error={validDays ? undefined : "Enter a whole number from 1 to 365."}>

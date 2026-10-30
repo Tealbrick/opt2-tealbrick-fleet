@@ -50,11 +50,17 @@ const overview = {
 };
 
 // ── lifecycle pages (C380) ──────────────────────────────────────────────────
+/** The server's words (src/lifecycle/floor.ts): a scene must show what the server sends. */
+const FLOOR_TEXT = {
+  confirmed: "Rules has this change.",
+  not_confirmed: "Not confirmed: nothing may stop until you approve in Portal.",
+  not_installed: "Rules & Approvals adds an early stop. It is not installed, or it needs an update.",
+};
 const LIFECYCLE_OPS = ["summary_get", "colleagues_list", "colleague_get", "lifecycle_set", "settings_set", "overview_get", "reviews_list"];
-const FLOOR_PENDING = { state: "not_confirmed", text: "Not confirmed: nothing may stop until you approve in Portal.", version: "0.7.0-dev.1", feedRevision: 11, entries: 0, lastGateAt: "2026-10-30T15:58:00Z", gateNote: null };
-const FLOOR_CONFIRMED = { ...FLOOR_PENDING, state: "confirmed", text: "Rules has this change. With its hook on, these calls stop in about 2 minutes. Governance cannot see that switch: check it in Portal.", feedRevision: 13, entries: 1 };
-const FLOOR_ABSENT = { state: "not_installed", text: "Rules & Approvals adds an early stop. It is not installed.", version: null, feedRevision: null, entries: null, lastGateAt: null, gateNote: null };
-const FLOOR_OLD_GATE = { ...FLOOR_CONFIRMED, gateNote: "Rules has not checked a call since 29 Oct 2026, 08:00 UTC." };
+const FLOOR_PENDING = { state: "not_confirmed", text: FLOOR_TEXT.not_confirmed, version: "0.7.0-dev.1", feedRevision: 11, entries: 0, lastGateAt: "2026-10-30T15:58:00Z", gateNote: null };
+const FLOOR_CONFIRMED = { ...FLOOR_PENDING, state: "confirmed", text: FLOOR_TEXT.confirmed, feedRevision: 13, entries: 1 };
+const FLOOR_ABSENT = { state: "not_installed", text: FLOOR_TEXT.not_installed, version: null, feedRevision: null, entries: null, lastGateAt: null, gateNote: null };
+const FLOOR_OLD_GATE = { ...FLOOR_CONFIRMED, lastGateAt: "2026-10-29T08:00:00Z", gateNote: "Rules has not checked a call since 2026-10-29T08:00:00.000Z." };
 
 const summary = {
   generatedAt: "2026-10-30T16:00:00Z",
@@ -71,14 +77,14 @@ const summary = {
     { product: "knowledge", name: "Knowledge", state: "read", text: "Knowledge was read.", at: "2026-10-30T15:50:00Z" },
   ],
   readiness: [
-    { id: "rules", state: "ok", text: "Rules & Approvals 0.7.0 is installed. Check in Portal that its hook is on.", path: null },
+    { id: "rules", state: "ok", text: "Rules & Approvals can stop a call early.", path: null },
     { id: "consent", state: "missing", text: "See who has access is off for Governance.", path: null },
     { id: "owners", state: "missing", text: "1 agent has no owner.", path: "/people-and-agents" },
     { id: "alerts", state: "fallback", text: "Inbox is not installed. Governance shows a banner here and no message is sent.", path: null },
   ],
   stoppedToday: 0,
   stopCap: { limit: 5, windowMinutes: 10, used: 0 },
-  floor: FLOOR_PENDING,
+  floor: FLOOR_CONFIRMED,
   settings: { coolingDays: 30, defaultOwner: { id: ID.p, name: "Marco Rossi" }, stopCap: 5 },
 };
 const row = (over: Record<string, unknown>) => ({ kind: "agent", id: ID.a, name: "Henry", lifecycle: "active", effective: "active", runtime: "running", trust: "trusted", owner: { id: ID.p, name: "Marco Rossi" }, line: "Working", findings: [], validFrom: null, validUntil: null, keepRunning: false, at: "2026-10-30T09:00:00Z", ...over });
@@ -94,7 +100,7 @@ const NOT_CHANGED_SERVER = ["Their own logins, such as Slack, Google or a bank."
 const plan = {
   mode: "portal_link",
   applied: false,
-  headline: "Governance did not apply these. Do them in Portal.",
+  headline: "Not applied: do these in Portal",
   portalUrl: "https://portal.example.test/agents",
   steps: [{ id: "s1", agent: { id: ID.a, name: "Henry" }, action: "pause", text: "Pause Henry in Portal.", state: "open", proof: "Core says Henry is running." }],
   openSteps: 1,
@@ -144,12 +150,13 @@ const AGENT = `person-or-agent?kind=agent&id=${ID.a}`;
 const PERSON = `person-or-agent?kind=person&id=${ID.p}`;
 
 export const scenes: Scene[] = [
-  { name: "summary", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: pageOps, ready: "Ready to stop an agent?", expect: ["Could not be read", "Not installed", "Not confirmed"] },
+  { name: "summary", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: pageOps, ready: "Ready to stop an agent?", expect: ["Could not be read", "Not installed", "Rules has this change", "cannot see that switch"] },
+  { name: "summary-no-stop-open", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, summary_get: ok({ ...summary, agents: { ...summary.agents, stopping: 0 }, people: { ...summary.people, leaving: 0 } }) }, ready: "Ready to stop an agent?", forbid: ["Rules has this change"] },
   { name: "summary-empty", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, summary_get: ok({ ...summary, agents: { total: 0, running: 0, paused: 0, stopping: 0, notReviewed: 0 }, people: { total: 0, leaving: 0, suspended: 0 } }) }, ready: "Add your first person" },
   { name: "summary-loading", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, summary_get: hang }, ready: "Loading the summary" },
   { name: "summary-error", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, summary_get: fail("internal") }, ready: "Try again" },
   { name: "summary-no-rules", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, summary_get: ok({ ...summary, floor: FLOOR_ABSENT, stoppedToday: 2 }) }, ready: "It is not installed", expect: ["adds an early stop", "2 entries were stopped today"], forbid: ["Rules has this change"] },
-  { name: "summary-old-gate", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, summary_get: ok({ ...summary, floor: FLOOR_OLD_GATE }) }, ready: "has not checked a call" },
+  { name: "summary-old-gate", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, summary_get: ok({ ...summary, floor: FLOOR_OLD_GATE }) }, ready: "has not checked a call", expect: ["29 Oct 2026, 08:00 UTC"], forbid: ["2026-10-29T"] },
   {
     name: "summary-settings",
     path: "",
@@ -161,7 +168,7 @@ export const scenes: Scene[] = [
     expect: ["Default owner", "Cooling period"],
   },
   { name: "feature-off", path: "", personOps: ["overview_get", "reviews_list"], ops: { ...shell, overview_get: ok(overview) }, ready: "Support", forbid: ["Summary", "People and agents", "Stop now", "See what would stop"] },
-  { name: "everyone", path: "people-and-agents", personOps: LIFECYCLE_OPS, strict: true, ops: pageOps, ready: "Marco Rossi", expect: ["New: working, not reviewed", "Stop now", "No owner", "2 differences"], forbid: ["See what would stop"] },
+  { name: "everyone", path: "people-and-agents", personOps: LIFECYCLE_OPS, strict: true, ops: pageOps, ready: "Marco Rossi", expect: ["New: working, not reviewed", "Stop now", "No owner", "Name an owner. And 1 more."], forbid: ["See what would stop"] },
   { name: "everyone-empty", path: "people-and-agents", personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, colleagues_list: ok({ items: [], nextCursor: null, total: 0 }) }, ready: "Add your first person" },
   { name: "everyone-loading", path: "people-and-agents", personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, colleagues_list: hang }, ready: "Loading people and agents" },
   { name: "everyone-error", path: "people-and-agents", personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, colleagues_list: fail("internal") }, ready: "Try again" },
@@ -278,7 +285,7 @@ export const scenes: Scene[] = [
     path: PERSON,
     personOps: LIFECYCLE_OPS,
     strict: true,
-    ops: { ...pageOps, colleague_get: ok(personDetail({ lifecycle: "archived", effective: "archived", line: "Closed", agents: [], actions: [{ to: "proposed", label: "Bring back", blocked: null, needsWaive: false }], grantsBefore: [{ agent: "Henry", product: "Knowledge", crud: ["read", "write"] }] })) },
+    ops: { ...pageOps, colleague_get: ok(personDetail({ lifecycle: "archived", effective: "archived", line: "Closed", agents: [], actions: [{ to: "proposed", label: "Bring back", blocked: null, needsWaive: false }], grantsBefore: [{ agent: ID.a, product: "knowledge", crud: ["read", "write"] }] })) },
     ready: "History",
     steps: (p) => button(p, "Bring back"),
     expect: ["This restores nothing"],
@@ -303,7 +310,7 @@ export const scenes: Scene[] = [
       await dialog.getByRole("button", { name: "Stop", exact: true }).click();
       await dialog.getByText("Not applied: do these in Portal").waitFor();
     },
-    expect: i === 0 ? ["This stops now"] : i === 2 ? ["Not changed", "Their own logins", "The next screen says"] : i === 3 ? ["Not applied: do these in Portal"] : [],
+    expect: i === 0 ? ["The mark takes effect now"] : i === 2 ? ["Not changed", "Their own logins", "The next screen says"] : i === 3 ? ["Not applied: do these in Portal"] : [],
     forbid: ["last day"],
   })),
   { name: "people-old", path: "people", ops: { ...shell, overview_get: ok(overview) }, ready: "Marco Rossi" },
