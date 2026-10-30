@@ -137,7 +137,7 @@ test("members, agent owner and resolve_sender for a Buzz npub (J3 sender → per
   // C380: an open stop must end first (a delete would lift the floor on the handles and the owned agents' stop)
   assert.throws(() => store.deletePerson(db, ann.id), (e: TbError) => e.code === "lifecycle_open" && e.httpStatus === 409);
   db.prepare("UPDATE fleet_agents SET keep_running = 1, keep_reason = 'test' WHERE id = ?").run(AGENT_A.id);
-  transition(db, { kind: "person", id: ann.id, to: "archived", reason: "left", waive: "test", actor: { kind: "owner", id: null } });
+  transition(db, { kind: "person", id: ann.id, to: "proposed", reason: "mistake", actor: { kind: "owner", id: null } });
   // deleting the person clears ownership and memberships
   assert.equal(store.deletePerson(db, ann.id), true);
   assert.equal(store.getAgent(db, AGENT_A.id).owner, null);

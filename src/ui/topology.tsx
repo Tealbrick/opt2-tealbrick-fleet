@@ -154,7 +154,7 @@ function Inspector({ node, view, byId, layer, portalHref }: { node: Node; view: 
           );
         })}
       </dl>
-      {node.changedSinceReview ? <Notice tone="needs-you">It changed since the last review. Open Trust reviews to look at it again.</Notice> : null}
+      {node.changedSinceReview ? <Notice tone="needs-you">It changed since the last review. Open Reviews to look at it again.</Notice> : null}
       {mine.length === 0 ? <p className="tb-soft">No relationships in this layer.</p> : null}
       {layer === "access" && node.kind === "agent" ? (
         <p className="tb-soft page-note">
@@ -184,15 +184,15 @@ export function TopologyPage({ portalHref }: { portalHref?: string } = {}) {
 
   if (data === null)
     return (
-      <section className="app-page" aria-label="Topology">
-        <PageHead title="Topology" />
-        {error ? <LoadFailed message={error} retrying={loading} onRetry={() => void reload()} /> : <Loading what="the topology" />}
+      <section className="app-page" aria-label="Who owns what">
+        <PageHead title="Who owns what" />
+        {error ? <LoadFailed message={error} retrying={loading} onRetry={() => void reload()} /> : <Loading what="who owns what" />}
       </section>
     );
   if ("tooLarge" in data)
     return (
-      <section className="app-page" aria-label="Topology">
-        <PageHead title="Topology" />
+      <section className="app-page" aria-label="Who owns what">
+        <PageHead title="Who owns what" />
         <Notice tone="needs-you" role="alert">
           This workspace is too big to list in one answer: more than 3,000 people, agents and teams, or more than 10,000 relationships. The Teams, People and Agents pages still list everything.
         </Notice>
@@ -205,9 +205,9 @@ export function TopologyPage({ portalHref }: { portalHref?: string } = {}) {
   const edges = view?.edges ?? [];
   const chosen = selected ? byId.get(selected) : undefined;
   return (
-    <section className="app-page" aria-label="Topology">
+    <section className="app-page" aria-label="Who owns what">
       <PageHead
-        title="Topology"
+        title="Who owns what"
         lede="Who owns which agent, who is in which team, who your agents write to, and which apps they may use. Only you see this page."
         action={
           <Button className="no-print" onClick={() => globalThis.print()}>
@@ -216,7 +216,7 @@ export function TopologyPage({ portalHref }: { portalHref?: string } = {}) {
         }
       />
       {error ? <LoadFailed message={error} retrying={loading} onRetry={() => void reload()} /> : null}
-      <p className="print-only">{`Governance topology, printed ${day(new Date().toISOString())}`}</p>
+      <p className="print-only">{`Governance: who owns what, printed ${day(new Date().toISOString())}`}</p>
       <div className="toolbar no-print">
         <Segmented<Layer>
           label="Layer"

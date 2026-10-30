@@ -141,7 +141,7 @@ export function assertFeedCaller(caller: { type: string; product?: unknown; list
  * carry `floor`. A reader replaces its floor entries from a full read, so a stopped row stays listed. Time changes `not_started` only with a
  * revision bump (the date timer ends the date), so `unchanged` stays true to its word.
  */
-export function directoryFeed(db: Db, input: FeedInput, warn?: Warn, now = Date.now()): DirectoryFeed {
+export function directoryFeed(db: Db, input: FeedInput, warn?: Warn): DirectoryFeed {
   const rev = revision(db);
   if (input.sinceRevision !== undefined && input.sinceRevision === rev) return { v: 1, revision: rev, unchanged: true };
   // C373 §3: agent handles only when the reader asks for them; without `accept` the answer is exactly the old shape
@@ -177,7 +177,7 @@ export function directoryFeed(db: Db, input: FeedInput, warn?: Warn, now = Date.
     if (lifecycle) {
       const own = (c.lifecycle ?? null) as Lifecycle | null;
       ownerLifecycle.set(id, own);
-      const effective = own === null ? null : effectivePerson({ lifecycle: own, validFrom: c.valid_from === null ? null : Number(c.valid_from) }, now);
+      const effective = own === null ? null : effectivePerson({ lifecycle: own, validFrom: c.valid_from === null ? null : Number(c.valid_from) });
       if (effective !== null) contact.lifecycle = effective;
       contact.floor = floorOf(effective, contact.trust);
     }
@@ -213,7 +213,7 @@ export function directoryFeed(db: Db, input: FeedInput, warn?: Warn, now = Date.
       agent.handles = list;
     }
     if (lifecycle) {
-      const effective = effectiveAgent({ lifecycle: a.lifecycle as Lifecycle, validFrom: a.valid_from === null ? null : Number(a.valid_from), keepRunning: Number(a.keep_running) === 1 }, a.owner_id === null ? null : (ownerLifecycle.get(String(a.owner_id)) ?? null), now);
+      const effective = effectiveAgent({ lifecycle: a.lifecycle as Lifecycle, validFrom: a.valid_from === null ? null : Number(a.valid_from), keepRunning: Number(a.keep_running) === 1 }, a.owner_id === null ? null : (ownerLifecycle.get(String(a.owner_id)) ?? null));
       agent.lifecycle = effective;
       agent.floor = floorOf(effective, agent.trust, a.migrated_note === "no_card");
     }

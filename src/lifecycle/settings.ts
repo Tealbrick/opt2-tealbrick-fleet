@@ -12,6 +12,8 @@ const write = (db: Db, key: string, value: string): void => {
   db.prepare("INSERT INTO fleet_settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(key, value);
 };
 
+const WORKSPACE = { kind: "workspace", id: "", name: "Governance" };
+
 export const coolingDays = (db: Db): number => Number(read(db, "cooling_days") ?? 30);
 export const stopCap = (db: Db): number => Number(read(db, "stop_cap") ?? 5);
 
@@ -54,13 +56,18 @@ export function setSettings(db: Db, input: { coolingDays?: number | undefined; d
     if (input.coolingDays !== undefined) {
       if (!Number.isInteger(input.coolingDays) || input.coolingDays < 1 || input.coolingDays > 365) fail("input_invalid", "The cooling period must be 1 to 365 days.", 400);
       write(db, "cooling_days", String(input.coolingDays));
+      appendEvent(db, { subject: WORKSPACE, kind: "changed", actor, note: `Cooling period set to ${input.coolingDays} days.`, at: now });
     }
-    if (input.defaultOwner === null) db.prepare("DELETE FROM fleet_settings WHERE key = 'default_owner'").run();
+    if (input.defaultOwner === null) {
+      db.prepare("DELETE FROM fleet_settings WHERE key = 'default_owner'").run();
+      appendEvent(db, { subject: WORKSPACE, kind: "changed", actor, note: "Default owner removed.", at: now });
+    }
     else if (input.defaultOwner !== undefined) {
-      const p = db.prepare("SELECT kind, lifecycle FROM fleet_people WHERE id = ?").get(input.defaultOwner) ?? fail("person_not_found", "The default owner is not in the directory.", 404);
+      const p = db.prepare("SELECT name, kind, lifecycle FROM fleet_people WHERE id = ?").get(input.defaultOwner) ?? fail("person_not_found", "The default owner is not in the directory.", 404);
       if (p.kind !== "person") fail("owner_not_person", "The owner must be a person, not an outside agent.", 400);
       if (p.lifecycle !== "active") fail("owner_inactive", "The default owner must be an active person.", 409);
       write(db, "default_owner", input.defaultOwner);
+      appendEvent(db, { subject: WORKSPACE, kind: "changed", actor, note: `Default owner set to ${String(p.name)}.`.slice(0, 500), at: now });
     }
     const assigned = input.defaultOwner ? assignDefaultOwner(db, actor, now) : 0;
     return { settings: getSettings(db), assigned };

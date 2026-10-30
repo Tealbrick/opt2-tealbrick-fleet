@@ -178,7 +178,7 @@ describe("TopologyGraph", () => {
     const svg = m.host.querySelector("svg.topo-svg");
     assert.ok(svg);
     assert.equal(svg.getAttribute("role"), "group");
-    assert.equal(svg.getAttribute("aria-label"), "Topology graph, read only: 2 people, 3 agents, 2 teams, 0 apps, 3 outside contacts, 10 links.");
+    assert.equal(svg.getAttribute("aria-label"), "Who owns what, graph, read only: 2 people, 3 agents, 2 teams, 0 apps, 3 outside contacts, 10 links.");
     assert.equal(cards(m.host).length, 8);
     assert.deepEqual(
       [...m.host.querySelectorAll("g.g-region")].map((r) => [r.getAttribute("class"), r.getAttribute("data-id")]),
