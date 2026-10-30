@@ -13,8 +13,6 @@ import { DirectoryPage } from "./pages/directory.tsx";
 import { EveryonePage } from "./pages/everyone.tsx";
 import { FEATURES } from "./pages/features.ts";
 import { Identities } from "./pages/identities.tsx";
-import { SubjectPage } from "./pages/subject.tsx";
-import { SUBJECT_PATH } from "./pages/subject-link.ts";
 import { SummaryPage } from "./pages/summary.tsx";
 import { loadReviews, ReviewsPage, reviewBadge } from "./reviews.tsx";
 import { HoldsPage, portalHref, useHoldList, useNav } from "./standard.tsx";
@@ -27,7 +25,7 @@ const STILLS = new URL("./stills/", import.meta.url).href;
 /** Shell page id → path under the base `/a/fleet/`. Teams is the launch page and the configure page (manifest `ui.launchPath` = `ui.configurePath` = "/"). */
 const OLD_ROUTES = { teams: "", topology: "topology", access: "access", reviews: "reviews", rules: "contact-rules", people: "people", agents: "agents", identities: "identities", holds: "holds" } as const;
 /** With the lifecycle ops (C380): Summary is the launch page; /people and /agents stay as routes and leave the nav for one release. */
-const NEW_ROUTES = { ...OLD_ROUTES, summary: "", everyone: "people-and-agents", subject: SUBJECT_PATH, teams: "teams" } as const;
+const NEW_ROUTES = { ...OLD_ROUTES, summary: "", everyone: "people-and-agents", teams: "teams" } as const;
 const ROUTES: Readonly<Record<string, string>> = FEATURES.lifecycle ? NEW_ROUTES : OLD_ROUTES;
 const LAUNCH = FEATURES.lifecycle ? "summary" : "teams";
 const OLD_PAGES = [
@@ -73,7 +71,7 @@ export function App() {
       art={appArt("fleet", STILLS)}
       portalHref={portal}
       pages={pages}
-      current={nav.page === "subject" ? "everyone" : nav.page}
+      current={nav.page}
       onNavigate={nav.go}
       pageHref={nav.href}
       actions={
@@ -107,8 +105,6 @@ export function App() {
         <SummaryPage />
       ) : nav.page === "everyone" ? (
         <EveryonePage portalHref={portalLink} />
-      ) : nav.page === "subject" ? (
-        <SubjectPage portalHref={portalLink} />
       ) : nav.page === "holds" ? (
         <HoldsPage list={holds} only={nav.hold} empty="No calls wait for your approval." />
       ) : nav.page === "topology" ? (

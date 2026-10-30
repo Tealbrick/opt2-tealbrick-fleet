@@ -2,13 +2,11 @@
 // and the moves that fit. "See what would stop" appears only when the app has `plan_preview`. Outside agents stay on the
 // People page: they have no lifecycle.
 import { callOp } from "@opt2-tealbrick/miniapp-sdk/client";
-import { Button, ButtonLink, EmptyState, Segmented, Table, Tag, TextLink } from "@opt2-tealbrick/ui";
+import { Button, ButtonLink, EmptyState, Segmented, Table, Tag } from "@opt2-tealbrick/ui";
 import { useCallback, useState } from "react";
 import type { ColleaguesListOutput } from "#kit";
 import { LoadFailed, Loading, PageHead, useLoad } from "../common.tsx";
-import { FEATURES } from "./features.ts";
 import { StopNow } from "./stop-now.tsx";
-import { openSubject, subjectHref } from "./subject-link.ts";
 import { when } from "./words.ts";
 
 export type Row = ColleaguesListOutput["items"][number];
@@ -82,15 +80,7 @@ export function EveryonePage({ portalHref }: { portalHref?: string }) {
                 <tr key={`${r.kind}:${r.id}`}>
                   <td>
                     <span className="row-name">
-                    <TextLink
-                      href={subjectHref(r.kind, r.id)}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        openSubject(r.kind, r.id);
-                      }}
-                    >
-                      {r.name}
-                    </TextLink>
+                    <strong>{r.name}</strong>
                     <span className="tb-hint">{r.kind === "agent" ? "Agent" : "Person"}</span>
                     </span>
                   </td>
@@ -105,13 +95,8 @@ export function EveryonePage({ portalHref }: { portalHref?: string }) {
                     ) : null}
                   </td>
                   <td className={r.kind === "agent" ? undefined : "is-empty"}>{r.kind === "agent" ? (r.owner?.name ?? "No owner") : ""}</td>
-                  <td className={FEATURES.preview || canStop(r) ? undefined : "is-empty"}>
+                  <td className={canStop(r) ? undefined : "is-empty"}>
                     <span className="tb-row tight row-actions">
-                      {FEATURES.preview ? (
-                        <Button size="sm" onClick={() => openSubject(r.kind, r.id, "preview")}>
-                          See what would stop
-                        </Button>
-                      ) : null}
                       {canStop(r) ? (
                         <Button size="sm" variant="danger" onClick={() => setStop(r)}>
                           Stop now
