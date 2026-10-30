@@ -43,6 +43,16 @@ Governance (0.3.1; formerly Organization Plane) is the workspace directory and i
 - **Record:** `fleet_lifecycle_events` is append-only by trigger, with a hash chain from the first row after the migration. It is evidence of what this app wrote, no more: the app owns the file. A restore drops later rows, and a `restored` row says so.
 - **Rollback.** E3 to 0.3.2 restores the data and drops later events. Revokes done in Core or a store stay. The 0.3.2 feed has no `floor` key, and Rules dev keeps its entries (fail closed): the owner clears them on the Rules page. A restore that stays on this version follows the feed.
 
+## Roles (C380 T2-a, `src/roles/`, migration 0011, DESIGN-C380 §6)
+
+- **A role is a record.** It allows and stops nothing by itself. A Rules rule that names it (`match.callerRoles`, Rules 0.7.0-dev.N) is what uses it, with the semantics of `callerTeams`: deny and hold see every holder, allow sees active holders, an app caller never matches, acting agents narrow only. Ending an assignment removes no Portal grant; the form says so.
+- `roles.ts` is the only writer of `fleet_roles` and `fleet_role_assignments` (a test scans `src/`). An assignment: role, subject (person or agent, never an outside agent, not one that is leaving or closed), a reason from a list, optional dates, one open per role and subject. `checkAssignable` is the one place that checks an assignment (T2-c adds its check there).
+- **Held** means started and not ended. `expiry.ts` (30 s) ends an assignment whose end date passed and starts one whose start date passed, with no action by anyone. Two ticks must agree, one synchronous transaction per row (no await), the revision moves, one event on the subject in `fleet_lifecycle_events` (kind `changed`, no stop state, so the stop cap does not count it). Time alone never changes an answer at one revision.
+- T7, `person_delete` and a change to outside agent end the open assignments of the subject (`endAssignmentsOf`).
+- **Feed:** `accept: ["roles"]` adds top-level `roles`: `[{id, name, members: [{kind: agent|contact, id}]}]`, archived roles left out, members the feed does not list left out. It is present (maybe empty) exactly when asked, so a reader can tell "no roles" from "a Governance that knows no roles". Caps: 200 roles, 4000 members each (503 `feed_too_large` beyond).
+- **Words:** with Governance down, a role allow lasts up to 10 minutes (Rules keeps its copy that long). Archiving a role makes a rule that names it match no one.
+- **UI:** the Roles page is built and reachable only when `FEATURES.roles` is true: the ops exist and the QA rows R1-R4 passed (`ROLES_ROWS_PASSED` in `src/ui/pages/features.ts`). Until then it is not in the navigation and has no route.
+
 ## Inventory (C380 B9b, `src/access/`, spec 0.1.89 `tb.access/1`)
 
 - `items.ts`: one `access_list` page, checked by hand (`test/access-reader.test.ts` runs the spec's fixtures through parser and schema), the digest computed again with the product called, the shadow copy `fleet_access_items`. Never authority.
