@@ -5358,6 +5358,35 @@
       "idempotency": "supported",
       "receipt": false,
       "audience": "person"
+    },
+    {
+      "id": "reconcile_now",
+      "title": "Check now",
+      "description": "Read each app now and compare what it reports with this directory. It changes nothing in any app. The answer says if a new check started; a running check is enough. Owner only.",
+      "crud": [
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "supported",
+      "receipt": false,
+      "audience": "person",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "started"
+        ],
+        "properties": {
+          "started": {
+            "type": "boolean"
+          }
+        }
+      }
     }
   ],
   "hooks": [
