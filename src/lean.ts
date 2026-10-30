@@ -2,7 +2,8 @@
 // roles, team structure, owner and trust only. Never an email, a channel handle, a tag, an identity, a mode or a
 // review reason. Every query here selects the columns it returns, so a new column of a table cannot leak by accident.
 import type { Db } from "@opt2-tealbrick/miniapp-sdk";
-import { type AgentStatus, fail, MAX_TEAMS_PER_ANSWER, type PersonStatus, type Role, revision } from "./store.ts";
+import { leanPersonStatus } from "./lifecycle/states.ts";
+import { type AgentStatus, fail, MAX_TEAMS_PER_ANSWER, type PersonStatus, type Resolved, type Role, resolveSender, revision, teamsOf } from "./store.ts";
 import type { ContactKind, Trust } from "./trust.ts";
 
 export type MemberKind = "person" | "outside_agent" | "agent";
@@ -148,7 +149,7 @@ export function leanDirectory(db: Db): LeanDirectory {
       .all()
       .map((r) => toTeam(r, members.get(String(r.id)) ?? [])),
     people: db
-      .prepare("SELECT id, name, kind, title, status, trust, updated_at FROM fleet_people ORDER BY name COLLATE NOCASE, id")
+      .prepare("SELECT id, name, kind, title, status, lifecycle, trust, updated_at FROM fleet_people ORDER BY name COLLATE NOCASE, id")
       .all()
       .map(
         (r): LeanPerson => ({
@@ -156,7 +157,7 @@ export function leanDirectory(db: Db): LeanDirectory {
           name: String(r.name),
           kind: r.kind as ContactKind,
           title: String(r.title),
-          status: r.status as PersonStatus,
+          status: leanPersonStatus(r.status as PersonStatus, r.lifecycle as string | null),
           trust: r.trust as Trust,
           teams: refs.get(`person:${r.id}`) ?? [],
           updatedAt: iso(r.updated_at),
@@ -177,5 +178,24 @@ export function leanDirectory(db: Db): LeanDirectory {
           updatedAt: iso(r.updated_at),
         }),
       ),
+  };
+}
+
+/**
+ * resolve_sender as an agent reads it (C380, S2-8): `departed` from `archived` only, so no agent learns of a leaver before the person
+ * knows. The teams follow what the agent is told. The hook facts and the feed keep the real status: they narrow what Rules allows.
+ */
+export function leanResolveSender(db: Db, handle: string): Resolved {
+  const found = resolveSender(db, handle);
+  const c = found.contact;
+  if (!c) return found;
+  const lifecycle = db.prepare("SELECT lifecycle FROM fleet_people WHERE id = ?").get(c.id)?.lifecycle as string | null | undefined;
+  const status = leanPersonStatus(c.status, lifecycle ?? null);
+  if (status === c.status) return found;
+  return {
+    found: true,
+    person: found.person ? { ...found.person, status } : null,
+    contact: { ...c, status },
+    teams: status === "active" && c.trust !== "blocked" ? teamsOf(db, "person", c.id).slice(0, MAX_TEAMS_PER_ANSWER) : [],
   };
 }

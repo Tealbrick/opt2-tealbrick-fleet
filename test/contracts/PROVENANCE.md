@@ -63,3 +63,11 @@ copy of this file for its contract test (Rules lead, 2026-10-27). It replaces no
 - `access.list_in.1.json`: `dc1745d9a0bd6d83fdd672fbc14e119f9637b19537162e77455b246676535c85`
 - `access.list_out.1.json`: `efc7e1389eb7a7eac55e3149c2ac111959a5664ebaccf630a0155668c70b5c49`
 - `access.digest.1.json`: `e4db19dd894802348b9e87c2251d85383fb2e4f47e90b26dde76c42e17b42daa`
+
+## fleet.directory_feed/1 with lifecycle and floor (C380, spec 0.1.89)
+
+`fleet.directory_feed.1.lifecycle.schema.json` and `fleet.directory_feed.1.lifecycle.json` are byte copies. Do not edit them. `test/lifecycle.test.ts` fails when a file no longer matches the sha256 below.
+
+- Source repo: `Tealbrick/opt2-tealbrick-specs`, paths `packages/spec/schemas/contracts/` and `packages/spec/examples/contracts/`, tag `spec-v0.1.89`.
+- Schema sha256: `35ebfd9f49eebeebc3c84a0ea686ab4efb18503953599828bdfd94f76734695f`
+- Fixture sha256: `3c0004d98b361bf629fb6489e655516e3fbf5123b1a1adb9d84bf62d3a17e1b2`

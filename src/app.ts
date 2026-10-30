@@ -8,6 +8,9 @@ import { type AppDefinition, defineApp, type HandlerSpec, type HookHandler, type
 import type { OpId } from "#kit";
 import { startAgentHandlesTimer } from "./agent-handles.ts";
 import { factsAnswer } from "./facts.ts";
+import { noteRestore } from "./lifecycle/events.ts";
+import { assignDefaultOwner } from "./lifecycle/settings.ts";
+import { startDatesTimer } from "./lifecycle/validity.ts";
 import { directoryOps } from "./ops/directory.ts";
 import { proposalOps } from "./ops/proposals.ts";
 import { reviewOps } from "./ops/reviews.ts";
@@ -38,6 +41,7 @@ export const hooks: Record<string, HookHandler> = {
 
 let stopTimer: (() => void) | null = null;
 let stopHandlesTimer: (() => void) | null = null;
+let stopDatesTimer: (() => void) | null = null;
 
 export const definition: SdkAppDefinition = {
   manifest,
@@ -45,7 +49,10 @@ export const definition: SdkAppDefinition = {
   hooks,
   // Every 60 s (C85): the status of drafts sent to Rules. draft_status only; the timer never submits a draft.
   // Every 60 s (C373 §3): the agent handles cache from Connect identities_list, outside every call (read only).
+  // Every 60 s (C380 §2): end and start dates; two ticks must agree. It calls nothing.
   async onStart(ctx) {
+    noteRestore(ctx.db, Date.now());
+    stopDatesTimer = startDatesTimer(ctx.db, ctx.log);
     stopTimer = startProposalTimer(ctx.db, ctx.callApp, ctx.log);
     stopHandlesTimer = startAgentHandlesTimer(ctx.db, ctx.callApp, ctx.log);
   },
@@ -54,13 +61,18 @@ export const definition: SdkAppDefinition = {
     stopTimer = null;
     stopHandlesTimer?.();
     stopHandlesTimer = null;
+    stopDatesTimer?.();
+    stopDatesTimer = null;
   },
   migrations: migrationsDir,
   events: {
     // needsAgentDirectory: the slice lists every workspace agent; the full list arrives on every change (SDK 0.1.13).
     async agentsChanged(agents, ctx) {
       // one transaction: the agents are stored and a new agent gets its review request (when the policy says so)
-      ctx.db.transaction(() => reviews.requestForNewAgents(ctx.db, store.syncAgents(ctx.db, agents)));
+      ctx.db.transaction(() => {
+        reviews.requestForNewAgents(ctx.db, store.syncAgents(ctx.db, agents));
+        assignDefaultOwner(ctx.db, { kind: "system", id: null });
+      });
     },
   },
 };
