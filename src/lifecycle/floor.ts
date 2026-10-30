@@ -37,7 +37,7 @@ export function floorView(read: FloorStatus | Exclude<FloorState, "confirmed" | 
   if (typeof read === "string") return empty(read);
   const state: FloorState = read.feedRevision >= rev ? "confirmed" : "not_confirmed";
   const gateMs = read.lastGateAt === null ? Number.NaN : Date.parse(read.lastGateAt);
-  const gateNote = agentsRun && Number.isFinite(gateMs) && gateMs + GATE_STALE_MS < now ? `Rules has not checked a call since ${new Date(gateMs).toISOString()}.` : null;
+  const gateNote = !agentsRun ? null : read.lastGateAt === null ? "Rules has not checked a call yet." : Number.isFinite(gateMs) && gateMs + GATE_STALE_MS < now ? `Rules has not checked a call since ${new Date(gateMs).toISOString()}.` : null;
   return { state, text: FLOOR_TEXT[state], version: read.version, feedRevision: read.feedRevision, entries: read.entries, lastGateAt: read.lastGateAt, gateNote };
 }
 
@@ -46,7 +46,7 @@ const isStatus = (o: unknown): o is FloorStatus => {
   return !!r && typeof r.version === "string" && Number.isInteger(r.feedRevision) && Number.isInteger(r.entries) && (r.lastGateAt === null || typeof r.lastGateAt === "string");
 };
 
-const OLDER_CODES = new Set(["unknown_tool", "unknown_op", "op_not_found", "not_found"]);
+const OLDER_CODES = new Set(["unknown_tool", "unknown_op"]);
 
 export interface FloorContext {
   companionTargets(): string[];
