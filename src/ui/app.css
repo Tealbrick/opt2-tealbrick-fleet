@@ -65,3 +65,9 @@
 .details > .kv { margin-top: var(--tb-s3); overflow-wrap: anywhere; }
 .flow-agent { display: grid; gap: 2px; font-size: 1.0625rem; font-weight: var(--tb-weight-head); line-height: 22px; overflow-wrap: anywhere; }
 .flow-agent .tb-hint { font-weight: var(--tb-weight-nav); }
+.store { display: grid; gap: var(--tb-s2); padding-bottom: var(--tb-s3); box-shadow: var(--tb-hair-bottom); }
+.store-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; }
+.store-head h3 { font-size: 1.0625rem; font-weight: var(--tb-weight-head); line-height: 22px; }
+.store-items > summary { cursor: pointer; font-weight: var(--tb-weight-label); padding: 4px 0; }
+.store-items > .ready { margin-top: var(--tb-s2); }
+.store-who { flex-basis: 100%; }

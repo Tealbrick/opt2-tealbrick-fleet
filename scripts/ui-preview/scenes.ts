@@ -147,6 +147,32 @@ async function pick(page: Page, label: string, option: string) {
   await page.getByRole("option", { name: option }).click();
 }
 const AGENT = `person-or-agent?kind=agent&id=${ID.a}`;
+const INVENTORY_OPS = [...LIFECYCLE_OPS, "plan_preview", "findings_list", "exception_set", "reconcile_now"];
+const item = (over: Record<string, unknown>) => ({ id: "x:1", kind: "routine", label: "Morning summary routine", level: "use", direction: "held_by", state: "active", effect: "stops", who: null, ...over });
+const previewOut = {
+  subject: { kind: "agent", id: ID.a, name: "Henry" },
+  asOf: "2026-10-30T16:00:00Z",
+  unlinkedAccounts: 3,
+  stores: [
+    { product: "core", name: "Portal", state: "read", text: null, at: "2026-10-30T16:00:00Z", notShown: [], items: [item({ id: "core:1", kind: "edge", label: "Can use Knowledge, Task Board" }), item({ id: "core:2", kind: "connection", label: "1 connection" })] },
+    { product: "connect", name: "Connect", state: "read", text: null, at: "2026-10-30T16:00:00Z", notShown: [{ kind: "held_call", reason: "calls waiting for approval." }], items: [item({ id: "c:1", kind: "account_as_itself", label: "Slack account as itself" }), item({ id: "c:2", kind: "account_as_me", label: "Google account as Marco", effect: "manual", who: "You disconnect this in Connect." }), item({ id: "c:3", kind: "buzz_identity", label: "Buzz identity", effect: "stays" })] },
+    { product: "knowledge", name: "Knowledge", state: "read", text: null, at: "2026-10-30T16:00:00Z", notShown: [], items: [] },
+    { product: "evolution", name: "Evolution", state: "not_read", text: "Evolution did not answer. This is not the same as nothing.", at: null, notShown: [], items: [] },
+    { product: "kanban", name: "Task Board", state: "not_installed", text: null, at: null, notShown: [], items: [] },
+    { product: "rules", name: "Rules & Approvals", state: "refused", text: "A rule refused this read: Audit only.", at: null, notShown: [], items: [] },
+  ],
+};
+const findingsOut = {
+  lastSweepAt: "2026-10-30T15:00:00Z",
+  storesRead: 4,
+  unread: [{ product: "evolution", name: "Evolution", text: "It did not answer." }],
+  items: [
+    { code: "not_stopped", text: "Governance says stop, but this agent still runs in Portal.", subject: { kind: "agent", id: ID.a, name: "Henry" }, productName: null, since: null, exception: null },
+    { code: "no_owner", text: "This agent has no owner. Name an owner.", subject: { kind: "agent", id: ID.b, name: "Sales helper" }, productName: null, since: null, exception: null },
+    { code: "access_after_leave", text: "A leaver still has access.", subject: { kind: "person", id: ID.p, name: "Bob Bianchi" }, productName: "Knowledge", since: null, exception: { reason: "Handover until Friday", until: "2026-11-06T00:00:00Z" } },
+  ],
+};
+const invOps = { ...pageOps, plan_preview: ok(previewOut), findings_list: ok(findingsOut), access_get: ok({ status: "unavailable", reason: "not_consented", note: "App access is not shown." }), colleague_get: ok(agentDetail()) };
 const PERSON = `person-or-agent?kind=person&id=${ID.p}`;
 
 export const scenes: Scene[] = [
@@ -313,6 +339,14 @@ export const scenes: Scene[] = [
     expect: i === 0 ? ["The mark takes effect now"] : i === 1 ? ["Henry", "Sales helper"] : i === 2 ? ["Not changed", "Their own logins", "The next screen says"] : i === 3 ? ["Not applied: do these in Portal"] : [],
     forbid: ["last day"],
   })),
+  { name: "see-what-would-stop", path: "people-and-agents", personOps: INVENTORY_OPS, strict: true, ops: invOps, ready: "Marco Rossi", steps: (p) => button(p, "See what would stop"), expect: ["This is a preview. Nothing changes.", "Could not be read", "Not installed", "Knowledge reports nothing for Henry", "Refused", "You do this", "3 accounts have no person", "Not changed", "Reported by Connect"], assertCalls: (calls) => (calls.some((c) => c.op === "lifecycle_set") ? ["a preview called lifecycle_set"] : []) },
+  { name: "see-what-would-stop-loading", path: "people-and-agents", personOps: INVENTORY_OPS, strict: true, ops: { ...invOps, plan_preview: hang }, ready: "Marco Rossi", steps: (p) => button(p, "See what would stop"), expect: ["what each app reports"] },
+  { name: "see-what-would-stop-error", path: "people-and-agents", personOps: INVENTORY_OPS, strict: true, ops: { ...invOps, plan_preview: fail("internal") }, ready: "Marco Rossi", steps: async (p) => { await button(p, "See what would stop"); await p.getByText("Try again").first().waitFor(); }, forbid: ["reports nothing"] },
+  { name: "agent-with-access", path: AGENT, personOps: INVENTORY_OPS, strict: true, ops: invOps, ready: "Reported by Connect", expect: ["Could not be read", "Not installed", "reports nothing", "See what would stop"] },
+  { name: "differences", path: "access", personOps: INVENTORY_OPS, strict: true, ops: invOps, ready: "App access is not shown", steps: async (p) => { await p.getByRole("tab", { name: "Differences" }).click(); await p.getByText("Sales helper").waitFor(); }, expect: ["Check now", "Accepted until", "Could not be read: Evolution"] },
+  { name: "differences-not-checked", path: "access", personOps: INVENTORY_OPS, strict: true, ops: { ...invOps, findings_list: ok({ lastSweepAt: null, storesRead: 0, unread: [], items: [] }) }, ready: "App access is not shown", steps: async (p) => { await p.getByRole("tab", { name: "Differences" }).click(); await p.getByText("Not checked yet").waitFor(); }, forbid: ["No differences"] },
+  { name: "differences-none", path: "access", personOps: INVENTORY_OPS, strict: true, ops: { ...invOps, findings_list: ok({ lastSweepAt: "2026-10-30T15:00:00Z", storesRead: 5, unread: [], items: [] }) }, ready: "App access is not shown", steps: async (p) => { await p.getByRole("tab", { name: "Differences" }).click(); await p.getByText("No differences at").waitFor(); } },
+  { name: "differences-accept", path: "access", personOps: INVENTORY_OPS, strict: true, ops: invOps, ready: "App access is not shown", steps: async (p) => { await p.getByRole("tab", { name: "Differences" }).click(); await p.getByText("Sales helper").waitFor(); await button(p, "Accept with a reason"); }, expect: ["Accepting changes no access"] },
   { name: "people-old", path: "people", ops: { ...shell, overview_get: ok(overview) }, ready: "Marco Rossi" },
   { name: "people-old-empty", path: "people", ops: { ...shell, overview_get: ok({ revision: 0, teams: [], people: [], agents: [] }) }, ready: "No people yet" },
   { name: "people-old-loading", path: "people", ops: { ...shell, overview_get: hang }, ready: "Loading the directory" },
