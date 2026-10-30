@@ -12,6 +12,7 @@ import { noteRestore } from "./lifecycle/events.ts";
 import { assignDefaultOwner } from "./lifecycle/settings.ts";
 import { startDatesTimer } from "./lifecycle/validity.ts";
 import { directoryOps } from "./ops/directory.ts";
+import { lifecycleOps } from "./ops/lifecycle.ts";
 import { proposalOps } from "./ops/proposals.ts";
 import { reviewOps } from "./ops/reviews.ts";
 import { topologyOps } from "./ops/topology.ts";
@@ -31,6 +32,7 @@ export const handlers = {
   ...reviewOps,
   ...proposalOps,
   ...topologyOps,
+  ...lifecycleOps,
 } satisfies Record<OpId, HandlerSpec>;
 
 export const hooks: Record<string, HookHandler> = {
