@@ -4,9 +4,11 @@
 // - No check-then-write across an await: each write after a call is a compare-and-set, and it loses to whoever moved the row first.
 // - Attempt and key are persisted before the call. A new attempt comes only after a fresh list, with the items still open. A held step keeps its key.
 // - Everything lives in the tables, so a tick that dies anywhere is resumed by the next tick, in this process or the next one.
+import { normalizeHandle } from "@opt2-tealbrick/manifest";
 import type { Db } from "@opt2-tealbrick/miniapp-sdk";
 import type { AccessTarget } from "../access/items.ts";
 import { LIST_LIMITS, personSubject } from "../access/items.ts";
+import { HANDLE_PATTERN } from "../feed.ts";
 import { loadSubject } from "../lifecycle/transitions.ts";
 import { type AccessItem, type AccessPort, type ListSubject, revokeBatchMax } from "./access-port.ts";
 import { type AlertPort, alertOnce, retryPendingAlerts } from "./alerts.ts";
@@ -41,11 +43,19 @@ export function cancelUnsent(db: Db, id: string, now: number): void {
   }
 }
 
+/** A plan that ended runs nothing more: its steps must not read as waiting for anyone. */
+function endPlan(pc: PlanCtx, id: string, from: string, to: string, fields: Record<string, string | number | null>, now: number): boolean {
+  const moved = movePlan(pc.db, id, from, to, fields, now);
+  if (moved) cancelUnsent(pc.db, id, now);
+  return moved;
+}
+
 // ── Core ────────────────────────────────────────────────────────────────────
 
 function toLinkMode(pc: PlanCtx, p: Row, code: string): void {
   const now = pc.now();
-  notePlan(pc.db, String(p.id), String(p.state), { rail: "portal_link", rail_code: code }, now);
+  // Core stored nothing under this key: no draft to read or take back.
+  notePlan(pc.db, String(p.id), String(p.state), { rail: "portal_link", rail_code: code, draft_key: null }, now);
   movePlan(pc.db, String(p.id), "preparing", "waiting", {}, now);
 }
 
@@ -75,7 +85,7 @@ async function askForDraft(pc: PlanCtx, p: Row, steps: readonly Row[]): Promise<
   switch (answer.kind) {
     case "ok":
       // The owner cancelled while this call ran: no draft may stay open in Portal with no plan behind it.
-      if (!movePlan(pc.db, id, "preparing", "waiting", { draft_id: answer.value.draftId, draft_state: answer.value.state, review_url: answer.value.reviewUrl, code: null, detail: null }, at)) await askRail(() => rail.withdraw(key as string));
+      if (getPlan(pc.db, id)?.draft_key !== key || !movePlan(pc.db, id, "preparing", "waiting", { draft_id: answer.value.draftId, draft_state: answer.value.state, review_url: answer.value.reviewUrl, code: null, detail: null }, at)) await askRail(() => rail.withdraw(key as string));
       return;
     case "off":
       return toLinkMode(pc, p, answer.code);
@@ -89,11 +99,11 @@ async function askForDraft(pc: PlanCtx, p: Row, steps: readonly Row[]): Promise<
       if (!notePlan(pc.db, id, "preparing", { code: answer.code }, at)) await askRail(() => rail.withdraw(key as string));
       return;
     case "draft_state":
-      movePlan(pc.db, id, "preparing", "failed", { code: "draft_state" }, at);
+      endPlan(pc, id, "preparing", "failed", { code: "draft_state" }, at);
       return;
     case "unknown_key":
     case "refused":
-      movePlan(pc.db, id, "preparing", "failed", { code: answer.kind === "refused" ? answer.code : "unknown_key", detail: answer.kind === "refused" ? answer.message : null }, at);
+      endPlan(pc, id, "preparing", "failed", { code: answer.kind === "refused" ? answer.code : "unknown_key", detail: answer.kind === "refused" ? answer.message : null }, at);
       return;
   }
 }
@@ -139,13 +149,13 @@ async function syncDraft(pc: PlanCtx, p: Row, steps: readonly Row[]): Promise<vo
   const now = pc.now();
   const state = String(p.state);
   if (answer.kind === "off") {
-    notePlan(pc.db, id, state, { rail: "portal_link", rail_code: answer.code }, now);
+    if (p.rail !== "portal_link") notePlan(pc.db, id, state, { rail: "portal_link", rail_code: answer.code }, now);
     return;
   }
   if (answer.kind === "unknown_key") {
     // After a restore of Core, or a key Core never stored. The owner cannot approve what Core does not hold. A draft we saw applied stays applied: the slice proves the rest.
     if (isAppliedHere(p)) notePlan(pc.db, id, state, { rail: "portal_link", rail_code: "unknown_key" }, now);
-    else movePlan(pc.db, id, state, "lost", { code: "unknown_key" }, now);
+    else endPlan(pc, id, state, "lost", { code: "unknown_key" }, now);
     return;
   }
   if (answer.kind !== "ok" || !readableDraft(answer.value)) {
@@ -154,10 +164,10 @@ async function syncDraft(pc: PlanCtx, p: Row, steps: readonly Row[]): Promise<vo
   }
   const get = answer.value;
   if ((p.core_digest !== null && p.core_digest !== get.digest) || !sameSteps(get, steps)) {
-    if (movePlan(pc.db, id, state, "failed", { code: "core_mismatch", detail: "Portal answered about other steps. Nothing more runs. Open Portal and check." }, now)) cancelUnsent(pc.db, id, now);
+    endPlan(pc, id, state, "failed", { code: "core_mismatch", detail: "Portal answered about other steps. Nothing more runs. Open Portal and check." }, now);
     return;
   }
-  const fields = { draft_id: get.draftId, draft_state: get.state, review_url: get.reviewUrl, core_digest: get.digest, expires_at: get.expiresAt ? Date.parse(get.expiresAt) : null, code: null };
+  const fields = { draft_id: get.draftId, draft_state: get.state, review_url: get.reviewUrl, core_digest: get.digest, expires_at: get.expiresAt ? Date.parse(get.expiresAt) : null, code: null, rail: "draft", rail_code: null };
   switch (get.state) {
     case "open":
     case "submitted":
@@ -180,7 +190,7 @@ async function syncDraft(pc: PlanCtx, p: Row, steps: readonly Row[]): Promise<vo
       // A draft that failed part-way can end like this. What Core did stays on the record, and the page does not say "nothing was applied".
       applyCoreSteps(pc, get, steps);
       const partly = get.steps.some((g) => g.status === "ok");
-      if (movePlan(pc.db, id, state, get.state, { ...fields, code: partly ? "partly_applied" : null }, now)) cancelUnsent(pc.db, id, now);
+      endPlan(pc, id, state, get.state, { ...fields, code: partly ? "partly_applied" : null }, now);
       return;
     }
   }
@@ -208,7 +218,7 @@ const coreAgents = (steps: readonly Row[]): string[] => [...new Set(steps.filter
 
 /** A person with more handles than one subject may carry is asked about in several: a handle left out would keep its bar off. */
 function personSubjects(db: Db, id: string): ListSubject[] {
-  const all = db.prepare("SELECT handle FROM fleet_handles WHERE person_id = ? ORDER BY handle").all(id).map((r) => String(r.handle));
+  const all = db.prepare("SELECT handle FROM fleet_handles WHERE person_id = ? ORDER BY handle").all(id).map((r) => String(r.handle)).filter((h) => HANDLE_PATTERN.test(h) && normalizeHandle(h) === h);
   if (all.length <= LIST_LIMITS.handles) return [personSubject(db, id)];
   const out: ListSubject[] = [];
   for (let i = 0; i < all.length; i += LIST_LIMITS.handles) out.push({ kind: "person", id, handles: all.slice(i, i + LIST_LIMITS.handles) });
@@ -239,6 +249,8 @@ function absorb(pc: PlanCtx, p: Row, target: string, items: readonly AccessItem[
   const id = String(p.id);
   const ticks = parseTicks(p);
   db.transaction(() => {
+    // Closed during the list: no new step.
+    if (!isOpenPlan(String(getPlan(db, id)?.state))) return;
     let n = Number(db.prepare("SELECT COALESCE(MAX(n), -1) + 1 AS n FROM fleet_plan_steps WHERE plan_id = ?").get(id)?.n);
     for (const item of items) {
       if (item.subject.kind === "unlinked") continue;
@@ -251,7 +263,8 @@ function absorb(pc: PlanCtx, p: Row, target: string, items: readonly AccessItem[
       let state = "pending";
       let code: string | null = null;
       if (!item.revocable) state = item.level === "info" ? "listed" : "manual";
-      else if (!wanted) state = "listed";
+      // The owner confirmed nothing in a plan the system opened: what needs a confirm waits for a plan he makes. Only what stands on his approval in Portal runs.
+      else if (!wanted || (phase === "now" && p.trigger_kind === "system")) state = "listed";
       else if (tick?.digest !== undefined && tick.digest !== item.digest) {
         state = "changed";
         code = "changed_since_preview";
@@ -455,11 +468,10 @@ export async function tick(pc: PlanCtx, id: string): Promise<TickResult> {
   }
   let steps = stepsOf(db, id);
   // 1. Core first: its answer decides what may run after it.
-  if (p.rail === "draft") {
-    const needAsk = p.state === "preparing" && p.draft_id === null;
-    if (needAsk) await askForDraft(pc, p, steps);
-    else if (!isAppliedHere(p) || steps.some((s) => s.phase === "core" && !isFinalStep(String(s.state)))) await syncDraft(pc, p, steps);
-  }
+  const needAsk = p.rail === "draft" && p.state === "preparing" && p.draft_id === null;
+  if (needAsk) await askForDraft(pc, p, steps);
+  // Link mode too, when a draft exists: the rail may be back, and the owner may have approved that draft.
+  else if (p.draft_key !== null && (!isAppliedHere(p) || steps.some((s) => s.phase === "core" && !isFinalStep(String(s.state))))) await syncDraft(pc, p, steps);
   p = getPlan(db, id) as Row;
   if (!isOpenPlan(String(p.state))) {
     await alerts(pc, p);
@@ -494,10 +506,21 @@ export async function tick(pc: PlanCtx, id: string): Promise<TickResult> {
 async function staleEnd(pc: PlanCtx, p: Row): Promise<void> {
   const id = String(p.id);
   const rail = pc.rail;
+  let code = "lifecycle_moved";
   // Whatever the mode says: a draft may stand in Portal since before the rail went away.
-  if (rail && p.draft_key !== null && !isAppliedHere(p)) await askRail(() => rail.withdraw(String(p.draft_key)));
-  const now = pc.now();
-  if (movePlan(pc.db, id, String(p.state), "stale", { code: "lifecycle_moved" }, now)) cancelUnsent(pc.db, id, now);
+  if (rail && p.draft_key !== null && !isAppliedHere(p)) {
+    const key = String(p.draft_key);
+    const answer = await askRail(() => rail.withdraw(key));
+    if (answer.kind === "draft_state") {
+      // The owner approved first. What Core did goes on the record before the plan ends: a T6 must see it.
+      const got = await askRail(() => rail.get(key));
+      if (got.kind === "ok" && readableDraft(got.value)) {
+        applyCoreSteps(pc, got.value, stepsOf(pc.db, id));
+        notePlan(pc.db, id, String(p.state), { draft_state: got.value.state, core_digest: got.value.digest, ...(got.value.receiptId ? { receipt_id: got.value.receiptId } : {}) }, pc.now());
+      } else notePlan(pc.db, id, String(p.state), { draft_state: "applying" }, pc.now());
+    } else if (answer.kind !== "ok" && answer.kind !== "unknown_key") code = "not_taken_back";
+  }
+  endPlan(pc, id, String(p.state), "stale", { code }, pc.now());
 }
 
 async function alerts(pc: PlanCtx, p: Row): Promise<void> {

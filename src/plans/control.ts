@@ -5,7 +5,7 @@ import { loadSubject } from "../lifecycle/transitions.ts";
 import { askRail } from "./core-rail.ts";
 import { createPlan, getPlan, movePlan, OPEN_SQL, type Row, stepsOf } from "./plan.ts";
 import { cancelUnsent, isAppliedHere, type PlanCtx } from "./runner.ts";
-import { isOpenPlan, REISSUE_MS } from "./steps.ts";
+import { ASK_AGAIN_STATES, isOpenPlan, REISSUE_MS } from "./steps.ts";
 
 /**
  * Takes open plans of a subject back, draft first (§2 T4, T6). `replaced`: a new plan takes over, and a plan past Core stays, so createPlan refuses.
@@ -13,11 +13,12 @@ import { isOpenPlan, REISSUE_MS } from "./steps.ts";
  */
 export async function closeOpenPlans(pc: PlanCtx, plans: readonly Row[], to: "replaced" | "withdrawn" | "cancelled"): Promise<void> {
   const rail = pc.rail;
+  // All parts or none, as far as this file can tell before it calls anyone.
+  if (plans.some((p) => p.state === "applying" || p.draft_state === "applying")) throw new TbError("plan_applying", "Portal is applying this plan. Try again in a minute.", 409);
+  if (to === "replaced" && plans.some(isAppliedHere)) throw new TbError("plan_open", "A plan for this entry is past Portal and still open. Cancel it or wait for it.", 409);
   for (const p of plans) {
     const id = String(p.id);
-    if (p.state === "applying" || p.draft_state === "applying") throw new TbError("plan_applying", "Portal is applying this plan. Try again in a minute.", 409);
     if (isAppliedHere(p)) {
-      if (to === "replaced") continue;
       if (movePlan(pc.db, id, String(p.state), "cancelled", { code: "cancelled_after_apply" }, pc.now())) cancelUnsent(pc.db, id, pc.now());
       continue;
     }
@@ -32,16 +33,19 @@ export async function closeOpenPlans(pc: PlanCtx, plans: readonly Row[], to: "re
     } else if (!rail && p.draft_key !== null) code = "not_taken_back";
     const now = pc.now();
     const cur = getPlan(pc.db, id) as Row;
-    if (isOpenPlan(String(cur.state)) && movePlan(pc.db, id, String(cur.state), to, { code }, now)) cancelUnsent(pc.db, id, now);
+    const did = stepsOf(pc.db, id).some((s) => s.phase === "core" && s.output_json !== null);
+    if (isOpenPlan(String(cur.state)) && movePlan(pc.db, id, String(cur.state), to, { code: code ?? (did ? "partly_applied" : null) }, now)) cancelUnsent(pc.db, id, now);
   }
 }
+
+const otherOpen = (db: Db, p: Row): boolean => !!db.prepare(`SELECT 1 FROM fleet_plans WHERE subject_kind = ? AND subject_id = ? AND group_id <> ? AND state IN (${OPEN_SQL}) LIMIT 1`).get(String(p.subject_kind), String(p.subject_id), String(p.group_id));
 
 /** A plan asks Core again with a new key: a key of a rejected or expired draft gives the old answer. */
 export function askAgain(db: Db, p: Row, now: number): void {
   db.transaction(() => {
     const id = String(p.id);
     const hasCore = stepsOf(db, id).some((s) => s.phase === "core");
-    if (!movePlan(db, id, String(p.state), "preparing", { draft_key: null, draft_id: null, draft_state: null, review_url: null, core_digest: null, expires_at: null, applying_since: null, code: null, detail: null, rail: hasCore ? "draft" : "none", rail_code: null, next_at: 0, closed_at: null }, now)) return;
+    if (!movePlan(db, id, String(p.state), "preparing", { draft_key: null, draft_id: null, draft_state: null, review_url: null, core_digest: null, expires_at: null, applying_since: null, applied_at: null, code: null, detail: null, rail: hasCore ? "draft" : "none", rail_code: null, next_at: 0, closed_at: null }, now)) return;
     db.prepare("UPDATE fleet_plan_steps SET state = 'pending', code = NULL, detail = NULL, tries = 0, retry_at = 0, updated_at = ? WHERE plan_id = ? AND state = 'cancelled'").run(now, id);
     db.prepare("UPDATE fleet_plan_steps SET state = 'pending', code = NULL, detail = NULL, updated_at = ? WHERE plan_id = ? AND phase = 'core' AND state NOT IN ('done', 'reported')").run(now, id);
   });
@@ -54,6 +58,8 @@ export function retryPlan(db: Db, p: Row, now: number): void {
   if (!s || s.rev !== Number(p.lifecycle_rev)) throw new TbError("lifecycle_stale", "This entry changed after you confirmed. Make a new plan.", 409);
   if (!isOpenPlan(String(p.state))) {
     if (p.state === "done" || p.state === "reported") throw new TbError("plan_finished", "This plan is finished.", 409);
+    if (!ASK_AGAIN_STATES.includes(String(p.state)) || p.code === "core_mismatch") throw new TbError("plan_ended", "This plan cannot be asked again. Make a new plan.", 409);
+    if (otherOpen(db, p)) throw new TbError("plan_open", "A newer plan for this entry is open.", 409);
     askAgain(db, p, now);
     return;
   }
@@ -65,13 +71,10 @@ export function retryPlan(db: Db, p: Row, now: number): void {
   const steps = stepsOf(db, id);
   if (steps.some((x) => x.phase === "core" && x.state === "failed")) throw new TbError("apply_in_portal", "Portal stopped on a step. Apply it again in Portal.", 409);
   db.transaction(() => {
-    // `changed` goes: the next list makes a new step from what the store shows now. What the owner ticked stands, the digest he saw does not.
-    db.prepare("UPDATE fleet_plan_steps SET state = 'pending' WHERE plan_id = ? AND phase = 'read' AND target IN (SELECT target FROM fleet_plan_steps WHERE plan_id = ? AND state = 'changed')").run(id, id);
-    db.prepare("DELETE FROM fleet_plan_steps WHERE plan_id = ? AND state = 'changed'").run(id);
+    // `changed` stays: the store's row is not what the owner saw, so only a new plan, with a new look, may end it.
     db.prepare("UPDATE fleet_plan_steps SET state = 'failed', tries = 0, retry_at = 0, code = NULL, detail = NULL, updated_at = ? WHERE plan_id = ? AND phase <> 'read' AND phase <> 'core' AND state IN ('refused', 'failed', 'not_revocable')").run(now, id);
     db.prepare("UPDATE fleet_plan_steps SET retry_at = 0, updated_at = ? WHERE plan_id = ? AND phase = 'read'").run(now, id);
-    const ticks = typeof p.wanted_json === "string" ? (JSON.parse(p.wanted_json) as { product: string; id: string }[]).map((t) => ({ product: t.product, id: t.id })) : null;
-    movePlan(db, id, String(p.state), p.state === "partial" ? "running" : String(p.state), { next_at: 0, wanted_json: ticks ? JSON.stringify(ticks) : null, code: null }, now);
+    movePlan(db, id, String(p.state), p.state === "partial" ? "running" : String(p.state), { next_at: 0, code: null }, now);
   });
 }
 
@@ -98,9 +101,12 @@ export function scanPlans(db: Db, now: number, warn: (m: string, f?: Record<stri
       if (!(err instanceof TbError)) warn("system plan failed", { reason: err instanceof Error ? err.message.slice(0, 200) : "error" });
     }
   }
-  for (const p of db.prepare("SELECT * FROM fleet_plans WHERE state = 'expired' AND trigger_kind = 'system' AND closed_at <= ? LIMIT 20").all(now - REISSUE_MS)) {
+  for (const p of db.prepare("SELECT * FROM fleet_plans WHERE state = 'expired' AND trigger_kind = 'system' AND closed_at <= ? ORDER BY closed_at LIMIT 20").all(now - REISSUE_MS)) {
     const s = loadSubject(db, p.subject_kind as "person" | "agent", String(p.subject_id));
-    if (s && s.rev === Number(p.lifecycle_rev)) askAgain(db, p, now);
+    // The entry moved, or the owner made his own plan: nothing is owed by this one any more.
+    if (!s || s.rev !== Number(p.lifecycle_rev)) movePlan(db, String(p.id), "expired", "stale", { code: "lifecycle_moved" }, now);
+    else if (otherOpen(db, p)) movePlan(db, String(p.id), "expired", "replaced", {}, now);
+    else askAgain(db, p, now);
   }
 }
 
