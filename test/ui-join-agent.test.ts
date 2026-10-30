@@ -27,7 +27,7 @@ for (const k of ["window", "document", "navigator", "location", "history", "sess
 g.IS_REACT_ACT_ENVIRONMENT = true;
 
 const PEOPLE = [{ kind: "person", id: "psn_marco", name: "Marco Rossi", lifecycle: "active" }, { kind: "person", id: "psn_ann", name: "Ann Smith", lifecycle: "active" }];
-const AGENTS = [{ kind: "agent", id: "agt_henry", name: "Henry", lifecycle: "proposed", owner: null }];
+const AGENTS = [{ kind: "agent", id: "agt_henry", name: "Henry", lifecycle: "proposed", owner: null, validUntil: null }];
 const PREVIEW = { subject: { kind: "agent", id: "agt_henry", name: "Henry" }, asOf: "2026-10-30T16:00:00Z", unlinkedAccounts: 0, stores: [{ product: "knowledge", name: "Knowledge", state: "read", text: null, at: "2026-10-30T16:00:00Z", notShown: [], items: [{ id: "k:1", kind: "agent_area", label: "Area: Sales notes", level: "use", direction: "held_by", state: "active", effect: "stops", who: null }] }] };
 const DIR = { revision: 3, teams: [{ id: "tm_support", name: "Support", description: "", tags: [], people: 1, agents: 0, updatedAt: "2026-10-30T09:00:00Z", members: [{ kind: "person", id: "psn_marco", name: "Marco Rossi", role: "lead" }] }], people: [], agents: [] };
 interface Stub {
@@ -190,6 +190,42 @@ describe("Join: a new agent", () => {
     assert.equal(reviews[1]?.input.validUntil, "2099-12-31T23:59:59.000Z");
     assert.equal(stub.calls.filter((c) => c.op === "agent_set").length, 1, "the owner is not set again");
     assert.match(dialog().textContent ?? "", /Henry is marked as reviewed\./);
+  });
+
+  it("an agent that has a last day already: it is said, and \"Has no end\" removes it (validUntil null) instead of leaving a stop the screen did not mention", async () => {
+    reset();
+    stub.agents = [{ ...AGENTS[0], validUntil: "2026-12-01T00:00:00Z" }];
+    await open();
+    await pick(0, "Henry");
+    await next();
+    assert.match(dialog().textContent ?? "", /This agent has a last day already: 1 Dec 2026/);
+    await pick(1, "Marco Rossi");
+    await next();
+    await next();
+    assert.match(dialog().textContent ?? "", /None\. The last day it has now is removed\./);
+    await next("Mark as reviewed");
+    assert.equal(stub.calls.find((c) => c.op === "lifecycle_set")?.input.validUntil, null);
+  });
+
+  it("a last day that ended while the dialog was open is refused at the send: the agent is not marked as reviewed with no end date", async () => {
+    reset();
+    await open();
+    await pick(0, "Henry");
+    await next();
+    await pick(1, "Marco Rossi");
+    await choose("Has a last day");
+    await type(field("Last day"), new Date(Date.now() + 86_400_000).toISOString().slice(0, 10));
+    await next();
+    await next();
+    const realNow = Date.now;
+    Date.now = () => realNow() + 3 * 86_400_000;
+    try {
+      await next("Mark as reviewed");
+    } finally {
+      Date.now = realNow;
+    }
+    assert.match(alerts().join(" "), /The last day is not right\. This day has passed in UTC\. Choose a later day\. Nothing was changed\./);
+    assert.deepEqual(stub.calls.filter((c) => ["agent_set", "members_set", "lifecycle_set"].includes(c.op)), []);
   });
 
   it("no new agent waits: the page says so and Next stays off", async () => {

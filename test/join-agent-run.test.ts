@@ -93,3 +93,13 @@ test("fire on bad: a team that is gone is said, not guessed", async () => {
   assert.deepEqual(run.failed, { step: "team", message: "This team is gone. Choose a team on the People page." });
   assert.equal(w.calls.some((c) => c.op === "members_set" || c.op === "lifecycle_set"), false);
 });
+
+test("an agent that has a last day and gets \"no end\": the review sends validUntil null, and only then (it is said in the screen)", async () => {
+  const w = world();
+  const run = newAgentRun("b7");
+  await sendAgentJoin(run, { agent: "agt_a", owner: null, team: null, until: null, clearUntil: true }, w.deps);
+  assert.deepEqual(w.calls.at(-1)?.input, { kind: "agent", id: "agt_a", to: "active", reason: "reviewed", expectedRev: 7, validUntil: null });
+  const w2 = world();
+  await sendAgentJoin(newAgentRun("b8"), { agent: "agt_a", owner: null, team: null, until: "2099-12-31T23:59:59.000Z", clearUntil: true }, w2.deps);
+  assert.equal(w2.calls.at(-1)?.input.validUntil, "2099-12-31T23:59:59.000Z", "a new day wins over clearing");
+});

@@ -7,11 +7,12 @@ import { useCallback, useRef, useState } from "react";
 import type { ColleaguesListOutput, OverviewGetOutput } from "#kit";
 import { changeError, LoadFailed, Loading, useLoad } from "../common.tsx";
 import { FEATURES } from "./features.ts";
-import { type AgentRun, newAgentRun, sendAgentJoin } from "./join-agent-run.ts";
+import { type AgentJoin, type AgentRun, newAgentRun, sendAgentJoin } from "./join-agent-run.ts";
 import { deps } from "./join-flow.tsx";
-import { lastDayInstant } from "./join-input.ts";
+import { lastDayInstant, untilToSend } from "./join-input.ts";
 import { StoreRows } from "./store-rows.tsx";
 import { loadPreview } from "./what-would-stop.tsx";
+import { when } from "./words.ts";
 
 const NO_TEAM = "none";
 const list = (kind: "agent" | "person", lifecycle: "proposed" | "active") => callOp<ColleaguesListOutput>("colleagues_list", { kind, lifecycle, limit: 200 });
@@ -32,6 +33,8 @@ export function JoinAgentFlow({ portalHref, onClose, onChanged }: { portalHref?:
   const [failure, setFailure] = useState<string | null>(null);
   const [, setTick] = useState(0);
   const run = useRef<AgentRun | null>(null);
+  /** what the first send used: a repeat sends the same */
+  const frozen = useRef<AgentJoin | null>(null);
   const agent = agents.data?.items.find((a) => a.id === agentId) ?? null;
   const ownerId = ownerPick ?? agent?.owner?.id ?? "";
   const owner = people.data?.items.find((p) => p.id === ownerId) ?? null;
@@ -45,11 +48,19 @@ export function JoinAgentFlow({ portalHref, onClose, onChanged }: { portalHref?:
 
   const send = async (): Promise<boolean | undefined> => {
     if (!agent || !owner) return false;
+    if (!frozen.current) {
+      const end = untilToSend(kind === "ends", day);
+      if (!end.ok) {
+        setFailure(`${end.text} Nothing was changed.`);
+        return false;
+      }
+      frozen.current = { agent: agent.id, owner: owner.id !== agent.owner?.id ? owner.id : null, team: teamId, until: end.until, clearUntil: end.until === null && agent.validUntil !== null };
+    }
     setBusy(true);
     setFailure(null);
     try {
       run.current ??= newAgentRun(globalThis.crypto.randomUUID());
-      await sendAgentJoin(run.current, { agent: agent.id, owner: owner.id !== agent.owner?.id ? owner.id : null, team: teamId, until }, deps);
+      await sendAgentJoin(run.current, frozen.current, deps);
       setSent(true);
       await Promise.resolve(onChanged());
       return undefined;
@@ -62,10 +73,10 @@ export function JoinAgentFlow({ portalHref, onClose, onChanged }: { portalHref?:
     }
   };
   const again = async () => {
-    if (!agent || !owner || !run.current) return;
+    if (!run.current || !frozen.current) return;
     setBusy(true);
     try {
-      await sendAgentJoin(run.current, { agent: agent.id, owner: owner.id !== agent.owner?.id ? owner.id : null, team: teamId, until }, deps);
+      await sendAgentJoin(run.current, frozen.current, deps);
       await Promise.resolve(onChanged());
     } finally {
       setBusy(false);
@@ -101,12 +112,14 @@ export function JoinAgentFlow({ portalHref, onClose, onChanged }: { portalHref?:
     render: () => (
       <div className="tb-stack">
         {people.error && !people.data ? <LoadFailed message={people.error} retrying={people.loading} onRetry={() => void people.reload()} /> : null}
+        {people.data && people.data.total > people.data.items.length ? <p className="tb-hint">{`This list shows ${people.data.items.length} of ${people.data.total} people. Add the owner on the People page if the person is not here.`}</p> : null}
         <Field label="Owner" hint="A person who is active. They answer for this agent." error={agent && !owner && people.data ? "Choose an owner." : undefined}>
           <Select placeholder="Choose a person" options={(people.data?.items ?? []).map((p) => ({ value: p.id, label: p.name }))} value={ownerId} onValueChange={setOwnerPick} />
         </Field>
         <Field label="Team" hint="Optional.">
           <Select placeholder="No team" options={[{ value: NO_TEAM, label: "No team" }, ...teams.map((t) => ({ value: t.id, label: t.name }))]} value={team} onValueChange={setTeam} />
         </Field>
+        {agent?.validUntil ? <Notice tone="neutral">{`This agent has a last day already: ${when(agent.validUntil)}. Choose "Has a last day" to change it. Choose "Has no end" to remove it.`}</Notice> : null}
         <Choices<"keep" | "ends">
           label="This agent"
           value={kind}
@@ -117,7 +130,7 @@ export function JoinAgentFlow({ portalHref, onClose, onChanged }: { portalHref?:
           ]}
         />
         {kind === "ends" ? (
-          <Field label="Last day" hint="It ends at the end of this day, UTC." error={last && !last.ok ? last.text : undefined}>
+          <Field label="Last day" hint="Governance marks the agent as stopped at the end of this day, UTC." error={last && !last.ok ? last.text : undefined}>
             <TextInput type="date" value={day} onChange={(e) => setDay(e.target.value)} />
           </Field>
         ) : null}
@@ -146,7 +159,7 @@ export function JoinAgentFlow({ portalHref, onClose, onChanged }: { portalHref?:
   const confirmStep: FlowStep = {
     name: "Confirm",
     nextLabel: "Mark as reviewed",
-    canNext: agent !== null && owner !== null,
+    canNext: agent !== null && owner !== null && dayOk,
     onNext: send,
     render: () => (
       <div className="tb-stack">
@@ -170,11 +183,11 @@ export function JoinAgentFlow({ portalHref, onClose, onChanged }: { portalHref?:
           </div>
           <div className="kv-row">
             <dt>Last day</dt>
-            <dd>{until ? day : "None"}</dd>
+            <dd>{until ? day : agent?.validUntil ? "None. The last day it has now is removed." : "None"}</dd>
           </div>
         </dl>
         <Notice tone="neutral">This records the owner, the team and that you reviewed the agent. It grants no access and changes nothing in Portal.</Notice>
-        {until ? <Notice tone="neutral">{`At the end of ${day}, Governance marks this agent as stopped, and the steps to stop it in Portal wait for you. This needs Governance to be running then.`}</Notice> : null}
+        {until ? <Notice tone="neutral">{`At the end of ${day} (UTC), Governance marks this agent as stopped, and the steps to stop it in Portal wait for you. This needs Governance to be running then.`}</Notice> : null}
       </div>
     ),
   };
@@ -194,7 +207,7 @@ export function JoinAgentFlow({ portalHref, onClose, onChanged }: { portalHref?:
           ))}
           {r.failed ? (
             <Notice tone="needs-you" role="alert">
-              {`${r.failed.step === "review" ? "The agent was not marked as reviewed." : r.failed.step === "team" ? "The agent was not put in the team." : "The owner was not saved."} ${r.failed.message} What went through is kept: Send again repeats only the rest.`}
+              {`${r.failed.step === "review" ? "The agent was not marked as reviewed." : r.failed.step === "team" ? "The agent was not put in the team, so it is not marked as reviewed yet." : "The owner was not saved, so nothing else was done."} ${r.failed.message} What went through is kept: Send again repeats only the rest.`}
               <span>
                 <Button size="sm" onClick={() => void again()} disabled={busy}>
                   Send again
@@ -202,7 +215,7 @@ export function JoinAgentFlow({ portalHref, onClose, onChanged }: { portalHref?:
               </span>
             </Notice>
           ) : null}
-          {r.done.has("review") && until ? <p>{`Last day saved: ${day}. It ends at the end of that day, UTC.`}</p> : null}
+          {r.done.has("review") && until ? <p>{`Last day saved: ${day} (UTC).`}</p> : null}
         </div>
       );
     },

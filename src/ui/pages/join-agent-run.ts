@@ -12,6 +12,8 @@ export interface AgentJoin {
   team: string | null;
   /** the last day as an instant, or null */
   until: string | null;
+  /** the owner chose "no end" and the agent has a last day already: it is removed */
+  clearUntil?: boolean;
 }
 export type Step = "owner" | "team" | "review";
 export interface AgentRun {
@@ -61,6 +63,7 @@ export async function sendAgentJoin(run: AgentRun, j: AgentJoin, deps: Deps): Pr
       const now = await deps.call<ColleagueGetOutput>("colleague_get", { kind: "agent", id: j.agent }, `join-${run.batch}-get-${run.tries}`);
       const input: Record<string, unknown> = { kind: "agent", id: j.agent, to: "active", reason: "reviewed", expectedRev: now.colleague.rev };
       if (j.until) input.validUntil = j.until;
+      else if (j.clearUntil) input.validUntil = null;
       await deps.call("lifecycle_set", input, `join-${run.batch}-review-${run.tries}`);
       run.done.add("review");
     } catch (e) {
