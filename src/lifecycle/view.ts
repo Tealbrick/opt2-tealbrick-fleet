@@ -5,9 +5,9 @@ import type { ColleagueGetOutput, ColleaguesListOutput, SummaryGetOutput } from 
 import { readStates } from "../access/client.ts";
 import { ACCESS_AFTER_LEAVE, accessAfterLeave, openDifferences } from "../access/differences.ts";
 import { type AccessTarget, TARGET_NAMES } from "../access/items.ts";
-import { type Finding, findingsOf } from "../findings.ts";
+import { type Finding, findingsOf, KEY_STILL_EXISTS } from "../findings.ts";
 import { fail, revision } from "../meta.ts";
-import { latestPlanStates, unnamedAccounts } from "../plans/guards.ts";
+import { keyEndedAgents, latestPlanStates, unnamedAccounts } from "../plans/guards.ts";
 import { type PlanAgent, portalPlan } from "../plans/portal-link.ts";
 import { cleanTopology, type DecodedTopology, decodeTopology } from "../topology-slice.ts";
 import type { Trust } from "../trust.ts";
@@ -24,7 +24,7 @@ const isoOf = (ms: unknown): string | null => (ms === null || ms === undefined ?
 const runtimeOf = (status: unknown): "running" | "paused" | "gone" => (status === "active" ? "running" : status === "paused" ? "paused" : "gone");
 
 /** One line, no pills: the three axes in plain words. */
-function lineOf(kind: SubjectKind, lifecycle: Lifecycle, effective: Effective, runtime: Row["runtime"], validFrom: unknown): string {
+function lineOf(kind: SubjectKind, lifecycle: Lifecycle, effective: Effective, runtime: Row["runtime"], validFrom: unknown, keyEnded = false): string {
   if (effective === "not_started") return `Starts on ${String(isoOf(validFrom)).slice(0, 10)}`;
   if (kind === "person") {
     return { proposed: "New, not reviewed", active: "Active", suspended: "Stop asked", leaving: "Leaving", archived: "Closed" }[effective];
@@ -34,7 +34,7 @@ function lineOf(kind: SubjectKind, lifecycle: Lifecycle, effective: Effective, r
   if (effective === "proposed") return runtime === "running" ? "New: working, not reviewed" : "New, not reviewed: paused";
   if (effective === "active") return runtime === "running" ? "Working" : "Paused in Portal";
   const word = effective === "leaving" ? "Stop and remove" : "Stop";
-  return runtime === "running" ? `${word} asked: still running` : effective === "leaving" ? "Stopped, removal waits for you" : "Stopped";
+  return runtime === "running" ? `${word} asked: still running` : effective === "leaving" ? "Stopped, removal waits for you" : keyEnded ? "Stopped" : KEY_STILL_EXISTS;
 }
 
 interface Loaded {
@@ -46,6 +46,7 @@ interface Loaded {
 export function loadColleagues(db: Db, now: number): Loaded {
   const conflicts = new Set(db.prepare("SELECT DISTINCT h.agent_id FROM fleet_agent_handles h JOIN fleet_handles p ON p.handle = h.handle").all().map((r) => String(r.agent_id)));
   const plans = latestPlanStates(db);
+  const keysGone = keyEndedAgents(db);
   const owners = new Map<string, { name: string; lifecycle: string | null }>();
   const rows: Row[] = [];
   const person = (p: Db_): Row => {
@@ -79,7 +80,7 @@ export function loadColleagues(db: Db, now: number): Loaded {
     const effective = effectiveAgent({ lifecycle, validFrom: a.valid_from === null ? null : Number(a.valid_from), keepRunning }, owner?.lifecycle ?? null);
     const runtime = runtimeOf(a.status);
     const findings = findingsOf(
-      { kind: "agent", lifecycle, effective, runtime, hasOwner: owner !== undefined, ownerLifecycle: owner?.lifecycle ?? null, reason: a.lifecycle_reason === null ? null : String(a.lifecycle_reason), at: Number(a.lifecycle_at), validUntil: a.valid_until === null ? null : Number(a.valid_until), noCard: a.migrated_note === "no_card", handleConflict: conflicts.has(String(a.id)), planState: plans.get(`agent:${String(a.id)}`) ?? null },
+      { kind: "agent", lifecycle, effective, runtime, hasOwner: owner !== undefined, ownerLifecycle: owner?.lifecycle ?? null, reason: a.lifecycle_reason === null ? null : String(a.lifecycle_reason), at: Number(a.lifecycle_at), validUntil: a.valid_until === null ? null : Number(a.valid_until), noCard: a.migrated_note === "no_card", handleConflict: conflicts.has(String(a.id)), planState: plans.get(`agent:${String(a.id)}`) ?? null, keyEnded: keysGone.has(String(a.id)) },
       now,
     );
     rows.push({
@@ -91,7 +92,7 @@ export function loadColleagues(db: Db, now: number): Loaded {
       runtime,
       trust: a.trust as Trust,
       owner: owner ? { id: String(a.owner_id), name: owner.name } : null,
-      line: lineOf("agent", lifecycle, effective, runtime, a.valid_from),
+      line: lineOf("agent", lifecycle, effective, runtime, a.valid_from, keysGone.has(String(a.id))),
       findings,
       validFrom: isoOf(a.valid_from),
       validUntil: isoOf(a.valid_until),
@@ -234,6 +235,7 @@ export async function summaryGet(ctx: OpContext, now = Date.now()): Promise<Summ
     },
     people: { total: people.length, leaving: people.filter((r) => r.lifecycle === "leaving").length, suspended: people.filter((r) => r.lifecycle === "suspended").length },
     noOwner,
+    keysUndecided: agents.filter((r) => r.findings.some((f: Finding) => f.code === "key_not_decided")).map((r) => ({ id: r.id, name: r.name, text: KEY_STILL_EXISTS })),
     differences: openDifferences(db, rows, now),
     canWriteOrSend: topology && !topology.truncated ? new Set(topology.edges.filter((e) => e.crud.some((c) => c !== "read")).map((e) => e.agent)).size : null,
     stores: [

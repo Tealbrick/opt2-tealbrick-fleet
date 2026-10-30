@@ -49,3 +49,8 @@ export function latestPlanStates(db: Db): Map<string, string> {
     .all();
   return new Map(rows.map((r) => [String(r.k), String(r.state)]));
 }
+
+/** Agents whose key Core says is gone: an offboard or a new-key step ran. Until then a paused agent's key still exists. One query for the whole list. */
+export function keyEndedAgents(db: Db): Set<string> {
+  return new Set(db.prepare("SELECT DISTINCT agent_id FROM fleet_plan_steps WHERE phase = 'core' AND op IN ('agents.offboard', 'agents.rotate') AND state IN ('done', 'reported')").all().map((r) => String(r.agent_id)));
+}

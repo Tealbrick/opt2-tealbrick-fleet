@@ -5710,6 +5710,29 @@
                 "minimum": 0
               }
             }
+          },
+          "keysUndecided": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "name",
+                "text"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       },
@@ -8322,7 +8345,7 @@
     {
       "id": "plan_send",
       "title": "Make a stop plan",
-      "description": "Prepare the plan for a person or agent you stopped: what your confirm ends at once, and what waits for your approval in Portal. Governance applies nothing in Portal; you approve there. Answers at once; read the progress with plan_get. Only you can do this. No agent can call it.",
+      "description": "Prepare the plan for a person or agent you stopped: what your confirm ends at once, and what waits for your approval in Portal. With no choice an agent is only paused, and its key stays until you choose. Choose per agent in `decisions` to finish in this one approval: stop and remove, move to `newOwner` with a new key, or keep running with a `reason`. Governance applies nothing in Portal; you approve there. Answers at once; read the progress with plan_get. Only you can do this. No agent can call it.",
       "input": {
         "type": "object",
         "additionalProperties": false,
@@ -8353,6 +8376,41 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 64
+            }
+          },
+          "decisions": {
+            "type": "array",
+            "maxItems": 400,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "agent",
+                "decision"
+              ],
+              "properties": {
+                "agent": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "decision": {
+                  "enum": [
+                    "stop",
+                    "transfer",
+                    "keep"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                "newOwner": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                }
+              }
             }
           },
           "items": {

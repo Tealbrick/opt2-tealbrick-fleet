@@ -1,9 +1,11 @@
 // Plan ops (C380, DESIGN-C380 §5). Person ops only: no agent and no app can call them, and each handler checks that again. They write intent and start the job; the runner is the one that calls Core and the stores.
 import { type HandlerSpec, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { OP, type OpId, type PlanCancelInput, type PlanCancelOutput, type PlanGetInput, type PlanGetOutput, type PlanRetryInput, type PlanRetryOutput, type PlanSendInput, type PlanSendOutput } from "#kit";
+import { grantsOf, readTopology } from "../lifecycle/view.ts";
 import { bannerAlerts } from "../plans/alerts.ts";
 import { planCtxOf } from "../plans/context.ts";
 import { assertAllClosed, closeOpenPlans, retryPlan } from "../plans/control.ts";
+import { applyDecisions, subjectAt } from "../plans/decisions.ts";
 import { kickPlans } from "../plans/jobs.ts";
 import { checkPlan, createPlan, getPlan, OPEN_SQL, openPlansOf, type Row } from "../plans/plan.ts";
 import { isOpenPlan } from "../plans/steps.ts";
@@ -17,15 +19,32 @@ const groupOf = (db: Parameters<typeof planView>[0], id: string): Row[] => {
   return db.prepare("SELECT * FROM fleet_plans WHERE group_id = ? ORDER BY part").all(String(p.group_id));
 };
 
+class TriedOnly extends Error {}
+
 export const planOps = {
   [OP.planSend]: op<PlanSendInput, PlanSendOutput>({
     async run(input, ctx) {
       assertOwner(ctx.caller);
       const pc = planCtxOf(ctx as never);
-      const asked = { kind: input.kind, id: input.id, expectedRev: input.expectedRev, transfers: input.transfers, items: input.items, expiresInSec: input.expiresInSec, actor: { kind: "owner" as const, id: ctx.caller.id } };
-      checkPlan(ctx.db, asked);
-      assertAllClosed(await closeOpenPlans(pc, openPlansOf(ctx.db, input.kind, input.id), "replaced"));
-      const made = createPlan(ctx.db, asked, pc.now());
+      const db = ctx.db;
+      const now = pc.now();
+      const actor = { kind: "owner" as const, id: ctx.caller.id };
+      const topology = readTopology(ctx);
+      const grants = (agent: string) => grantsOf(db, topology, "agent", agent);
+      const asked = { kind: input.kind, id: input.id, items: input.items, expiresInSec: input.expiresInSec, actor };
+      const choose = () => [...(input.transfers ?? []), ...applyDecisions(db, subjectAt(db, input.kind, input.id, input.expectedRev), input.decisions ?? [], actor, grants, now)];
+      // Tried first and rolled back: what would refuse takes no older draft back. No await in the try.
+      try {
+        db.transaction(() => {
+          checkPlan(db, { ...asked, transfers: choose() });
+          throw new TriedOnly();
+        });
+      } catch (e) {
+        if (!(e instanceof TriedOnly)) throw e;
+      }
+      assertAllClosed(await closeOpenPlans(pc, openPlansOf(db, input.kind, input.id), "replaced"));
+      // One transaction: the choices and the plan that carries them.
+      const made = db.transaction(() => createPlan(db, { ...asked, transfers: choose() }, now));
       kickPlans(ctx as never);
       return { plans: viewAll(ctx.db, made.ids) };
     },
