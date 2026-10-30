@@ -1,10 +1,10 @@
 {
-  "$comment": "Setup inputs for the conformance suite (miniapp-sdk conformance 0.1.18). review_request needs a subject that exists in the directory: the suite's agent A is synced from the slice.",
+  "$comment": "Setup inputs for the conformance suite (miniapp-sdk conformance 0.1.18). review_request needs a subject that is not the calling agent (C380: an agent never asks about itself); a handle not in the directory stays a request and creates no entry.",
   "inputs": {
     "review_request": {
       "subject": {
-        "kind": "agent",
-        "id": "${tb.agentA}"
+        "kind": "outside_agent",
+        "handle": "slack:UCONF00001"
       },
       "why": "conformance probe"
     }

@@ -6,6 +6,7 @@ import { isNpub, normalizeHandle, npubFromHex } from "@opt2-tealbrick/manifest";
 import { TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { factsFor } from "../src/facts.ts";
 import { directoryFeed } from "../src/feed.ts";
+import { transition } from "../src/lifecycle/transitions.ts";
 import * as store from "../src/store.ts";
 import { AGENT_A, AGENT_B, migratedDb, NOSTR } from "./helpers.ts";
 
@@ -133,6 +134,10 @@ test("members, agent owner and resolve_sender for a Buzz npub (J3 sender → per
   // departed: still found, no team facts (narrow, never widen)
   store.setPerson(db, { id: ann.id, name: "Ann", status: "departed" });
   assert.deepEqual(store.resolveSender(db, NOSTR.npub).teams, []);
+  // C380: an open stop must end first (a delete would lift the floor on the handles and the owned agents' stop)
+  assert.throws(() => store.deletePerson(db, ann.id), (e: TbError) => e.code === "lifecycle_open" && e.httpStatus === 409);
+  db.prepare("UPDATE fleet_agents SET keep_running = 1, keep_reason = 'test' WHERE id = ?").run(AGENT_A.id);
+  transition(db, { kind: "person", id: ann.id, to: "proposed", reason: "mistake", actor: { kind: "owner", id: null } });
   // deleting the person clears ownership and memberships
   assert.equal(store.deletePerson(db, ann.id), true);
   assert.equal(store.getAgent(db, AGENT_A.id).owner, null);
