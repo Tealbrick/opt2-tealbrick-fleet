@@ -2,6 +2,14 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
+## 0.4.0-dev.5 - 2026-10-30
+
+C380 D2, DEV only. Not for stable until Martin has read C380-DECISIONS.md.
+
+- A stop has two stages. With no choice an agent is only paused, because offboarding has no quick undo; the plan, its row, a finding and the Summary say "Paused. The key still exists until you choose." An owner who knows the answer chooses on the first step: stop and remove, move to a new owner, or keep running, and one approval finishes it.
+- `plan_send` takes the per-agent `decisions`; `summary_get` lists `keysUndecided`; new finding `key_not_decided`.
+- The person flow has the choice on its first step, with "Decide later" as the default. The person's page has "Choose for their agents" for later.
+
 ## 0.4.0-dev.4 - 2026-10-30
 
 C380 pages for inventory and plans, DEV only. Not for stable until Martin has read C380-DECISIONS.md.

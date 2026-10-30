@@ -374,7 +374,7 @@ describe("the person flow", () => {
     await act(async () => new Promise((r) => setTimeout(r, 450)));
     await flush();
   };
-  it("one send: a decision for each agent that can still decide, the revision it read, then only the result", async () => {
+  it("no choice is the default: the mark has no decisions, plan_send has none, then only the result", async () => {
     reset();
     stub.answers.lifecycle_set = ok({ colleague: DETAIL({ kind: "person", name: "Marco" }), transition: null });
     stub.answers.colleagues_list = ok({ items: [], nextCursor: null, total: 0 });
@@ -390,10 +390,11 @@ describe("the person flow", () => {
     const m = await mount(h(flow.LeaveFlow, { c: person(), onClose: () => {}, onChanged: () => {} }));
     const dlg = m.host.querySelector("dialog") as Element;
     assert.equal(button(dlg, "Next").disabled, true, "no reason, no Next");
-    await chooseReason(dlg, "They left");
-    await next(dlg);
     assert.match(dlg.textContent ?? "", /Henry/);
+    assert.match(dlg.textContent ?? "", /Decide later/);
+    assert.match(dlg.textContent ?? "", /It is only paused, when you approve in Portal\. Its key still exists until you choose\./);
     assert.doesNotMatch(dlg.textContent ?? "", /Already leaving/);
+    await chooseReason(dlg, "They left");
     await next(dlg);
     assert.match(dlg.textContent ?? "", /2 accounts have no person/);
     assert.match(dlg.textContent ?? "", /Could not be read/);
@@ -403,11 +404,11 @@ describe("the person flow", () => {
     assert.match(dlg.textContent ?? "", /Their own logins/);
     assert.doesNotMatch(dlg.textContent ?? "", /last day:/i);
     await next(dlg, "Stop");
-    assert.deepEqual(stopInput(), [{ kind: "person", id: "per_1", to: "leaving", reason: "left", expectedRev: 7, decisions: [{ agent: "agt_A", decision: "stop" }] }]);
+    assert.deepEqual(stopInput(), [{ kind: "person", id: "per_1", to: "leaving", reason: "left", expectedRev: 7 }]);
     assert.deepEqual(stub.calls.find((c) => c.op === "plan_send")?.input, { kind: "person", id: "per_1", items: [{ product: "connect", id: "c1" }] }, "the stop item ticked, the about item not, nothing from the store not read");
     const after = m.host.querySelector("dialog")?.textContent ?? "";
     assert.match(after, /Open approval in Portal/);
-    assert.doesNotMatch(after, /Their agents/, "the earlier steps are gone: going back could not change what was sent");
+    assert.doesNotMatch(after, /Decide later/, "the earlier steps are gone: going back could not change what was sent");
     assert.equal(stopInput().length, 1);
     await m.unmount();
   });
@@ -421,7 +422,6 @@ describe("the person flow", () => {
     const dlg = m.host.querySelector("dialog") as Element;
     await chooseReason(dlg, "Security");
     await next(dlg);
-    await next(dlg);
     assert.match(dlg.textContent ?? "", /You can go on/, "a failed read does not block the stop");
     await next(dlg);
     await next(dlg, "Stop");
@@ -430,17 +430,17 @@ describe("the person flow", () => {
     assert.equal(reloaded, 1);
     await m.unmount();
   });
-  it("a move that fails after the mark says so, and the retry does not mark again", async () => {
+  it("a transfer goes in plan_send; a refusal keeps the stop, stays on Confirm, and the retry does not mark again", async () => {
     reset();
     stub.answers.lifecycle_set = ok({ colleague: DETAIL({ kind: "person", name: "Marco" }), transition: null });
     stub.answers.colleagues_list = ok({ items: [ROW({ kind: "person", id: "per_2", name: "Bob", runtime: null, owner: null, line: "Active" })], nextCursor: null, total: 1 });
     stub.answers.plan_preview = refuse(500, "internal", "x");
-    stub.answers.agent_set = refuse(409, "owner_inactive", "x");
-    const m = await mount(h(flow.LeaveFlow, { c: person({ agents: [ROW()] }), onClose: () => {}, onChanged: () => {} }));
+    stub.answers.plan_send = refuse(409, "owner_inactive", "The new owner must be an active person.");
+    let reloaded = 0;
+    const m = await mount(h(flow.LeaveFlow, { c: person({ agents: [ROW()] }), onClose: () => {}, onChanged: () => void reloaded++ }));
     const dlg = m.host.querySelector("dialog") as Element;
     await chooseReason(dlg, "They left");
-    await next(dlg);
-    const move = [...dlg.querySelectorAll('[role="radio"]')].find((r) => r.textContent?.includes("Pause and transfer"));
+    const move = [...dlg.querySelectorAll('[role="radio"]')].find((r) => r.textContent?.includes("Pause and move to a new owner"));
     assert.ok(move);
     await click(move as Element);
     assert.match(dlg.textContent ?? "", /A new key is needed/);
@@ -451,11 +451,12 @@ describe("the person flow", () => {
     await next(dlg);
     await next(dlg);
     await next(dlg, "Stop");
-    assert.match([...dlg.querySelectorAll('[role="alert"]')].map((x) => x.textContent).join(" "), /The stop is recorded, but Henry did not move/);
-    stub.answers.agent_set = ok({});
-    await next(dlg, "Stop");
-    assert.deepEqual(opsCalled().filter((o) => ["lifecycle_set", "agent_set", "plan_send"].includes(o)), ["lifecycle_set", "agent_set", "agent_set", "plan_send"]);
-    assert.deepEqual(stub.calls.find((c) => c.op === "plan_send")?.input.transfers, ["agt_A"]);
+    assert.match([...dlg.querySelectorAll('[role="alert"]')].map((x) => x.textContent).join(" "), /The stop is recorded, but the request for Portal is not ready\. The new owner must be an active person\./);
+    assert.ok(reloaded >= 1, "the page behind shows the stop");
+    stub.answers.plan_send = ok({ plans: [PLAN()] });
+    await next(dlg, "Send again");
+    assert.deepEqual(opsCalled().filter((o) => ["lifecycle_set", "agent_set", "plan_send"].includes(o)), ["lifecycle_set", "plan_send", "plan_send"]);
+    assert.deepEqual(stub.calls.findLast((c) => c.op === "plan_send")?.input.decisions, [{ agent: "agt_A", decision: "transfer", newOwner: "per_2" }]);
     await m.unmount();
   });
   it("Keep running needs a named reason before Next", async () => {
@@ -464,7 +465,6 @@ describe("the person flow", () => {
     const m = await mount(h(flow.LeaveFlow, { c: person(), onClose: () => {}, onChanged: () => {} }));
     const dlg = m.host.querySelector("dialog") as Element;
     await chooseReason(dlg, "They left");
-    await next(dlg);
     const keep = [...dlg.querySelectorAll('[role="radio"]')].find((r) => r.textContent?.includes("Keep running"));
     assert.ok(keep);
     await click(keep as Element);
