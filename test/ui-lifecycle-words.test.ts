@@ -8,7 +8,7 @@ import { featuresOf } from "../src/ui/pages/features.ts";
 import { lifecycleError, stopCapOf } from "../src/ui/pages/lifecycle-errors.ts";
 import { currentPlans, liveBanners, pollDelay } from "../src/ui/pages/plan-poll.ts";
 import { subjectFromUrl, subjectHref } from "../src/ui/pages/subject-link.ts";
-import { afterChangeText, beforeChangeText, beforeChangeTone, floorTone, KEY_SENTENCE as KEY_SENTENCE_UI, NOT_CHANGED, REASONS, reasonLabel, when } from "../src/ui/pages/words.ts";
+import { afterChangeText, beforeChangeText, beforeChangeTone, floorTone, NOT_CHANGED, REASONS, reasonLabel, when } from "../src/ui/pages/words.ts";
 
 describe("features come from the ops of this build", () => {
   it("on when every op is there", () => {
