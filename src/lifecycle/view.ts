@@ -7,7 +7,7 @@ import { ACCESS_AFTER_LEAVE, accessAfterLeave, openDifferences } from "../access
 import { type AccessTarget, TARGET_NAMES } from "../access/items.ts";
 import { type Finding, findingsOf, KEY_STILL_EXISTS } from "../findings.ts";
 import { fail, revision } from "../meta.ts";
-import { keyEndedAgents, latestPlanStates, unnamedAccounts } from "../plans/guards.ts";
+import { keyEndedAt, latestPlanStates, unnamedAccounts } from "../plans/guards.ts";
 import { type PlanAgent, portalPlan } from "../plans/portal-link.ts";
 import { cleanTopology, type DecodedTopology, decodeTopology } from "../topology-slice.ts";
 import type { Trust } from "../trust.ts";
@@ -46,8 +46,8 @@ interface Loaded {
 export function loadColleagues(db: Db, now: number): Loaded {
   const conflicts = new Set(db.prepare("SELECT DISTINCT h.agent_id FROM fleet_agent_handles h JOIN fleet_handles p ON p.handle = h.handle").all().map((r) => String(r.agent_id)));
   const plans = latestPlanStates(db);
-  const keysGone = keyEndedAgents(db);
-  const owners = new Map<string, { name: string; lifecycle: string | null }>();
+  const keysGone = keyEndedAt(db);
+  const owners = new Map<string, { name: string; lifecycle: string | null; at: number }>();
   const rows: Row[] = [];
   const person = (p: Db_): Row => {
     const lifecycle = p.lifecycle as Lifecycle;
@@ -70,7 +70,7 @@ export function loadColleagues(db: Db, now: number): Loaded {
     };
   };
   for (const p of db.prepare("SELECT id, name, kind, lifecycle, lifecycle_reason, lifecycle_at, valid_from, valid_until, trust FROM fleet_people").all()) {
-    owners.set(String(p.id), { name: String(p.name), lifecycle: p.lifecycle === null ? null : String(p.lifecycle) });
+    owners.set(String(p.id), { name: String(p.name), lifecycle: p.lifecycle === null ? null : String(p.lifecycle), at: Number(p.lifecycle_at) });
     if (p.kind === "person" && p.lifecycle !== null) rows.push(person(p));
   }
   for (const a of db.prepare("SELECT id, name, status, trust, owner_id, lifecycle, lifecycle_reason, lifecycle_at, valid_from, valid_until, keep_running, migrated_note FROM fleet_agents").all()) {
@@ -79,8 +79,10 @@ export function loadColleagues(db: Db, now: number): Loaded {
     const keepRunning = Number(a.keep_running) === 1;
     const effective = effectiveAgent({ lifecycle, validFrom: a.valid_from === null ? null : Number(a.valid_from), keepRunning }, owner?.lifecycle ?? null);
     const runtime = runtimeOf(a.status);
+    // Only after this stop began: an agent brought back has a new key.
+    const keyEnded = (keysGone.get(String(a.id)) ?? -1) >= Math.max(Number(a.lifecycle_at), owner?.at ?? 0);
     const findings = findingsOf(
-      { kind: "agent", lifecycle, effective, runtime, hasOwner: owner !== undefined, ownerLifecycle: owner?.lifecycle ?? null, reason: a.lifecycle_reason === null ? null : String(a.lifecycle_reason), at: Number(a.lifecycle_at), validUntil: a.valid_until === null ? null : Number(a.valid_until), noCard: a.migrated_note === "no_card", handleConflict: conflicts.has(String(a.id)), planState: plans.get(`agent:${String(a.id)}`) ?? null, keyEnded: keysGone.has(String(a.id)) },
+      { kind: "agent", lifecycle, effective, runtime, hasOwner: owner !== undefined, ownerLifecycle: owner?.lifecycle ?? null, reason: a.lifecycle_reason === null ? null : String(a.lifecycle_reason), at: Number(a.lifecycle_at), validUntil: a.valid_until === null ? null : Number(a.valid_until), noCard: a.migrated_note === "no_card", handleConflict: conflicts.has(String(a.id)), planState: plans.get(`agent:${String(a.id)}`) ?? null, keyEnded },
       now,
     );
     rows.push({
@@ -92,7 +94,7 @@ export function loadColleagues(db: Db, now: number): Loaded {
       runtime,
       trust: a.trust as Trust,
       owner: owner ? { id: String(a.owner_id), name: owner.name } : null,
-      line: lineOf("agent", lifecycle, effective, runtime, a.valid_from, keysGone.has(String(a.id))),
+      line: lineOf("agent", lifecycle, effective, runtime, a.valid_from, keyEnded),
       findings,
       validFrom: isoOf(a.valid_from),
       validUntil: isoOf(a.valid_until),

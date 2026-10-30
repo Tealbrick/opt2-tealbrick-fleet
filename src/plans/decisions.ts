@@ -3,7 +3,7 @@
 import type { Db } from "@opt2-tealbrick/miniapp-sdk";
 import { setAgentMoved } from "../lifecycle/moved.ts";
 import type { Lifecycle } from "../lifecycle/states.ts";
-import { type Actor, type Grant, loadSubject, type Subject, setKeepRunning, transition } from "../lifecycle/transitions.ts";
+import { type Actor, assertCap, type Grant, loadSubject, type Subject, setKeepRunning, transition } from "../lifecycle/transitions.ts";
 import { fail } from "../meta.ts";
 
 export interface AgentDecision {
@@ -15,10 +15,11 @@ export interface AgentDecision {
 
 const STOPPED: readonly string[] = ["suspended", "leaving"];
 
-/** Runs the choices in the caller's transaction, and answers the agents that get a new key. Only for a subject that is stopped: this op never starts a stop, so the cap on stops stays where it is. */
-export function applyDecisions(db: Db, s: Subject, decisions: readonly AgentDecision[], actor: Actor, grantsOf: (agent: string) => readonly Grant[], now: number): string[] {
+/** Runs the choices in the caller's transaction, and answers the agents that get a new key. Only for a subject that is stopped. Stop choices pass the cap once per call, as in lifecycle_set. */
+export function applyDecisions(db: Db, s: Subject, decisions: readonly AgentDecision[], actor: Actor, grantsOf: (agent: string) => readonly Grant[], now: number, confirmCount?: number): string[] {
   if (decisions.length > 0 && !STOPPED.includes(s.lifecycle)) fail("decisions_need_stop", "Stop this entry first. Then choose for each agent.", 409);
   if (new Set(decisions.map((d) => d.agent)).size !== decisions.length) fail("input_invalid", "Choose once for each agent.", 400);
+  if (decisions.some((d) => d.decision === "stop" && db.prepare("SELECT lifecycle FROM fleet_agents WHERE id = ?").get(d.agent)?.lifecycle !== "leaving")) assertCap(db, confirmCount, now);
   const moved: string[] = [];
   for (const d of decisions) {
     const a = db.prepare("SELECT lifecycle, owner_id FROM fleet_agents WHERE id = ?").get(d.agent) ?? fail("agent_not_found", "No such agent.", 404);
@@ -39,6 +40,7 @@ export function applyDecisions(db: Db, s: Subject, decisions: readonly AgentDeci
       continue;
     }
     if (!d.newOwner) fail("input_invalid", "Name the new owner.", 400);
+    if (d.newOwner === a.owner_id) fail("input_invalid", "Name a new owner. This is the owner now.", 400);
     setAgentMoved(db, { agent: d.agent, owner: d.newOwner as string }, { kind: "owner", id: actor.id }, now);
     moved.push(d.agent);
   }

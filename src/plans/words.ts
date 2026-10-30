@@ -13,8 +13,8 @@ export function coreLabel(op: string, name: string): string {
   return `Remove the old key of ${name}`;
 }
 
-/** `pauseOnly`: this agent has no offboard or new-key step in this plan. */
-export function coreStepText(s: Row, mode: string, pauseOnly = false): string {
+/** `undecided`: this agent is paused now, and no choice was made for it. */
+export function coreStepText(s: Row, mode: string, undecided = false): string {
   const state = String(s.state);
   const pause = s.op === "agents.pause";
   switch (state) {
@@ -23,7 +23,7 @@ export function coreStepText(s: Row, mode: string, pauseOnly = false): string {
     case "pending_bridge":
       return "Portal says this is done. The bridge has not shown it yet.";
     case "done":
-      return pause ? (pauseOnly ? KEY_STILL_EXISTS : "Stopped at the bridge.") : s.op === "agents.offboard" ? "Stopped at the bridge. Portal shows no access left." : "Portal shows no old key left.";
+      return pause ? (undecided ? KEY_STILL_EXISTS : "Stopped at the bridge.") : s.op === "agents.offboard" ? "Stopped at the bridge. Portal shows no access left." : "Portal shows no old key left.";
     case "reported":
       return String(s.detail ?? "Portal says this is done. Governance cannot see it.");
     case "not_provable":

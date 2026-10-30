@@ -32,7 +32,7 @@ export const planOps = {
       const topology = readTopology(ctx);
       const grants = (agent: string) => grantsOf(db, topology, "agent", agent);
       const asked = { kind: input.kind, id: input.id, items: input.items, expiresInSec: input.expiresInSec, actor };
-      const choose = () => [...(input.transfers ?? []), ...applyDecisions(db, subjectAt(db, input.kind, input.id, input.expectedRev), input.decisions ?? [], actor, grants, now)];
+      const choose = () => [...(input.transfers ?? []), ...applyDecisions(db, subjectAt(db, input.kind, input.id, input.expectedRev), input.decisions ?? [], actor, grants, now, input.confirmCount)];
       // Tried first and rolled back: what would refuse takes no older draft back. No await in the try.
       try {
         db.transaction(() => {
@@ -42,9 +42,17 @@ export const planOps = {
       } catch (e) {
         if (!(e instanceof TriedOnly)) throw e;
       }
-      assertAllClosed(await closeOpenPlans(pc, openPlansOf(db, input.kind, input.id), "replaced"));
+      const closed = await closeOpenPlans(pc, openPlansOf(db, input.kind, input.id), "replaced");
+      assertAllClosed(closed);
       // One transaction: the choices and the plan that carries them.
-      const made = db.transaction(() => createPlan(db, { ...asked, transfers: choose() }, now));
+      let made: ReturnType<typeof createPlan>;
+      try {
+        made = db.transaction(() => createPlan(db, { ...asked, transfers: choose() }, now));
+      } catch (e) {
+        // The entry moved during the call to Portal. The owner reads what is true: the older request is gone, no new one was made.
+        if (closed.withdrawn > 0 && e instanceof TbError) throw new TbError(e.code, `${e.message} The older request in Portal was taken back already, and no new one was made.`, e.httpStatus);
+        throw e;
+      }
       kickPlans(ctx as never);
       return { plans: viewAll(ctx.db, made.ids) };
     },

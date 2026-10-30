@@ -8448,6 +8448,11 @@
             "type": "integer",
             "minimum": 60,
             "maximum": 86400
+          },
+          "confirmCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
           }
         }
       },

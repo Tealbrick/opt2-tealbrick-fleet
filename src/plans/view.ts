@@ -1,5 +1,6 @@
 // A plan as the owner reads it. Counts keep what is proved apart from what someone only said. No raw id goes into a sentence.
 import type { Db } from "@opt2-tealbrick/miniapp-sdk";
+import { undecidedKeys } from "./guards.ts";
 import { getPlan, type Row, stepsOf } from "./plan.ts";
 import { NOT_CHANGED } from "./portal-link.ts";
 import { ASK_AGAIN_STATES, isFinalStep, isOpenPlan, stuckStep } from "./steps.ts";
@@ -30,8 +31,7 @@ function noteOf(db: Db, p: Row, mode: string): string | null {
 export function planView(db: Db, id: string) {
   const p = getPlan(db, id) as Row;
   const steps = stepsOf(db, id);
-  const pauseOnly = (s: Row): boolean => !steps.some((x) => x.phase === "core" && x.agent_id === s.agent_id && x.op !== "agents.pause");
-  const keysLeft = steps.filter((s) => s.phase === "core" && s.op === "agents.pause" && s.state === "done" && pauseOnly(s)).length;
+  const undecided = undecidedKeys(db, String(p.subject_kind), String(p.subject_id));
   const nameOf = (agent: unknown): string => String(db.prepare("SELECT name FROM fleet_agents WHERE id = ?").get(String(agent))?.name ?? "This agent");
   const real = steps.filter((s) => s.phase !== "read" && s.state !== "listed");
   const counts = {
@@ -56,7 +56,7 @@ export function planView(db: Db, id: string) {
     state: String(p.state),
     headline: headlineOf(p, counts),
     mode,
-    note: [noteOf(db, p, mode), keysLeft > 0 ? noteKeys(keysLeft) : null].filter(Boolean).join(" ") || null,
+    note: [noteOf(db, p, mode), undecided.size > 0 ? noteKeys(undecided.size) : null].filter(Boolean).join(" ") || null,
     reviewUrl: p.review_url === null ? null : String(p.review_url),
     expiresAt: iso(p.expires_at),
     openedAt: iso(p.opened_at) as string,
@@ -76,7 +76,7 @@ export function planView(db: Db, id: string) {
           storeName: storeName(String(s.target)),
           label: core ? coreLabel(String(s.op), nameOf(s.agent_id)) : String(s.label ?? ""),
           state: String(s.state),
-          text: core ? coreStepText(s, mode, pauseOnly(s)) : itemStepText(s),
+          text: core ? coreStepText(s, mode, undecided.has(String(s.agent_id))) : itemStepText(s),
           code: s.code === null ? null : String(s.code),
           final: isFinalStep(String(s.state)),
           tries: Number(s.tries),
