@@ -219,6 +219,42 @@ const PARTIAL = planOf({
 });
 const PERSON = `person-or-agent?kind=person&id=${ID.p}`;
 
+
+// ── Tier 2 pages (C380 T2-b): review rounds and the Access record. The route works with the ops; the nav entry waits for the QA rows. ──
+const TIER2_OPS = ["round_create", "round_get", "round_verdict", "round_set", "record_export", "overview_get", "reviews_list"];
+const roundCounts = { total: 3, open: 1, trusted: 1, limited: 0, blocked: 0, dismissed: 1, removalQueued: 1, removalPlanned: 1 };
+const roundSummary = { id: "rnd_01J0000000000000000000R1", title: "Q4 review", scope: "everyone", createdAt: "2026-10-28T09:00:00Z", dueAt: "2026-11-10T09:00:00Z", closedAt: null, state: "open", overdue: false, counts: roundCounts };
+const accessRows = [
+  { product: "connect", productName: "Connect", id: "channel_sender:s1", kind: "channel_sender", label: "Slack: Marco's handle", level: "use", direction: "held_by", state: "active", revocable: true, digest: "sha256:01" },
+  { product: "knowledge", productName: "Knowledge", id: "team_grant:t1", kind: "team_grant", label: "Support team reads Marco's memory", level: "read", direction: "about", state: "active", revocable: true, digest: "sha256:02" },
+  { product: "kanban", productName: "Task Board", id: "assignment:i1", kind: "assignment", label: "Issue: Renew the contract", level: "info", direction: "held_by", state: "active", revocable: false, digest: "sha256:03" },
+];
+const roundItem = (over: Record<string, unknown>) => ({ review: "rvw_01J0000000000000000000A1", subject: { kind: "person", id: ID.p, name: "Marco Rossi" }, status: "open", reason: null, decidedAt: null, decidedIn: null, snapshotDigest: "snap", accessDigest: "acc", access: accessRows, accessCount: 3, removal: null, ...over });
+const roundDetail = {
+  ...roundSummary,
+  items: [
+    roundItem({}),
+    roundItem({ review: "rvw_2", subject: { kind: "agent", id: ID.a, name: "Henry" }, status: "trusted", reason: "Fine.", decidedAt: "2026-10-29T10:00:00Z", snapshotDigest: null, access: [], accessCount: 0, decidedIn: "round", removal: { state: "queued", note: "Waiting for a free place. Send it again when the open plans are done.", plan: null, planState: null, count: 1, headline: null, proved: 0, manual: 0, open: 0 } }),
+    roundItem({ review: "rvw_3", subject: { kind: "agent", id: ID.b, name: "Sales" }, status: "dismissed", snapshotDigest: null, access: [], accessCount: 0 }),
+  ],
+};
+const roundOps = { ...shell, round_get: (i: unknown) => ((i as { round?: string }).round ? ok({ rounds: [roundSummary], round: roundDetail })(i) : ok({ rounds: [roundSummary, { ...roundSummary, id: "rnd_2", title: "Q3 review", state: "closed", closedAt: "2026-07-30T09:00:00Z", counts: { ...roundCounts, open: 0 } }], round: null })(i)) };
+
+const recordFile = {
+  format: "tealbrick.access-record/1",
+  header: "What each app reported and what the Portal slice showed, in Teal Brick stores only. Not proof of compliance.",
+  limits: ["Our own apps report this data. A list proves only what the app reported.", "This record makes no claim about any law, standard or audit.", "One person approved all items. Governance has one owner login today."],
+  period: { from: "2026-08-01T00:00:00.000Z", to: "2026-10-30T00:00:00.000Z" },
+  generatedAt: "2026-10-30T12:00:00.000Z",
+  contents: { includes: ["Names and ids of people and agents."], excludes: ["Email addresses, titles, tags."], decision: "What this file holds about people is a default. Nobody checked this against a law." },
+  approvers: { count: 1, ids: ["per_1"], line: "One person approved all items." },
+  sweeps: { count: 2, notFinished: 0, lists: [{ id: "swp_1", startedAt: "a", finishedAt: "2026-10-29T10:00:00.000Z", listKept: true, stores: [{ product: "connect", store: "Connect", state: "read", readThisSweep: true }], items: [], ended: [] }, { id: "swp_2", startedAt: "b", finishedAt: "2026-10-30T10:00:00.000Z", listKept: true, stores: [{ product: "connect", store: "Connect", state: "not_read", readThisSweep: false }], items: [], ended: [] }] },
+  findings: { items: [{ text: "This agent has no owner. Name an owner." }] },
+  exceptions: [],
+  timeToStop: [{ subject: { name: "Marco Rossi" }, markedAt: "2026-10-29T10:00:00.000Z", stoppedAt: "2026-10-29T10:01:12.000Z", seconds: 72, note: null, steps: { proved: 3, total: 3 } }],
+  appsNotRead: { now: [{ product: "connect", name: "Connect", text: "Could not be read." }] },
+  integrity: { chain: { ok: true, rows: 40 }, digest: "sha256:abc" },
+};
 // ── Roles (C380 T2-a) ─────────────────────────────────────────────────────
 const ROLE_OPS = ["roles_list", "role_get", "role_set", "role_assign", "role_end", "overview_get", "reviews_list"];
 const roleRow = (over: Record<string, unknown> = {}) => ({ id: "rol_01J000000000000000000000R1", name: "Contractor", description: "Works for a limited time", archived: false, members: 2, scheduled: 1, createdAt: "2026-10-30T09:00:00Z", ...over });
@@ -594,5 +630,40 @@ export const scenes: Scene[] = [
   { name: "reviews-words", path: "reviews", strict: true, ops: { ...shell, overview_get: ok(overview), reviews_list: ok({ reviews: [], due: [], nextCursor: null, policy: { enabled: false, intervalDays: 90 } }) }, ready: "Review someone", expect: ["Reviews"] },
   { name: "access-words", path: "access", strict: true, ops: { ...shell, access_get: ok({ status: "unavailable", reason: "not_consented", note: "App access is not shown. Turn on 'See who has access' for Governance in the Portal (app settings) to show this." }) }, ready: "App access is not shown", expect: ["does not find agents you do not know about"] },
   { name: "who-owns-what", path: "topology", strict: true, ops: { ...shell, access_get: ok({ status: "unavailable", reason: "not_consented", note: "App access is not shown." }), topology_get: ok({ revision: 1, nodes: [], edges: [], sources: { contacts: { status: "unavailable", note: "Connect is not available." } } }) }, ready: "Who owns what" },
+  // Tier 2 (C380 T2-b)
+  { name: "rounds", path: "review-rounds", personOps: TIER2_OPS, strict: true, ops: roundOps, ready: "Q4 review", expect: ["Review rounds", "2 of 3 decided", "Closed"] },
+  { name: "rounds-empty", path: "review-rounds", personOps: TIER2_OPS, strict: true, ops: { ...shell, round_get: ok({ rounds: [], round: null }) }, ready: "No review rounds yet", expect: ["Start a round"] },
+  { name: "rounds-loading", path: "review-rounds", personOps: TIER2_OPS, strict: true, ops: { ...shell, round_get: hang }, ready: "Loading review rounds" },
+  { name: "rounds-error", path: "review-rounds", personOps: TIER2_OPS, strict: true, ops: { ...shell, round_get: fail("internal") }, ready: "Try again" },
+  { name: "rounds-start", path: "review-rounds", personOps: TIER2_OPS, strict: true, ops: roundOps, ready: "Q4 review", steps: (p) => button(p, "Start a round"), expect: ["Name of the round", "left out"] },
+  { name: "round", path: "review-rounds", personOps: TIER2_OPS, strict: true, ops: roundOps, ready: "Q4 review", steps: (p) => button(p, /^Open Q4 review$/), expect: ["Marco Rossi", "Not decided", "Trusted", "Skipped", "Waiting for a free place", "Send waiting removals", "1 entry has a removal in a plan"], forbid: ["sha256", "rvw_"] },
+  {
+    name: "round-review",
+    path: "review-rounds",
+    personOps: TIER2_OPS,
+    strict: true,
+    ops: roundOps,
+    ready: "Q4 review",
+    steps: async (p) => {
+      await button(p, /^Open Q4 review$/);
+      await p.getByText("Marco Rossi").first().waitFor();
+      await button(p, /^Review Marco Rossi$/);
+    },
+    expect: ["What the apps report", "Slack: Marco's handle", "Others can reach this entry's things", "This app cannot end this from here", "Your review"],
+    forbid: ["sha256", "has been removed"],
+  },
+  { name: "record", path: "access-record", personOps: TIER2_OPS, strict: true, ops: { ...shell, record_export: ok({ record: recordFile, digest: "sha256:abc" }) }, ready: "Make the record", expect: ["Access record", "Our own apps report this data", "no claim about any law or standard"], forbid: ["compliance", "Evidence"] },
+  {
+    name: "record-ready",
+    path: "access-record",
+    personOps: TIER2_OPS,
+    strict: true,
+    ops: { ...shell, record_export: ok({ record: recordFile, digest: "sha256:abc" }) },
+    ready: "Make the record",
+    steps: (p) => button(p, "Make the record"),
+    expect: ["The file is ready", "2 sweeps", "One person approved all items", "Not read: Connect", "Download the file", "Print"],
+  },
+  { name: "record-error", path: "access-record", personOps: TIER2_OPS, strict: true, ops: { ...shell, record_export: fail("record_too_big", 409, "This period has too many rows for one file. Choose a shorter period.") }, ready: "Make the record", steps: (p) => button(p, "Make the record"), expect: ["Choose a shorter period"] },
+  { name: "nav-waits-for-qa", path: "", personOps: [...LIFECYCLE_OPS, ...TIER2_OPS], strict: true, ops: pageOps, ready: "Ready to stop an agent?", forbid: ["Review rounds", "Access record"] },
   { name: "signed-out", path: "people", ops: {}, signedOut: true, ready: "Open this app from Portal" },
 ];

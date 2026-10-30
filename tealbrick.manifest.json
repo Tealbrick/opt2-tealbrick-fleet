@@ -1163,7 +1163,7 @@
                     }
                   }
                 }
-                },
+              },
               "epoch": {
                 "type": "string",
                 "pattern": "^[A-Za-z0-9_-]{1,64}$"
@@ -10613,6 +10613,1267 @@
       "idempotency": "supported",
       "receipt": false,
       "audience": "person"
+    },
+    {
+      "id": "round_create",
+      "title": "Start a review round",
+      "description": "Ask for one review of each person and agent in a list, and count the answers. It reads the directory and changes no access. A person or agent already in an open round is left out. Owner only. No agent can call it.",
+      "crud": [
+        "create"
+      ],
+      "effect": "write",
+      "idempotency": "required",
+      "receipt": false,
+      "audience": "person",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "scope"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "scope": {
+            "enum": [
+              "agents",
+              "people",
+              "everyone",
+              "chosen"
+            ]
+          },
+          "subjects": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "id"
+              ],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "agent",
+                    "person"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                }
+              }
+            }
+          },
+          "dueDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "round",
+          "skipped"
+        ],
+        "properties": {
+          "round": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "title",
+              "scope",
+              "createdAt",
+              "dueAt",
+              "closedAt",
+              "state",
+              "overdue",
+              "counts"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "dueAt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "closedAt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "state": {
+                "enum": [
+                  "open",
+                  "closed"
+                ]
+              },
+              "overdue": {
+                "type": "boolean"
+              },
+              "counts": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "total",
+                  "open",
+                  "trusted",
+                  "limited",
+                  "blocked",
+                  "dismissed",
+                  "removalQueued",
+                  "removalPlanned"
+                ],
+                "properties": {
+                  "total": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "open": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "trusted": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "limited": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "blocked": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "dismissed": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "removalQueued": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "removalPlanned": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          "skipped": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "round_get",
+      "title": "See review rounds",
+      "description": "The list of review rounds with their counts, and one round with each entry: what it holds now by app, what you decided and what you asked to remove. Owner only.",
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "round": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rounds",
+          "round"
+        ],
+        "properties": {
+          "rounds": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "title",
+                "scope",
+                "createdAt",
+                "dueAt",
+                "closedAt",
+                "state",
+                "overdue",
+                "counts"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "scope": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "string"
+                },
+                "dueAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "closedAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "state": {
+                  "enum": [
+                    "open",
+                    "closed"
+                  ]
+                },
+                "overdue": {
+                  "type": "boolean"
+                },
+                "counts": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "total",
+                    "open",
+                    "trusted",
+                    "limited",
+                    "blocked",
+                    "dismissed",
+                    "removalQueued",
+                    "removalPlanned"
+                  ],
+                  "properties": {
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "open": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "trusted": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "limited": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "blocked": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "dismissed": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "removalQueued": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "removalPlanned": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "round": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "title",
+                  "scope",
+                  "createdAt",
+                  "dueAt",
+                  "closedAt",
+                  "state",
+                  "overdue",
+                  "counts",
+                  "items"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "createdAt": {
+                    "type": "string"
+                  },
+                  "dueAt": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "closedAt": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "state": {
+                    "enum": [
+                      "open",
+                      "closed"
+                    ]
+                  },
+                  "overdue": {
+                    "type": "boolean"
+                  },
+                  "counts": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "total",
+                      "open",
+                      "trusted",
+                      "limited",
+                      "blocked",
+                      "dismissed",
+                      "removalQueued",
+                      "removalPlanned"
+                    ],
+                    "properties": {
+                      "total": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "open": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "trusted": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "limited": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "blocked": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "dismissed": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "removalQueued": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "removalPlanned": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "items": {
+                    "type": "array",
+                    "maxItems": 200,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "review",
+                        "subject",
+                        "status",
+                        "reason",
+                        "decidedAt",
+                        "decidedIn",
+                        "snapshotDigest",
+                        "accessDigest",
+                        "access",
+                        "accessCount",
+                        "removal"
+                      ],
+                      "properties": {
+                        "review": {
+                          "type": "string"
+                        },
+                        "subject": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "kind",
+                            "id",
+                            "name"
+                          ],
+                          "properties": {
+                            "kind": {
+                              "type": "string"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "status": {
+                          "enum": [
+                            "open",
+                            "trusted",
+                            "limited",
+                            "blocked",
+                            "dismissed"
+                          ]
+                        },
+                        "reason": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "decidedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "decidedIn": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "round",
+                                "elsewhere"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "snapshotDigest": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "accessDigest": {
+                          "type": "string"
+                        },
+                        "access": {
+                          "type": "array",
+                          "maxItems": 200,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "product",
+                              "productName",
+                              "id",
+                              "kind",
+                              "label",
+                              "level",
+                              "direction",
+                              "state",
+                              "revocable",
+                              "digest"
+                            ],
+                            "properties": {
+                              "product": {
+                                "type": "string"
+                              },
+                              "productName": {
+                                "type": "string"
+                              },
+                              "id": {
+                                "type": "string"
+                              },
+                              "kind": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "level": {
+                                "type": "string"
+                              },
+                              "direction": {
+                                "enum": [
+                                  "held_by",
+                                  "about"
+                                ]
+                              },
+                              "state": {
+                                "type": "string"
+                              },
+                              "revocable": {
+                                "type": "boolean"
+                              },
+                              "digest": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "accessCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "removal": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "state",
+                                "note",
+                                "plan",
+                                "planState",
+                                "count",
+                                "headline",
+                                "proved",
+                                "manual",
+                                "open"
+                              ],
+                              "properties": {
+                                "state": {
+                                  "type": "string"
+                                },
+                                "note": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "plan": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "planState": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "headline": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "proved": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "manual": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "open": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "round_verdict",
+      "title": "Decide one entry of a round",
+      "description": "Record the review of one entry of a round, and if you tick access to remove, make a stop plan for it by the same path as any plan. Nothing is removed until the plan runs and the app confirms. Owner only. No agent can call it.",
+      "crud": [
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "required",
+      "receipt": false,
+      "audience": "person",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "round",
+          "subject",
+          "verdict",
+          "reason",
+          "snapshotDigest",
+          "accessDigest"
+        ],
+        "properties": {
+          "round": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "subject": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "id"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "agent",
+                  "person"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              }
+            }
+          },
+          "verdict": {
+            "enum": [
+              "trusted",
+              "limited",
+              "blocked"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "snapshotDigest": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "accessDigest": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "remove": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "product",
+                "id",
+                "digest"
+              ],
+              "properties": {
+                "product": {
+                  "enum": [
+                    "connect",
+                    "knowledge",
+                    "kanban",
+                    "evolution"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "digest": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                }
+              }
+            }
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "item",
+          "plan"
+        ],
+        "properties": {
+          "item": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "review",
+              "subject",
+              "status",
+              "reason",
+              "decidedAt",
+              "decidedIn",
+              "snapshotDigest",
+              "accessDigest",
+              "access",
+              "accessCount",
+              "removal"
+            ],
+            "properties": {
+              "review": {
+                "type": "string"
+              },
+              "subject": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "id",
+                  "name"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              },
+              "status": {
+                "enum": [
+                  "open",
+                  "trusted",
+                  "limited",
+                  "blocked",
+                  "dismissed"
+                ]
+              },
+              "reason": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "decidedAt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "decidedIn": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "round",
+                      "elsewhere"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "snapshotDigest": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "accessDigest": {
+                "type": "string"
+              },
+              "access": {
+                "type": "array",
+                "maxItems": 200,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "product",
+                    "productName",
+                    "id",
+                    "kind",
+                    "label",
+                    "level",
+                    "direction",
+                    "state",
+                    "revocable",
+                    "digest"
+                  ],
+                  "properties": {
+                    "product": {
+                      "type": "string"
+                    },
+                    "productName": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "level": {
+                      "type": "string"
+                    },
+                    "direction": {
+                      "enum": [
+                        "held_by",
+                        "about"
+                      ]
+                    },
+                    "state": {
+                      "type": "string"
+                    },
+                    "revocable": {
+                      "type": "boolean"
+                    },
+                    "digest": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "accessCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "removal": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "state",
+                      "note",
+                      "plan",
+                      "planState",
+                      "count",
+                      "headline",
+                      "proved",
+                      "manual",
+                      "open"
+                    ],
+                    "properties": {
+                      "state": {
+                        "type": "string"
+                      },
+                      "note": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "plan": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "planState": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "count": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "headline": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "proved": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "manual": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "open": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "round_set",
+      "title": "Send queued removals or close a round",
+      "description": "Send makes the plans that wait for a free place. Close ends the round: entries nobody decided are dismissed and queued removals are dropped. Owner only.",
+      "crud": [
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "supported",
+      "receipt": false,
+      "audience": "person",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "round",
+          "action"
+        ],
+        "properties": {
+          "round": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "action": {
+            "enum": [
+              "send",
+              "close"
+            ]
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "round",
+          "planned",
+          "queued"
+        ],
+        "properties": {
+          "round": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "title",
+              "scope",
+              "createdAt",
+              "dueAt",
+              "closedAt",
+              "state",
+              "overdue",
+              "counts"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "dueAt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "closedAt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "state": {
+                "enum": [
+                  "open",
+                  "closed"
+                ]
+              },
+              "overdue": {
+                "type": "boolean"
+              },
+              "counts": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "total",
+                  "open",
+                  "trusted",
+                  "limited",
+                  "blocked",
+                  "dismissed",
+                  "removalQueued",
+                  "removalPlanned"
+                ],
+                "properties": {
+                  "total": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "open": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "trusted": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "limited": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "blocked": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "dismissed": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "removalQueued": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "removalPlanned": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          "planned": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "queued": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "record_export",
+      "title": "Make the access record",
+      "description": "Make one file for a period of up to a year: what each app listed in every sweep with the rows that ended, the open and accepted differences, the time from a stop to the proof, the apps that were not read, verdicts, plans with their outcomes, and who approved. Our own apps report this data. The file makes no claim about any law or standard, and it states its limits. Dates are in ISO form; a date alone is the whole day in UTC, and the end is never in the future. It changes no access. It writes one event with the digest of the file. Owner only.",
+      "crud": [
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "supported",
+      "receipt": false,
+      "audience": "person",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "from": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "to": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "record",
+          "digest"
+        ],
+        "properties": {
+          "record": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "format",
+              "period",
+              "limits",
+              "integrity"
+            ]
+          },
+          "digest": {
+            "type": "string"
+          }
+        }
+      }
     },
     {
       "id": "exclusions_list",

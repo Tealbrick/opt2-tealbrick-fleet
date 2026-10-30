@@ -19,6 +19,13 @@ export type Features = {
   exclusionsInNav: boolean;
   /** the live plan, Try again, the request in Portal */
   plans: boolean;
+  /** Review rounds: the route works when the ops are there (QA reaches it by its address) */
+  rounds: boolean;
+  /** Access record */
+  record: boolean;
+  /** the nav entries: the ops are there AND the QA rows of the page passed */
+  roundsNav: boolean;
+  recordNav: boolean;
 };
 
 /**
@@ -34,8 +41,16 @@ export const EXCLUSION_ROWS_PASSED = false;
 const ROLE_OPS = ["roles_list", "role_get", "role_set", "role_assign", "role_end"];
 const EXCLUSION_OPS = ["exclusions_list", "exclusion_set"];
 
-export function featuresOf(ops: readonly string[], rolesRowsPassed: boolean = ROLES_ROWS_PASSED, exclusionRowsPassed: boolean = EXCLUSION_ROWS_PASSED): Features {
+/**
+ * Tier 2 pages (C380 T2-b) stay off the nav until their QA rows pass: no half-shown page. One line flips each, in the PR that follows the PASS line on BOARD.
+ * R5 = rounds, R6 to R8 = the access record.
+ */
+export const TIER2_PASSED = { rounds: false, record: false } as const;
+
+export function featuresOf(ops: readonly string[], rolesRowsPassed: boolean = ROLES_ROWS_PASSED, exclusionRowsPassed: boolean = EXCLUSION_ROWS_PASSED, passed: { rounds: boolean; record: boolean } = TIER2_PASSED): Features {
   const has = (...names: string[]) => names.every((n) => ops.includes(n));
+  const rounds = has("round_create", "round_get", "round_verdict", "round_set");
+  const record = has("record_export");
   return {
     lifecycle: has("summary_get", "colleagues_list", "colleague_get", "lifecycle_set"),
     preview: has("plan_preview"),
@@ -46,6 +61,10 @@ export function featuresOf(ops: readonly string[], rolesRowsPassed: boolean = RO
     exclusions: has(...ROLE_OPS, ...EXCLUSION_OPS),
     exclusionsInNav: has(...ROLE_OPS, ...EXCLUSION_OPS) && exclusionRowsPassed,
     plans: has("plan_send", "plan_get", "plan_retry", "plan_cancel"),
+    rounds,
+    record,
+    roundsNav: rounds && passed.rounds,
+    recordNav: record && passed.record,
   };
 }
 
