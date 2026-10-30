@@ -219,6 +219,76 @@ const PARTIAL = planOf({
 });
 const PERSON = `person-or-agent?kind=person&id=${ID.p}`;
 
+const JOIN_OPS = [...LIFECYCLE_OPS, "person_set", "members_set"];
+const joinOps = { ...shell, overview_get: ok(overview), person_set: (i: unknown): Answer => ({ kind: "ok", value: { person: { id: "per_01J00000000000000000000N1", name: (i as { name: string }).name } } }), members_set: ok({ team: { id: ID.t } }) };
+const settle = (p: Page) => p.waitForTimeout(500);
+async function joinNext(p: Page, label = "Next") {
+  await button(p, label);
+  await settle(p);
+}
+/** Join, one person, to its Confirm step as a contractor with a last day. */
+async function joinOneToConfirm(p: Page) {
+  await button(p, "Add a person");
+  await p.getByLabel("Name").fill("Dana Lee");
+  await p.getByLabel("Email").fill("dana@acme.example");
+  await joinNext(p);
+  await p.getByRole("radio", { name: /contractor/i }).click();
+  await p.getByLabel("Last day").first().fill("2099-12-31");
+  await joinNext(p);
+}
+function joinScenes(): Scene[] {
+  const base = { path: "join", personOps: JOIN_OPS, strict: true, ops: joinOps } as const;
+  const list = async (p: Page, text: string) => {
+    await button(p, "Add people from a list");
+    await p.getByLabel("The list").fill(text);
+    await joinNext(p);
+  };
+  return [
+    { ...base, name: "join-page", ready: "Add a person", expect: ["gives no access", "A contractor has a last day"] },
+    { ...base, name: "join-one-who", ready: "Add a person", steps: (p) => button(p, "Add a person"), expect: ["Channel handles", "It gives no access to anything"] },
+    { ...base, name: "join-one-loading", ops: { ...joinOps, overview_get: hang }, ready: "Add a person", steps: (p) => button(p, "Add a person"), expect: ["Reading your directory."] },
+    { ...base, name: "join-one-directory-error", ops: { ...joinOps, overview_get: fail("internal") }, ready: "Add a person", steps: (p) => button(p, "Add a person"), expect: ["could not be read, so Join cannot check"] },
+    {
+      ...base,
+      name: "join-one-confirm",
+      ready: "Add a person",
+      steps: joinOneToConfirm,
+      expect: ["At the end of 2099-12-31", "It gives no access in any app", "does not end their own logins"],
+      forbid: ["have stopped"],
+    },
+    {
+      ...base,
+      name: "join-one-result",
+      ready: "Add a person",
+      steps: async (p) => {
+        await joinOneToConfirm(p);
+        await joinNext(p, "Add person");
+      },
+      expect: ["Dana Lee is added.", "Last day saved: 2099-12-31", "Joining gives no access", "grant it in Portal"],
+    },
+    {
+      ...base,
+      name: "join-list-check",
+      ready: "Add a person",
+      steps: (p) => list(p, "Name, Email\nBo Bell, bo@acme.example, slack:U3BO00003\nMarco Rossi\nCy Cole\tcy@acme.example\tDesigner\nx@y.example, a@b.example, Zed"),
+      expect: ["2 ready to add, 1 in the directory already, 1 to fix.", "The first line is a header and is left out.", "There is more than one email."],
+    },
+    {
+      ...base,
+      name: "join-list-partial",
+      ops: { ...joinOps, person_set: (i: unknown): Answer => ((i as { name: string }).name === "Cy Cole" ? { kind: "error", status: 409, code: "handle_taken", message: "slack:u3cy00003 belongs to another person" } : { kind: "ok", value: { person: { id: "per_01J00000000000000000000N2", name: (i as { name: string }).name } } }) },
+      ready: "Add a person",
+      steps: async (p) => {
+        await list(p, "Bo Bell\nCy Cole, slack:U3CY00003\nDi Dole");
+        await joinNext(p);
+        await joinNext(p);
+        await joinNext(p, "Add 3 people");
+      },
+      expect: ["2 added, 1 did not go through, 0 not tried.", "Send again", "Nothing was added twice"],
+    },
+  ];
+}
+
 export const scenes: Scene[] = [
   { name: "summary", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: pageOps, ready: "Ready to stop an agent?", expect: ["Could not be read", "Not installed", "Rules has this change", "cannot see that switch"] },
   { name: "summary-no-stop-open", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, summary_get: ok({ ...summary, agents: { ...summary.agents, stopping: 0 }, people: { ...summary.people, leaving: 0 } }) }, ready: "Ready to stop an agent?", forbid: ["Rules has this change"] },
@@ -461,4 +531,6 @@ export const scenes: Scene[] = [
   { name: "access-words", path: "access", strict: true, ops: { ...shell, access_get: ok({ status: "unavailable", reason: "not_consented", note: "App access is not shown. Turn on 'See who has access' for Governance in the Portal (app settings) to show this." }) }, ready: "App access is not shown", expect: ["does not find agents you do not know about"] },
   { name: "who-owns-what", path: "topology", strict: true, ops: { ...shell, access_get: ok({ status: "unavailable", reason: "not_consented", note: "App access is not shown." }), topology_get: ok({ revision: 1, nodes: [], edges: [], sources: { contacts: { status: "unavailable", note: "Connect is not available." } } }) }, ready: "Who owns what" },
   { name: "signed-out", path: "people", ops: {}, signedOut: true, ready: "Open this app from Portal" },
+  // Join (C380 T2-d). A route with no nav entry until R12 to R14 pass, so each scene opens it by its address.
+  ...joinScenes(),
 ];
