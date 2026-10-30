@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { validateAgainstSchema } from "@opt2-tealbrick/manifest";
+import { validateAgainstSchema, validateCompanions } from "@opt2-tealbrick/manifest";
 import { type Db, type Json, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { manifest } from "../src/app.ts";
 import { type DirectoryFeed, directoryFeed } from "../src/feed.ts";
@@ -270,4 +270,24 @@ test("a date tick: a subject that fails stays for the next tick and does not sto
   // a start date that has passed needs no wait
   setDates(late.db, { kind: "agent", id: AGENT_B.id, validFrom: new Date(T0 - 5).toISOString(), actor: OWNER }, T0);
   assert.equal(feedOf(late.db).agents.find((a) => a.id === AGENT_B.id)?.floor, false);
+});
+
+test("rules.floor_status: the deployed shape (byte copy of Rules 0.7.0-dev.1) reads right; the companion passes M-CP-2 against it; an older Rules fails it", async () => {
+  const rules = contract("rules.0.7.0-dev.1.manifest.json");
+  const sha = createHash("sha256").update(readFileSync(new URL("./contracts/rules.0.7.0-dev.1.manifest.json", import.meta.url))).digest("hex");
+  assert.ok(readFileSync(new URL("./contracts/PROVENANCE.md", import.meta.url), "utf8").includes(sha));
+  const op = rules.operations.find((o: { id: string }) => o.id === "floor_status");
+  assert.equal(op.listing, "workflow");
+  const reads = (output: unknown) => readFloorStatus({ companionTargets: () => ["rules"], callApp: async () => ({ status: "ok", output }) } as never);
+  for (const output of [{ version: "0.7.0-dev.1", feedRevision: null, entries: 0, lastGateAt: null }, { version: "0.7.0-dev.1", feedRevision: 12, entries: 3, lastGateAt: "2026-10-30T17:00:00.000Z" }]) {
+    assert.equal(validateAgainstSchema(op.output, output as Json).ok, true);
+    assert.deepEqual(await reads(output), output);
+  }
+  const never = floorView({ version: "0.7.0-dev.1", feedRevision: null, entries: 0, lastGateAt: null }, 1, T0, true);
+  assert.equal(never.state, "not_confirmed", "Rules has not read the feed yet: nothing is confirmed");
+  assert.equal(floorView({ version: "0.7.0-dev.1", feedRevision: null, entries: 0, lastGateAt: null }, 0, T0, true).state, "not_confirmed");
+  type RulesOp = { id: string; audience: string; crud: string[] };
+  const target = (ops: RulesOp[]) => [{ id: "rules", operations: ops.map((o) => ({ id: o.id, audience: o.audience, crud: o.crud })) }];
+  assert.equal(validateCompanions(manifest as never, target(rules.operations) as never).ok, true);
+  assert.equal(validateCompanions(manifest as never, target(rules.operations.filter((o: RulesOp) => o.id !== "floor_status")) as never).ok, false, "a Rules before 0.7.0 fails it: the changelog says so");
 });

@@ -9,11 +9,11 @@ import { AGENT_A, AGENT_B, migratedDb, NOSTR } from "./helpers.ts";
 
 type Call = (product: string, op: string, input: unknown) => Promise<unknown>;
 
-test("C88: the identities view is a person op, the only user of the Connect companion; agents get nothing from it", () => {
+test("C88: the identities view is a person op; the Connect companion is identities, contacts and tb.access/1; agents get nothing from it", () => {
   const view = manifest.operations.find((o) => o.id === "identities_view");
   assert.equal(view?.audience, "person");
   const connect = manifest.companions?.filter((c) => c.product === "connect");
-  assert.deepEqual(connect, [{ product: "connect", operations: ["identities_list", "contacts_list"], crud: ["read"], purpose: connect?.[0]?.purpose }]);
+  assert.deepEqual(connect, [{ product: "connect", operations: ["identities_list", "contacts_list", "access_list", "access_revoke"], crud: ["read", "update"], purpose: connect?.[0]?.purpose }]);
   for (const o of manifest.operations.filter((x) => x.audience === "agent")) {
     assert.ok(!JSON.stringify(o.output).includes("identity"), `${o.id} output carries no identities`);
   }

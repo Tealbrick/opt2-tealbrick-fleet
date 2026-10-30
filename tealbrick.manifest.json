@@ -5,10 +5,10 @@
   "name": "Governance",
   "summary": "Governance: who is who in your workspace, who owns which agent, and how far each person, outside agent and agent is trusted.",
   "description": "Governance is the workspace's record of who should have access: one state per person and agent, with reasons and dates, and what no longer matches. It holds no grant and no credential, and it decides no call: Portal and Rules & Approvals do that.\n\n- **Summary:** how many agents you have, which have no owner, which can write or send, what no longer matches, and if you are ready to stop an agent.\n- **People and agents:** one line per person and agent: working, not reviewed, stop asked, paused. Each change has a reason and stays in the history.\n- **Stop an agent, or a person's agents:** one dialog for one agent, or a short flow for a person. Governance records the stop and lists what to do in Portal. Each screen says what does not change: their own logins, the agent's machine, copies already made.\n- **Reviews:** an agent can ask for a review and say why; only you decide. Each verdict is kept with a copy of what the subject could do at that time.\n- **Who owns what:** who owns which agent and who is in which team, as a table you can print for a security review.\n- **Contact rules:** you can propose a rule from a fixed template. It is sent to Rules & Approvals as a draft; you approve it there.\n- **Feed for apps:** Rules & Approvals and Knowledge read a small, versioned directory feed. It has no email addresses and no job titles.\n\nGovernance finds no agent you do not know about. People are directory entries, not sign-ins. This is a record for your own review, not proof of compliance.",
-  "version": "0.3.2",
+  "version": "0.4.0-dev.3",
   "sdkMajor": 1,
   "requires": {
-    "bridge": "0.2.12"
+    "bridge": "0.2.14"
   },
   "publisher": {
     "name": "Teal Brick opt2"
@@ -7844,6 +7844,1740 @@
       "idempotency": "supported",
       "receipt": false,
       "audience": "person"
+    },
+    {
+      "id": "reconcile_now",
+      "title": "Check now",
+      "description": "Read each app now and compare what it reports with this directory. It changes nothing in any app. The answer says if a new check started; a running check is enough. Owner only.",
+      "crud": [
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "supported",
+      "receipt": false,
+      "audience": "person",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "started"
+        ],
+        "properties": {
+          "started": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "id": "plan_preview",
+      "title": "See what would stop",
+      "description": "What each app reports now for one person or agent, and what a stop would do to each item. It changes nothing. A store that was not read says so; it is never shown as empty. Owner only.",
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "id"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "person",
+              "agent"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "subject",
+          "asOf",
+          "unlinkedAccounts",
+          "stores"
+        ],
+        "properties": {
+          "subject": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "id",
+              "name"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "person",
+                  "agent"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            }
+          },
+          "asOf": {
+            "type": "string"
+          },
+          "unlinkedAccounts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "stores": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "product",
+                "name",
+                "state",
+                "text",
+                "at",
+                "notShown",
+                "items"
+              ],
+              "properties": {
+                "product": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "state": {
+                  "enum": [
+                    "read",
+                    "not_installed",
+                    "not_read",
+                    "refused",
+                    "waiting"
+                  ]
+                },
+                "text": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "at": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "notShown": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "kind",
+                      "reason"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "type": "string"
+                      },
+                      "reason": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "kind",
+                      "label",
+                      "level",
+                      "direction",
+                      "state",
+                      "effect",
+                      "who"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "level": {
+                        "type": "string"
+                      },
+                      "direction": {
+                        "type": "string"
+                      },
+                      "state": {
+                        "type": "string"
+                      },
+                      "effect": {
+                        "enum": [
+                          "stops",
+                          "manual",
+                          "stays",
+                          "about"
+                        ]
+                      },
+                      "who": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "findings_list",
+      "title": "Differences",
+      "description": "What no longer matches between this directory and what the apps report, the apps that could not be read, and the time of the last check. It changes nothing. Owner only.",
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "lastSweepAt",
+          "storesRead",
+          "unread",
+          "items"
+        ],
+        "properties": {
+          "lastSweepAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "storesRead": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unread": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "product",
+                "name",
+                "text"
+              ],
+              "properties": {
+                "product": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "code",
+                "text",
+                "subject",
+                "productName",
+                "since",
+                "exception"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "subject": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "id",
+                        "name"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "enum": [
+                            "person",
+                            "agent"
+                          ]
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "productName": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "since": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "exception": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "reason",
+                        "until"
+                      ],
+                      "properties": {
+                        "reason": {
+                          "type": "string"
+                        },
+                        "until": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "exception_set",
+      "title": "Accept a difference",
+      "description": "Accept one difference of a person or agent with a reason until a date within one year. It changes no access, and the difference comes back on that date. Owner only.",
+      "crud": [
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "supported",
+      "receipt": false,
+      "audience": "person",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "kind",
+          "id",
+          "reason",
+          "until"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "kind": {
+            "enum": [
+              "person",
+              "agent"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "until": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "exception"
+        ],
+        "properties": {
+          "exception": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "reason",
+              "until"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "until": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "plan_send",
+      "title": "Make a stop plan",
+      "description": "Prepare the plan for a person or agent you stopped: what your confirm ends at once, and what waits for your approval in Portal. Governance applies nothing in Portal; you approve there. Answers at once; read the progress with plan_get. Only you can do this. No agent can call it.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "id"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "person",
+              "agent"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "expectedRev": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "transfers": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "product",
+                "id"
+              ],
+              "properties": {
+                "product": {
+                  "enum": [
+                    "connect",
+                    "knowledge",
+                    "kanban",
+                    "evolution"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "digest": {
+                  "type": "string",
+                  "maxLength": 80
+                }
+              }
+            }
+          },
+          "expiresInSec": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 86400
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "plans"
+        ],
+        "properties": {
+          "plans": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "groupId",
+                "part",
+                "parts",
+                "subject",
+                "purpose",
+                "trigger",
+                "state",
+                "headline",
+                "mode",
+                "note",
+                "reviewUrl",
+                "expiresAt",
+                "openedAt",
+                "closedAt",
+                "receiptId",
+                "canRetry",
+                "canCancel",
+                "counts",
+                "stores",
+                "steps",
+                "notChanged"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "groupId": {
+                  "type": "string"
+                },
+                "part": {
+                  "type": "integer"
+                },
+                "parts": {
+                  "type": "integer"
+                },
+                "subject": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "id",
+                    "name"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "purpose": {
+                  "type": "string"
+                },
+                "trigger": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "headline": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "note": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "reviewUrl": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "expiresAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "openedAt": {
+                  "type": "string"
+                },
+                "closedAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "receiptId": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "canRetry": {
+                  "type": "boolean"
+                },
+                "canCancel": {
+                  "type": "boolean"
+                },
+                "counts": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "proved",
+                    "said",
+                    "manual",
+                    "open"
+                  ],
+                  "properties": {
+                    "proved": {
+                      "type": "integer"
+                    },
+                    "said": {
+                      "type": "integer"
+                    },
+                    "manual": {
+                      "type": "integer"
+                    },
+                    "open": {
+                      "type": "integer"
+                    }
+                  }
+                },
+                "stores": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "product",
+                      "name",
+                      "text",
+                      "state"
+                    ],
+                    "properties": {
+                      "product": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "text": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "state": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "steps": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "store",
+                      "storeName",
+                      "label",
+                      "state",
+                      "text",
+                      "code",
+                      "final",
+                      "tries"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "store": {
+                        "type": "string"
+                      },
+                      "storeName": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "state": {
+                        "type": "string"
+                      },
+                      "text": {
+                        "type": "string"
+                      },
+                      "code": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "final": {
+                        "type": "boolean"
+                      },
+                      "tries": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                },
+                "notChanged": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "create"
+      ],
+      "effect": "write",
+      "idempotency": "required",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "plan_get",
+      "title": "Read stop plans",
+      "description": "The plans of one entry, one plan, or every open plan, with each step in words: what is proved, what someone only said, what is still open. Also the alerts that reached nobody. Only you can do this.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "plan": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "kind": {
+            "enum": [
+              "person",
+              "agent"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "plans",
+          "banners"
+        ],
+        "properties": {
+          "plans": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "groupId",
+                "part",
+                "parts",
+                "subject",
+                "purpose",
+                "trigger",
+                "state",
+                "headline",
+                "mode",
+                "note",
+                "reviewUrl",
+                "expiresAt",
+                "openedAt",
+                "closedAt",
+                "receiptId",
+                "canRetry",
+                "canCancel",
+                "counts",
+                "stores",
+                "steps",
+                "notChanged"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "groupId": {
+                  "type": "string"
+                },
+                "part": {
+                  "type": "integer"
+                },
+                "parts": {
+                  "type": "integer"
+                },
+                "subject": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "id",
+                    "name"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "purpose": {
+                  "type": "string"
+                },
+                "trigger": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "headline": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "note": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "reviewUrl": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "expiresAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "openedAt": {
+                  "type": "string"
+                },
+                "closedAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "receiptId": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "canRetry": {
+                  "type": "boolean"
+                },
+                "canCancel": {
+                  "type": "boolean"
+                },
+                "counts": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "proved",
+                    "said",
+                    "manual",
+                    "open"
+                  ],
+                  "properties": {
+                    "proved": {
+                      "type": "integer"
+                    },
+                    "said": {
+                      "type": "integer"
+                    },
+                    "manual": {
+                      "type": "integer"
+                    },
+                    "open": {
+                      "type": "integer"
+                    }
+                  }
+                },
+                "stores": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "product",
+                      "name",
+                      "text",
+                      "state"
+                    ],
+                    "properties": {
+                      "product": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "text": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "state": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "steps": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "store",
+                      "storeName",
+                      "label",
+                      "state",
+                      "text",
+                      "code",
+                      "final",
+                      "tries"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "store": {
+                        "type": "string"
+                      },
+                      "storeName": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "state": {
+                        "type": "string"
+                      },
+                      "text": {
+                        "type": "string"
+                      },
+                      "code": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "final": {
+                        "type": "boolean"
+                      },
+                      "tries": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                },
+                "notChanged": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "banners": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "plan",
+                "kind",
+                "text"
+              ],
+              "properties": {
+                "plan": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "plan_retry",
+      "title": "Try a stop plan again",
+      "description": "Ask again after a refusal, a failed step, an expiry or a rejection. A new attempt goes out only after Governance read the store again, with what is still open. Only you can do this.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "plan"
+        ],
+        "properties": {
+          "plan": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "plans"
+        ],
+        "properties": {
+          "plans": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "groupId",
+                "part",
+                "parts",
+                "subject",
+                "purpose",
+                "trigger",
+                "state",
+                "headline",
+                "mode",
+                "note",
+                "reviewUrl",
+                "expiresAt",
+                "openedAt",
+                "closedAt",
+                "receiptId",
+                "canRetry",
+                "canCancel",
+                "counts",
+                "stores",
+                "steps",
+                "notChanged"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "groupId": {
+                  "type": "string"
+                },
+                "part": {
+                  "type": "integer"
+                },
+                "parts": {
+                  "type": "integer"
+                },
+                "subject": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "id",
+                    "name"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "purpose": {
+                  "type": "string"
+                },
+                "trigger": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "headline": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "note": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "reviewUrl": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "expiresAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "openedAt": {
+                  "type": "string"
+                },
+                "closedAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "receiptId": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "canRetry": {
+                  "type": "boolean"
+                },
+                "canCancel": {
+                  "type": "boolean"
+                },
+                "counts": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "proved",
+                    "said",
+                    "manual",
+                    "open"
+                  ],
+                  "properties": {
+                    "proved": {
+                      "type": "integer"
+                    },
+                    "said": {
+                      "type": "integer"
+                    },
+                    "manual": {
+                      "type": "integer"
+                    },
+                    "open": {
+                      "type": "integer"
+                    }
+                  }
+                },
+                "stores": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "product",
+                      "name",
+                      "text",
+                      "state"
+                    ],
+                    "properties": {
+                      "product": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "text": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "state": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "steps": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "store",
+                      "storeName",
+                      "label",
+                      "state",
+                      "text",
+                      "code",
+                      "final",
+                      "tries"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "store": {
+                        "type": "string"
+                      },
+                      "storeName": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "state": {
+                        "type": "string"
+                      },
+                      "text": {
+                        "type": "string"
+                      },
+                      "code": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "final": {
+                        "type": "boolean"
+                      },
+                      "tries": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                },
+                "notChanged": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "required",
+      "receipt": false,
+      "audience": "person"
+    },
+    {
+      "id": "plan_cancel",
+      "title": "Cancel a stop plan",
+      "description": "Take the request back from Portal and stop what has not run. What was already applied stays. Each part of a split plan answers with its own state; `left` counts the parts that still stand in Portal. Only you can do this.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "plan"
+        ],
+        "properties": {
+          "plan": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "left",
+          "plans"
+        ],
+        "properties": {
+          "left": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "plans": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "groupId",
+                "part",
+                "parts",
+                "subject",
+                "purpose",
+                "trigger",
+                "state",
+                "headline",
+                "mode",
+                "note",
+                "reviewUrl",
+                "expiresAt",
+                "openedAt",
+                "closedAt",
+                "receiptId",
+                "canRetry",
+                "canCancel",
+                "counts",
+                "stores",
+                "steps",
+                "notChanged"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "groupId": {
+                  "type": "string"
+                },
+                "part": {
+                  "type": "integer"
+                },
+                "parts": {
+                  "type": "integer"
+                },
+                "subject": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "id",
+                    "name"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "purpose": {
+                  "type": "string"
+                },
+                "trigger": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "headline": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "note": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "reviewUrl": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "expiresAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "openedAt": {
+                  "type": "string"
+                },
+                "closedAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "receiptId": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "canRetry": {
+                  "type": "boolean"
+                },
+                "canCancel": {
+                  "type": "boolean"
+                },
+                "counts": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "proved",
+                    "said",
+                    "manual",
+                    "open"
+                  ],
+                  "properties": {
+                    "proved": {
+                      "type": "integer"
+                    },
+                    "said": {
+                      "type": "integer"
+                    },
+                    "manual": {
+                      "type": "integer"
+                    },
+                    "open": {
+                      "type": "integer"
+                    }
+                  }
+                },
+                "stores": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "product",
+                      "name",
+                      "text",
+                      "state"
+                    ],
+                    "properties": {
+                      "product": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "text": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "state": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "steps": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "store",
+                      "storeName",
+                      "label",
+                      "state",
+                      "text",
+                      "code",
+                      "final",
+                      "tries"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "store": {
+                        "type": "string"
+                      },
+                      "storeName": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "state": {
+                        "type": "string"
+                      },
+                      "text": {
+                        "type": "string"
+                      },
+                      "code": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "final": {
+                        "type": "boolean"
+                      },
+                      "tries": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                },
+                "notChanged": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "crud": [
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "required",
+      "receipt": false,
+      "audience": "person"
     }
   ],
   "hooks": [
@@ -7865,24 +9599,72 @@
       "product": "connect",
       "operations": [
         "identities_list",
-        "contacts_list"
+        "contacts_list",
+        "access_list",
+        "access_revoke"
       ],
       "crud": [
-        "read"
+        "read",
+        "update"
       ],
-      "purpose": "Reads agent channel identities (owner view, Rules' feed handles) and which addresses each agent first-contacted (Topology contacts layer). Never shown to agents"
+      "purpose": "Reads agent identities, first contacts and access for the owner's pages; ends an item only in a stop plan you confirmed. Never shown to agents."
     },
     {
       "product": "rules",
       "operations": [
         "rule_draft_submit",
-        "draft_status"
+        "draft_status",
+        "floor_status"
       ],
       "crud": [
         "create",
         "read"
       ],
-      "purpose": "Send a contact rule you chose to Rules as a draft and read back if you approved it. It cannot approve or change rules."
+      "purpose": "Send a contact rule as a draft, read if you approved it, and read how far Rules has taken your stops. It cannot approve or change rules."
+    },
+    {
+      "product": "knowledge",
+      "operations": [
+        "access_list",
+        "access_revoke"
+      ],
+      "crud": [
+        "read",
+        "update"
+      ],
+      "purpose": "Reads what Knowledge reports for the owner's Access pages, and ends an item only in a stop plan you confirmed. Never shown to agents."
+    },
+    {
+      "product": "kanban",
+      "operations": [
+        "access_list"
+      ],
+      "crud": [
+        "read"
+      ],
+      "purpose": "Reads what Task Board reports about what each agent holds, for the owner's Access pages. Never shown to agents. It changes nothing."
+    },
+    {
+      "product": "evolution",
+      "operations": [
+        "access_list",
+        "access_revoke"
+      ],
+      "crud": [
+        "read",
+        "update"
+      ],
+      "purpose": "Reads each agent's routines and steps for the owner's Access pages, and pauses a routine only in a stop plan you confirmed. Never shown to agents."
+    },
+    {
+      "product": "inbox",
+      "operations": [
+        "inbox_ask"
+      ],
+      "crud": [
+        "create"
+      ],
+      "purpose": "Tell you when a stop request waits for your approval or ran out of time. The message names no person and no reason. It cannot read your inbox."
     }
   ],
   "needsAgentDirectory": true,

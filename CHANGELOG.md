@@ -2,6 +2,44 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
+## 0.4.0-dev.3 - 2026-10-30
+
+C380 plan runner, DEV only. Not for stable until Martin has read C380-DECISIONS.md.
+
+- A stop now has a plan: `plan_send`, `plan_get`, `plan_retry`, `plan_cancel` and the job `plans_tick` (migration 0010). Governance asks Portal for a draft; you approve there. It has no approve button.
+- Nothing reads as done until its owner proves it: a Core step by the slice, an item by a fresh list from its store. What Core or an app only said is shown as said.
+- Retry takes a new attempt with a new key, after a fresh list. A restart goes on from the tables. A held call keeps its key.
+- With the rail off, no consent `topology` or an older bridge, plans run in Portal link mode, with proof from the slice.
+- An open plan reads its stores every 60 s for 30 minutes, then every 15. Three or more open plans share one read.
+- T6 is refused after an apply, T7 while a plan is open or did not finish (a named reason passes), and while a Connect account with no person is unchecked. T4 and T6 take the draft back first.
+- Companions: `access_list` and `access_revoke` on Connect, `access_revoke` on Knowledge and Evolving Workflows, `inbox_ask` on Operator Inbox. Task Board stays list-only: it has no per-agent grant to end. SDK 0.1.46, `requires.bridge` 0.2.14.
+- Blast radius: rolling Connect back under 0.7.14 removes its whole companion entry, and with it `identities_list` and `contacts_list`, until Connect is forward again.
+
+## 0.4.0-dev.2 - 2026-10-30
+
+C380 inventory, DEV only. Not for stable until Martin has read C380-DECISIONS.md.
+
+- Governance reads what each app reports with `tb.access/1` (spec 0.1.89): every 6 hours and on "Check now" (`reconcile_now`), as SDK jobs that resume after a restart. It keeps a copy to compare with, never as authority. It changes nothing in any app.
+- New person ops: `plan_preview` (what a stop would do, per store; no state), `findings_list` (differences, computed on read), `exception_set` (accept one with a reason until a date; it changes no access), `reconcile_now`. No agent can call them.
+- "Not installed" and "Could not be read" are apart. With no consent `topology` or a cut picture, a store Governance has no grant for reads "Could not be read", because the absence of a grant does not prove the app is absent.
+- Companion `access_list` (read) on Knowledge, Task Board and Evolving Workflows. Connect follows when its 0.7.14 is on DEV. This version cannot be deployed or updated while one of those apps is deployed at a version before `access_list` (M-CP-2). A workspace without the app is not changed.
+- `summary_get` lists the stores that were read and no longer counts accepted differences.
+- SDK 0.1.43 drops `Retry-After`, so a 429 waits a fixed 30 s. Each read adds a row to Rules Decisions.
+- Rollback: E3 to dev.1 needs no data step. The copy, the read state and accepted differences stay in the tables of 0009; E3 to 0.3.2 drops them.
+
+## 0.4.0-dev.1 - 2026-10-30
+
+C380 skeleton, DEV only. Not for stable until Martin has read C380-DECISIONS.md.
+
+- One lifecycle per person and agent: `proposed`, `active`, `suspended`, `leaving`, `archived`, with reasons, dates, cooling and a record with a hash chain. Migration 0008 carries 0.3.2 data: `removed` becomes `archived` (no card), `departed` becomes `leaving`, everything else `active`.
+- `directory_feed` with `accept: ["lifecycle"]` carries `lifecycle` and `floor` (spec 0.1.89). Rules 0.7.0 refuses a stopped entry before any rule, so each entry that is blocked or departed starts to refuse: read the list before any promotion.
+- New person ops: `summary_get`, `colleagues_list`, `colleague_get`, `lifecycle_set`, `settings_set`. No agent can call them. An agent can only ask (`review_request`), and never about itself (`no_self_request`).
+- A plan is "Portal link" mode only: Governance applies nothing and lists the steps to do in Portal, with proof from the slice.
+- Agent views say `departed` from `archived` only. `person_set` with `departed` is now a stop; `active` on a departed person is refused. `person_delete` is refused while stopped, leaving or closed.
+- Companion `rules.floor_status` (read). `requires.bridge` 0.2.13. This version cannot be deployed or updated while the deployed Rules is older than 0.7.0 (M-CP-2). A workspace with no Rules is not checked.
+- Migration 0009 (empty tables for the inventory, C380 B9b) ships here and is not used yet.
+- Rollback: E3 to 0.3.2 restores the data and drops later events. Stops already applied in Core stay. Rules dev keeps its entries: clear them on the Rules page.
+
 ## 0.3.2 - 2026-10-28
 
 - `requires.bridge` 0.2.12 (new). The bridge validates each app manifest; bridge 0.2.11 (manifest 0.1.32) refuses

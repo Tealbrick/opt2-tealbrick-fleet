@@ -69,15 +69,21 @@ const topo = (input: object, c: OpContext) => handlers.topology_get.run(input as
 
 // ── the companion ────────────────────────────────────────────────────────────────────────────────────────────────
 
-test("M-CP-2: the companion matches Connect 0.7.5 (contacts_list, identities_list); Connect without contacts_list fails the check", () => {
-  const target = (ops: string[]) => [{ id: "connect", operations: connect.operations.filter((o) => ops.includes(o.id)).map((o) => ({ id: o.id, audience: o.audience, crud: o.crud })) }];
+test("M-CP-2: the companion needs Connect 0.7.14 (tb.access/1 on top of contacts_list, identities_list); a Connect without one of them fails the check, so G5 stays the rule", () => {
+  // access_list and access_revoke as Connect 0.7.14-dev.1 declares them: the fixture manifest here is older
+  const access = [
+    { id: "access_list", audience: "agent", crud: ["read"] },
+    { id: "access_revoke", audience: "agent", crud: ["update"] },
+  ];
+  const target = (ops: string[], extra = access) => [{ id: "connect", operations: [...connect.operations.filter((o) => ops.includes(o.id)).map((o) => ({ id: o.id, audience: o.audience, crud: o.crud })), ...extra] }];
   const ok = validateCompanions(manifest as never, target(["identities_list", "contacts_list"]) as never);
   assert.equal(ok.ok, true, JSON.stringify(ok));
   const old = validateCompanions(manifest as never, target(["identities_list"]) as never);
   assert.equal(old.ok, false, "an older Connect without contacts_list is refused by the check");
+  assert.equal(validateCompanions(manifest as never, target(["identities_list", "contacts_list"], []) as never).ok, false, "Connect 0.7.13 has no tb.access/1: an update to this version is refused there");
   assert.equal(validateCompanions(manifest as never, []).ok, true, "no Connect deployed: nothing to check");
   const c = manifest.companions?.find((x) => x.product === "connect");
-  assert.deepEqual([c?.operations, c?.crud], [["identities_list", "contacts_list"], ["read"]]);
+  assert.deepEqual([c?.operations, c?.crud], [["identities_list", "contacts_list", "access_list", "access_revoke"], ["read", "update"]]);
 });
 
 test("the contacts_list guard is Connect's: the op is for Governance only, and Governance reads it only from topology_get", () => {

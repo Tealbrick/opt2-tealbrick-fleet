@@ -26,15 +26,15 @@ test("one version everywhere: package.json = manifest = the newest CHANGELOG ent
   const pkg = JSON.parse(read("package.json")) as { version: string };
   const manifest = JSON.parse(read("tealbrick.manifest.json")) as { version: string };
   const top = /^## (\S+)/m.exec(read("CHANGELOG.md"))?.[1];
-  assert.equal(pkg.version, "0.3.2");
+  assert.equal(pkg.version, "0.4.0-dev.3");
   assert.equal(manifest.version, pkg.version);
   assert.equal(top, pkg.version);
 });
 
-test("requires.bridge 0.2.12: the bridge that validates needsTopology (manifest 0.1.35); an older bridge refused 0.3.1 (schema_invalid)", () => {
+test("requires.bridge 0.2.14 (C380: the rail, cap owner_drafts); the bridge must validate needsTopology (0.2.12 or later); an older bridge refused 0.3.1 (schema_invalid)", () => {
   const manifest = JSON.parse(read("tealbrick.manifest.json")) as { requires?: { bridge?: string }; needsTopology?: boolean };
   assert.equal(manifest.needsTopology, true);
-  assert.equal(manifest.requires?.bridge, "0.2.12");
+  assert.equal(manifest.requires?.bridge, "0.2.14");
 });
 
 test("update path: every image admits 0.2.3 (stable) and 0.2.x; the range check fires on a range that does not", () => {
@@ -50,6 +50,6 @@ test("update path: every image admits 0.2.3 (stable) and 0.2.x; the range check 
 
 test("migrations are forward-only and numbered without gaps (0005 agent handles, 0006 team template, 0007 outside agent fields, 0008 lifecycle, 0009 access)", () => {
   const names = migrationFiles().map((m) => m.name);
-  assert.deepEqual(names, ["0001_init.sql", "0002_governance.sql", "0003_reviews.sql", "0004_proposals.sql", "0005_agent_handles.sql", "0006_proposal_team_template.sql", "0007_outside_agent_fields.sql", "0008_lifecycle.sql", "0009_access.sql"]);
+  assert.deepEqual(names, ["0001_init.sql", "0002_governance.sql", "0003_reviews.sql", "0004_proposals.sql", "0005_agent_handles.sql", "0006_proposal_team_template.sql", "0007_outside_agent_fields.sql", "0008_lifecycle.sql", "0009_access.sql", "0010_plans.sql"]);
   for (const m of migrationFiles()) assert.doesNotMatch(m.sql, /^\s*DROP TABLE (?!fleet_proposals;)/im, `${m.name}: no table is dropped except the 0006 rebuild`);
 });
