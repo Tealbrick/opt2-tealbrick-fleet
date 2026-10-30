@@ -96,7 +96,7 @@ const LIST = () => ({
 
 interface Stub {
   calls: { op: string; input: any }[];
-  fail: Record<string, { status: number; code: string } | undefined>;
+  fail: Record<string, { status: number; code: string; details?: unknown } | undefined>;
   list: ReturnType<typeof LIST>;
   /** the picture review_get answers (the subject "now") */
   current: ReturnType<typeof snap>;
@@ -122,7 +122,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const body = JSON.parse(String(init?.body ?? "{}")) as { input?: any; idempotencyKey?: string };
   stub.calls.push({ op, input: body.input });
   const failure = stub.fail[op];
-  if (failure) return json(failure.status, { error: { code: failure.code, message: `raw upstream text for ${failure.code}`, requestId: "req_1" } });
+  if (failure) return json(failure.status, { error: { code: failure.code, message: `raw upstream text for ${failure.code}`, requestId: "req_1", details: failure.details } });
   if (op === "reviews_list") {
     const want = body.input?.status;
     const reviews = stub.list.reviews.filter((r) => (want === "open" ? r.status === "requested" : want === "done" ? r.status === "done" : true));
@@ -298,6 +298,44 @@ describe("Trust reviews page", () => {
     await m.unmount();
   });
 
+  it("blocked (N2-3): the Confirm says it is a stop; the cap answers with the count; the number goes once, on the owner's next press", async () => {
+    reset();
+    stub.fail.review_record = { status: 409, code: "stop_cap_reached", details: { count: 6 } };
+    const m = await mount(h(ui.ReviewsPage, {}));
+    await click(button(rows(m.host)[0] as Element, "Review"));
+    const d = dialog();
+    await move(d, "Next");
+    await click([...d.querySelectorAll('[role="radio"]')].find((c) => c.textContent?.startsWith("Blocked")) as Element);
+    await type(d.querySelector("textarea") as Element, "It wrote to staff.");
+    await move(d, "Next");
+    await move(d, "Skip, no rule");
+    assert.match(d.textContent ?? "", /Blocked is a stop\. If the Rules hook is on/);
+    assert.match(d.textContent ?? "", /Governance cannot see that switch/);
+    await click(button(d, "Record verdict"));
+    const sent = () => stub.calls.filter((c) => c.op === "review_record").map((c) => c.input);
+    assert.equal(sent().length, 1, "a refusal sends nothing by itself");
+    assert.equal(sent()[0]?.confirmCount, undefined);
+    assert.match(alerts(d).join(" "), /This makes 6 people and agents stopped in the last 10 minutes/);
+    assert.doesNotMatch(alerts(d).join(" "), /You stopped/);
+    stub.fail.review_record = undefined;
+    await click(button(d, "Yes, this makes 6"));
+    assert.equal(sent()[1]?.confirmCount, 6);
+    assert.equal(sent().length, 2);
+    await m.unmount();
+  });
+  it("a verdict that is not blocked has no stop sentence", async () => {
+    reset();
+    const m = await mount(h(ui.ReviewsPage, {}));
+    await click(button(rows(m.host)[0] as Element, "Review"));
+    const d = dialog();
+    await move(d, "Next");
+    await click([...d.querySelectorAll('[role="radio"]')].find((c) => c.textContent?.startsWith("Limited")) as Element);
+    await type(d.querySelector("textarea") as Element, "Partner bot.");
+    await move(d, "Next");
+    await move(d, "Skip, no rule");
+    assert.doesNotMatch(d.textContent ?? "", /Blocked is a stop/);
+    await m.unmount();
+  });
   it("the review: 4 steps; Next waits for a verdict and a reason; review_record gets the exact input", async () => {
     reset();
     const m = await mount(h(ui.ReviewsPage, {}));
@@ -613,6 +651,32 @@ describe("Trust reviews: step 3, the contact rule", () => {
     assert.ok(option, `who "${label}"`);
     await click(option);
   }
+
+  it("N2-3: a cap number named for one subject does not confirm another", async () => {
+    reset();
+    stub.fail.review_record = { status: 409, code: "stop_cap_reached", details: { count: 6 } };
+    const m = await mount(h(ui.ReviewsPage, {}));
+    await click(button(m.host, "Review someone"));
+    const d = dialog();
+    stub.current = snap(DIGEST, { kind: "agent", name: "Front desk", handles: [], teams: [] });
+    await pickWho(d, "Front desk (agent)");
+    await fillVerdict("Blocked", "Checked.");
+    await move(d, "Next"); // → 3
+    await move(d, "Skip, no rule"); // → 4
+    await click(button(d, "Record verdict"));
+    assert.ok(button(d, "Yes, this makes 6"));
+    for (let i = 0; i < 3; i++) await move(d, "Previous");
+    stub.current = snap(DIGEST2, { kind: "outside_agent", name: "Brightline intake", handles: ["slack:UBRIGHT01"], teams: [] });
+    await pickWho(d, "Brightline intake (outside agent)");
+    await move(d, "Next");
+    await move(d, "Next");
+    await move(d, "Skip, no rule");
+    await click(button(d, "Record verdict"));
+    const sent = stub.calls.filter((c) => c.op === "review_record").map((c) => c.input);
+    assert.equal(sent.length, 2);
+    assert.equal(sent[1]?.confirmCount, undefined);
+    await m.unmount();
+  });
 
   it("S3-1: the owner picks an agent, chooses an agent template, goes back and picks a person: the template is gone and the person gets only its own templates (fire on bad)", async () => {
     reset();

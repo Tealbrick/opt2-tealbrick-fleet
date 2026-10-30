@@ -6,7 +6,8 @@ import { useCallback, useState } from "react";
 import type { ColleagueGetOutput, ColleaguesListOutput, PlanSendInput } from "#kit";
 import { changeError, useLoad } from "../common.tsx";
 import { type Choice, type Choices, canChoose, choiceOf, choicesReady, decisionsOf, hasOwnStop } from "./agent-choice.ts";
-import { lifecycleError, stopCapOf } from "./lifecycle-errors.ts";
+import { capButton, useCapConfirm } from "./cap-confirm.ts";
+import { lifecycleError } from "./lifecycle-errors.ts";
 
 type Colleague = ColleagueGetOutput["colleague"];
 type Agent = Colleague["agents"][number];
@@ -72,20 +73,20 @@ export function ChooseDialog({ c, onClose, onChanged }: { c: Colleague; onClose:
   const [choices, setChoices] = useState<Choices>({});
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-  const [capCount, setCapCount] = useState<number | null>(null);
+  const cap = useCapConfirm();
   const decisions = decisionsOf(agents, choices);
   const save = async () => {
     setBusy(true);
     setFailure(null);
     const input: PlanSendInput = { kind: "person", id: c.id, decisions };
-    if (capCount !== null) input.confirmCount = capCount;
+    const confirm = cap.take();
+    if (confirm !== null) input.confirmCount = confirm;
     try {
       await callOp("plan_send", input);
       await onChanged();
       onClose();
     } catch (e) {
-      const cap = stopCapOf(e);
-      if (cap !== null) setCapCount(cap);
+      cap.note(e);
       setFailure(lifecycleError(e, changeError).message);
     } finally {
       setBusy(false);
@@ -104,7 +105,7 @@ export function ChooseDialog({ c, onClose, onChanged }: { c: Colleague; onClose:
             Cancel
           </Button>
           <Button variant="primary" onClick={() => void save()} disabled={busy || decisions.length === 0 || !choicesReady(agents, choices)}>
-            {capCount !== null ? "Send this too" : "Send to Portal"}
+            {cap.count !== null ? capButton(cap.count) : "Send to Portal"}
           </Button>
         </>
       }
@@ -116,7 +117,15 @@ export function ChooseDialog({ c, onClose, onChanged }: { c: Colleague; onClose:
           </Notice>
         ) : null}
         <p className="tb-soft">Your choices are recorded when you send: a new owner and Keep running apply at once. Pause, removal and new keys wait for your approval in Portal. This takes back an older request for this person, with any new key it asked for.</p>
-        <AgentChoices agents={agents} choices={choices} onChange={setChoices} owners={owners} />
+        <AgentChoices
+          agents={agents}
+          choices={choices}
+          onChange={(next) => {
+            setChoices(next);
+            cap.clear();
+          }}
+          owners={owners}
+        />
       </div>
     </Dialog>
   );

@@ -20,7 +20,9 @@ export function lifecycleError(e: unknown, fallback: (e: unknown) => string): Li
   const code = typeof err.code === "string" ? err.code : null;
   if (code === "stop_cap_reached") {
     const count = typeof err.details?.count === "number" ? err.details.count : null;
-    return { code, message: count === null ? "You stopped many entries in the last 10 minutes. Check that this is you." : `You stopped ${count - 1} entries in the last 10 minutes. Check that this is you, then stop this one too.` };
+    if (count !== null) return { code, message: `This makes ${count} people and agents stopped in the last 10 minutes. Check that this is you, then confirm.` };
+    // the old People form has no confirm to send: the server's sentence names the page that can
+    return { code, message: typeof err.message === "string" && err.message.trim() ? err.message.trim() : fallback(e) };
   }
   if (code === "transition_not_allowed") return { code, message: MOVE_REFUSED };
   if (code && OWNER_CODES.has(code) && typeof err.message === "string" && err.message.trim()) return { code, message: err.message.trim() };

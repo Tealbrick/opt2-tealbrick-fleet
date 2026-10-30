@@ -8,8 +8,9 @@ import type { ColleagueGetOutput, LifecycleSetInput, LifecycleSetOutput, PlanSen
 import { changeError } from "../common.tsx";
 import { type Choices, canChoose, choiceSummary, choicesReady, decisionsOf } from "./agent-choice.ts";
 import { AgentChoices, useOwners } from "./agent-choices.tsx";
+import { capButton, useCapConfirm } from "./cap-confirm.ts";
 import { FEATURES } from "./features.ts";
-import { lifecycleError, stopCapOf } from "./lifecycle-errors.ts";
+import { lifecycleError } from "./lifecycle-errors.ts";
 import { NotChanged, PlanResult } from "./plan-result.tsx";
 import { type Tick, WhatStopsStep } from "./what-stops-step.tsx";
 import { beforeChangeText, beforeChangeTone, NOTE_HINT, type Reason, reasonLabel, reasonOptions } from "./words.ts";
@@ -29,7 +30,7 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
   const sent = useRef(false);
   // the mark is made once: a retry after a refused plan goes on from there, and the owner can go back and change a choice
   const mark = useRef<Colleague | null>(null);
-  const [capCount, setCapCount] = useState<number | null>(null);
+  const cap = useCapConfirm();
   const person = c.kind === "person";
   const agents = person ? c.agents.filter(canChoose) : [];
 
@@ -39,22 +40,24 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
     setFailure(null);
     const input: LifecycleSetInput = { kind: c.kind, id: c.id, to: "leaving", reason, expectedRev: c.rev };
     if (note.trim()) input.note = note.trim();
-    if (capCount !== null) input.confirmCount = capCount;
+    // one press, one number: for the first call of this press only
+    const confirm = cap.take();
+    if (confirm !== null && !mark.current) input.confirmCount = confirm;
     try {
+      const markedBefore = mark.current !== null;
       if (!mark.current) mark.current = (await callOp<LifecycleSetOutput>("lifecycle_set", input)).colleague;
       if (FEATURES.plans) {
         const plan: PlanSendInput = { kind: c.kind, id: c.id };
         const decisions = decisionsOf(agents, choices);
         if (decisions.length) plan.decisions = decisions;
         if (selected) plan.items = selected;
-        if (capCount !== null) plan.confirmCount = capCount;
+        if (confirm !== null && markedBefore) plan.confirmCount = confirm;
         try {
           await callOp("plan_send", plan);
         } catch (e) {
           // nothing_to_stop: no Portal step is needed. Anything else: the stop stands, and the owner can change a choice and send again.
           if ((e as { code?: unknown } | null)?.code !== "nothing_to_stop") {
-            const cap = stopCapOf(e);
-            if (cap !== null) setCapCount(cap);
+            cap.note(e);
             setFailure(`The stop is recorded, but the request for Portal is not ready. ${lifecycleError(e, changeError).message}`);
             // the page behind must show the stop, also if the owner closes this now
             await onChanged();
@@ -67,8 +70,7 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
       await onChanged();
       return undefined;
     } catch (e) {
-      const cap = stopCapOf(e);
-      if (cap !== null) setCapCount(cap);
+      cap.note(e);
       // the page was old: read it again, so the next try sends the new state
       const code = (e as { code?: unknown } | null)?.code;
       if (code === "lifecycle_stale" || code === "agent_not_owned") await onChanged();
@@ -93,14 +95,14 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
         <div className="tb-stack">
           <p className="tb-soft">{person ? `This marks ${c.name}'s agents to stop, and lists what to do in Portal to stop them and remove their access in Teal Brick. It does not end their employment or their own logins.` : `This marks ${c.name} to stop, and lists what to do in Portal to stop it and remove its access in Teal Brick.`}</p>
           <Field label="Reason">
-            <Select placeholder="Choose a reason" disabled={Boolean(mark.current)} options={reasonOptions("leaving")} value={reason} onValueChange={(v) => setReason(v as Reason)} />
+            <Select placeholder="Choose a reason" disabled={Boolean(mark.current)} options={reasonOptions("leaving")} value={reason} onValueChange={(v) => { setReason(v as Reason); cap.clear(); }} />
           </Field>
           <Field label="Note" hint={NOTE_HINT}>
             <Textarea rows={2} maxLength={500} disabled={Boolean(mark.current)} value={note} onChange={(e) => setNote(e.target.value)} />
           </Field>
           <Notice tone="neutral">The mark takes effect now. There is no last-day date.</Notice>
           {person && agents.length === 0 ? <p>This person owns no agents.</p> : null}
-          {agents.length && FEATURES.plans ? <AgentChoices agents={agents} choices={choices} onChange={setChoices} owners={owners} /> : null}
+          {agents.length && FEATURES.plans ? <AgentChoices agents={agents} choices={choices} onChange={(next) => { setChoices(next); cap.clear(); }} owners={owners} /> : null}
         </div>
       ),
     },
@@ -114,7 +116,7 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
       : []),
     {
       name: "Confirm",
-      nextLabel: capCount !== null ? "Stop this one too" : mark.current ? "Send again" : "Stop",
+      nextLabel: cap.count !== null ? capButton(cap.count) : mark.current ? "Send again" : "Stop",
       onNext: send,
       render: () => (
         <div className="tb-stack">
