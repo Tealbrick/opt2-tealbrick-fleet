@@ -117,7 +117,7 @@ packages:
     version: 0.1.35
 
   '@opt2-tealbrick/miniapp-sdk@https://github.com/Tealbrick/opt2-tealbrick-dist/releases/download/opt2-tealbrick-sdk-miniapp-sdk-v0.1.40/opt2-tealbrick-miniapp-sdk-0.1.40.tgz':
-    resolution: {tarball: https://github.com/Tealbrick/opt2-tealbrick-dist/releases/download/opt2-tealbrick-sdk-miniapp-sdk-v0.1.40/opt2-tealbrick-miniapp-sdk-0.1.40.tgz}
+    resolution: {integrity: sha512-EHOXrioUxk6ZeD9YTklzWdwHYRB7GKd2KG0bQR1xcRMzhfFTGI1adEDQXKgWK2jdUq+MsV53F8a0Dl+CXt7yxg==, tarball: https://github.com/Tealbrick/opt2-tealbrick-dist/releases/download/opt2-tealbrick-sdk-miniapp-sdk-v0.1.40/opt2-tealbrick-miniapp-sdk-0.1.40.tgz}
     version: 0.1.40
     hasBin: true
     peerDependencies:
@@ -137,11 +137,11 @@ packages:
         optional: true
 
   '@opt2-tealbrick/spec@https://github.com/Tealbrick/opt2-tealbrick-dist/releases/download/opt2-tealbrick-specs-spec-v0.1.64/opt2-tealbrick-spec-0.1.64.tgz':
-    resolution: {tarball: https://github.com/Tealbrick/opt2-tealbrick-dist/releases/download/opt2-tealbrick-specs-spec-v0.1.64/opt2-tealbrick-spec-0.1.64.tgz}
+    resolution: {integrity: sha512-yuHuNo/SDvr13cf17KtZFqASTqQ8BN4ufHXpVW1/8H7Ze23cVitzwjsLgZF5Tf3bJj7KSreiOofdKSRSIsh4zA==, tarball: https://github.com/Tealbrick/opt2-tealbrick-dist/releases/download/opt2-tealbrick-specs-spec-v0.1.64/opt2-tealbrick-spec-0.1.64.tgz}
     version: 0.1.64
 
   '@opt2-tealbrick/spec@https://github.com/Tealbrick/opt2-tealbrick-dist/releases/download/opt2-tealbrick-specs-spec-v0.1.78/opt2-tealbrick-spec-0.1.78.tgz':
-    resolution: {tarball: https://github.com/Tealbrick/opt2-tealbrick-dist/releases/download/opt2-tealbrick-specs-spec-v0.1.78/opt2-tealbrick-spec-0.1.78.tgz}
+    resolution: {integrity: sha512-kDi3rZtU627gj6j3Hns3fSvE+xeCKirkdOhmGog4K5pU4BQkk5dyIvsPp2bBa07R8cjZghbRjDElkXAfDH1pqg==, tarball: https://github.com/Tealbrick/opt2-tealbrick-dist/releases/download/opt2-tealbrick-specs-spec-v0.1.78/opt2-tealbrick-spec-0.1.78.tgz}
     version: 0.1.78
 
   '@opt2-tealbrick/ui@https://github.com/Tealbrick/opt2-tealbrick-dist/releases/download/opt2-tealbrick-packages-ui-v0.3.0/opt2-tealbrick-ui-0.3.0.tgz':
