@@ -201,6 +201,8 @@ export function transition(db: Db, input: TransitionInput, now = Date.now()): { 
   return db.transaction(() => {
     const s = loadSubject(db, input.kind, input.id) ?? fail(input.kind === "agent" ? "agent_not_found" : "person_not_found", "No such entry.", 404);
     if (input.expectedRev !== undefined && input.expectedRev !== s.rev) fail("lifecycle_stale", "This entry changed since you looked. Open it again.", 409);
+    // C380 N2-T1: "reviewed" is the word of T2 only. It never lifts a stop.
+    if (input.reason === "reviewed" && s.lifecycle !== "proposed") fail("not_new", "This entry is not new any more. Nothing was changed. Open its own page to see why.", 409);
     const problem = guardOf(db, s, input.to, { waive: input.waive }, now);
     if (problem) throw new TbError(problem.code, problem.message, problem.status);
     if (STOP_STATES.includes(input.to) && !input.noCap) assertCap(db, input.confirmCount, now);

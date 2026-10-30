@@ -10,7 +10,7 @@ interface Call {
   input: any;
   key: string;
 }
-function world(fail: (op: string, n: number) => Error | null = () => null) {
+function world(fail: (op: string, n: number) => Error | null = () => null, lifecycle = "proposed") {
   const calls: Call[] = [];
   const counts = new Map<string, number>();
   let members = [{ kind: "person", id: "psn_old", name: "Old", role: "lead" }];
@@ -23,7 +23,7 @@ function world(fail: (op: string, n: number) => Error | null = () => null) {
       const bad = fail(op, n);
       if (bad) throw bad;
       if (op === "overview_get") return { teams: [{ id: "tm_1", name: "Support", members }] } as T;
-      if (op === "colleague_get") return { colleague: { rev: 7 } } as T;
+      if (op === "colleague_get") return { colleague: { rev: 7, lifecycle } } as T;
       if (op === "members_set") members = [...input.people.map((p: any) => ({ kind: "person", id: p.id, name: "", role: p.role })), ...input.agents.map((a: any) => ({ kind: "agent", id: a.id, name: "", role: a.role }))];
       return {} as T;
     },
@@ -93,6 +93,18 @@ test("fire on bad: a team that is gone is said, not guessed", async () => {
   assert.deepEqual(run.failed, { step: "team", message: "This team is gone. Choose a team on the People page." });
   assert.equal(w.calls.some((c) => c.op === "members_set" || c.op === "lifecycle_set"), false);
 });
+
+for (const lifecycle of ["suspended", "leaving", "active", "archived"]) {
+  test(`fire on bad: an agent that is ${lifecycle} by now is not sent as reviewed: a stale Join never lifts a stop (N2-T1)`, async () => {
+    const w = world(() => null, lifecycle);
+    const run = newAgentRun("bx");
+    await sendAgentJoin(run, { agent: "agt_a", owner: null, team: null, until: "2099-12-31T23:59:59.000Z" }, w.deps);
+    assert.equal(w.calls.some((c) => c.op === "lifecycle_set"), false);
+    assert.equal(run.failed?.step, "review");
+    assert.match(String(run.failed?.message), /not new any more/);
+    assert.equal(run.done.has("review"), false);
+  });
+}
 
 test("an agent that has a last day and gets \"no end\": the review sends validUntil null, and only then (it is said in the screen)", async () => {
   const w = world();

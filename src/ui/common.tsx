@@ -5,7 +5,7 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import { errorMessage } from "./standard.tsx";
 
 /** Codes whose message this app wrote as a plain sentence (src/store.ts); everything else gets the shared wording. */
-export const OWN_CODES = new Set(["input_invalid", "handle_invalid", "handle_taken", "team_name_taken", "limit_reached", "owner_not_person", "lifecycle_open", "use_bring_back", "date_in_past"]);
+export const OWN_CODES = new Set(["input_invalid", "handle_invalid", "handle_taken", "team_name_taken", "limit_reached", "owner_not_person", "lifecycle_open", "use_bring_back", "date_in_past", "not_new"]);
 export const GONE_CODES = new Set(["team_not_found", "person_not_found", "agent_not_found", "review_not_found", "subject_not_found"]);
 /** Codes of the review ops with their own plain sentence. */
 export const REVIEW_MESSAGES: Record<string, string> = {

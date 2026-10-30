@@ -61,6 +61,8 @@ export async function sendAgentJoin(run: AgentRun, j: AgentJoin, deps: Deps): Pr
     try {
       // the revision is read now: the owner step above may have moved the entry
       const now = await deps.call<ColleagueGetOutput>("colleague_get", { kind: "agent", id: j.agent }, `join-${run.batch}-get-${run.tries}`);
+      // Only a new entry is reviewed here. An entry stopped since this flow opened must stay stopped: "active" would lift the stop (C380 N2-T1).
+      if (now.colleague.lifecycle !== "proposed") throw Object.assign(new Error("This agent is not new any more. Nothing was changed. Open its own page to see why."), { code: "not_new" });
       const input: Record<string, unknown> = { kind: "agent", id: j.agent, to: "active", reason: "reviewed", expectedRev: now.colleague.rev };
       if (j.until) input.validUntil = j.until;
       else if (j.clearUntil) input.validUntil = null;

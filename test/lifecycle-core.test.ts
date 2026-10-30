@@ -171,6 +171,9 @@ test("T9: a closed agent is terminal; T8: a closed person can come back and noth
   assert.equal(store.getPerson(db, ann.id).status, "departed", "feed departed until active");
   assert.equal(store.getTeam(db, team.id).people, 0, "teams do not return");
   set(db, "person", ann.id, "active", { reason: "reviewed" });
+  set(db, "person", ann.id, "leaving");
+  assert.throws(() => set(db, "person", ann.id, "active", { reason: "reviewed" }), refused("not_new", 409), "reviewed never lifts a stop (N2-T1)");
+  set(db, "person", ann.id, "active", { reason: "mistake" });
   assert.equal(store.getPerson(db, ann.id).status, "active");
 });
 

@@ -53,7 +53,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (op === "colleagues_list") return json(200, { status: "ok", output: { items: body.input.kind === "agent" ? stub.agents : PEOPLE, nextCursor: null, total: 1 } });
   if (op === "overview_get") return json(200, { status: "ok", output: DIR });
   if (op === "plan_preview") return json(200, { status: "ok", output: PREVIEW });
-  if (op === "colleague_get") return json(200, { status: "ok", output: { colleague: { rev: 5 } } });
+  if (op === "colleague_get") return json(200, { status: "ok", output: { colleague: { rev: 5, lifecycle: "proposed" } } });
   if (op === "agent_set" || op === "members_set" || op === "lifecycle_set") return json(200, { status: "ok", output: {} });
   return json(404, { error: { code: "unknown_tool", message: op } });
 }) as typeof fetch;
