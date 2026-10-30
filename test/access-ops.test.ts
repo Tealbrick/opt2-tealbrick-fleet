@@ -1,7 +1,7 @@
 // C380 B9b: plan_preview, findings_list, exception_set, the Summary's stores. Shapes from B10's pages, checked against the manifest.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { validateAgainstSchema } from "@opt2-tealbrick/manifest";
+import { validateAgainstSchema, validateCompanions } from "@opt2-tealbrick/manifest";
 import { type Db, type Json, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { noteRead, noteStop } from "../src/access/client.ts";
 import { findingsList, openDifferences, setException, type unreadOf } from "../src/access/differences.ts";
@@ -314,4 +314,17 @@ test("exception_set refuses: no such entry, a finding that is gone, a date past 
   assert.throws(() => setException(db, { ...base, until: new Date(NOW + 400 * 86_400_000).toISOString() }, s, "o", NOW), refused("until_invalid", 400));
   assert.throws(() => setException(db, { ...base, reason: "\u200b " }, s, "o", NOW), refused("reason_required", 400));
   assert.equal(Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_exceptions").get()?.n), 0);
+});
+
+test("G5: access_list only on targets that are on qa1, read only; M-CP-2 passes with the op and fails without it", () => {
+  const stores = (manifest.companions ?? []).filter((c) => (c.operations as readonly string[]).includes("access_list"));
+  assert.deepEqual(stores.map((c) => c.product).sort(), ["evolution", "kanban", "knowledge"]);
+  for (const c of stores) {
+    assert.deepEqual(c.operations, ["access_list"], "no access_revoke in the reader: the plan lane adds it");
+    assert.deepEqual(c.crud, ["read"]);
+    const op = { id: "access_list", title: "List", description: "List.", crud: ["read"], effect: "read", idempotency: "none", receipt: false, audience: "agent", listing: "workflow", input: { type: "object" }, output: { type: "object" } };
+    const only = { ...manifest, companions: [c] };
+    assert.equal(validateCompanions(only as never, [{ id: c.product, operations: [op] }] as never).ok, true, c.product);
+    assert.equal(validateCompanions(only as never, [{ id: c.product, operations: [] }] as never).ok, false, c.product);
+  }
 });
