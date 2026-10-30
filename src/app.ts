@@ -13,9 +13,12 @@ import { assignDefaultOwner } from "./lifecycle/settings.ts";
 import { startDatesTimer } from "./lifecycle/validity.ts";
 import { directoryOps } from "./ops/directory.ts";
 import { lifecycleOps } from "./ops/lifecycle.ts";
+import { planOps } from "./ops/plans.ts";
 import { proposalOps } from "./ops/proposals.ts";
 import { reviewOps } from "./ops/reviews.ts";
 import { topologyOps } from "./ops/topology.ts";
+import { wakePlans } from "./plans/control.ts";
+import { kickPlans, planJobs, startPlanClock } from "./plans/jobs.ts";
 import { startProposalTimer } from "./proposals.ts";
 import * as reviews from "./reviews.ts";
 import * as store from "./store.ts";
@@ -33,6 +36,7 @@ export const handlers = {
   ...proposalOps,
   ...topologyOps,
   ...lifecycleOps,
+  ...planOps,
 } satisfies Record<OpId, HandlerSpec>;
 
 export const hooks: Record<string, HookHandler> = {
@@ -52,9 +56,11 @@ export const definition: SdkAppDefinition = {
   // Every 60 s (C85): the status of drafts sent to Rules. draft_status only; the timer never submits a draft.
   // Every 60 s (C373 §3): the agent handles cache from Connect identities_list, outside every call (read only).
   // Every 60 s (C380 §2): end and start dates; two ticks must agree. It calls nothing.
+  // Each minute (C380 §5): the plans job. A plan's state lives in its tables, so a restart goes on by itself.
   async onStart(ctx) {
     noteRestore(ctx.db, Date.now());
     stopDatesTimer = startDatesTimer(ctx.db, ctx.log);
+    startPlanClock(ctx);
     stopTimer = startProposalTimer(ctx.db, ctx.callApp, ctx.log);
     stopHandlesTimer = startAgentHandlesTimer(ctx.db, ctx.callApp, ctx.log);
   },
@@ -67,6 +73,7 @@ export const definition: SdkAppDefinition = {
     stopDatesTimer = null;
   },
   migrations: migrationsDir,
+  jobs: planJobs,
   events: {
     // needsAgentDirectory: the slice lists every workspace agent; the full list arrives on every change (SDK 0.1.13).
     async agentsChanged(agents, ctx) {
@@ -75,6 +82,8 @@ export const definition: SdkAppDefinition = {
         reviews.requestForNewAgents(ctx.db, store.syncAgents(ctx.db, agents));
         assignDefaultOwner(ctx.db, { kind: "system", id: null });
       });
+      // A pause reached this app: the plan that waits for it goes on now, not at the next slow poll.
+      if (wakePlans(ctx.db) > 0) kickPlans(ctx as never);
     },
   },
 };

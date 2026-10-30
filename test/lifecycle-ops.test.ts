@@ -34,7 +34,8 @@ const validOut = (id: string, out: unknown) => {
 
 test("A16: the new ops are person ops, last in the manifest; the agent surface is exactly what it was; review_request is the one write and it only asks", () => {
   assert.equal(validateManifest(manifest).ok, true);
-  assert.deepEqual(manifest.operations.slice(-NEW_OPS.length).map((o) => o.id), NEW_OPS, "appended last");
+  const at = manifest.operations.findIndex((o) => o.id === NEW_OPS[0]);
+  assert.deepEqual(manifest.operations.slice(at, at + NEW_OPS.length).map((o) => o.id), NEW_OPS, "appended after the old ops");
   for (const id of NEW_OPS) assert.equal(specOf(id).audience, "person", id);
   const agentOps = manifest.operations.filter((o) => (o as { audience?: string }).audience !== "person").map((o) => o.id);
   assert.deepEqual(agentOps, ["teams_list", "team_get", "directory_get", "resolve_sender", "review_request", "directory_feed"]);

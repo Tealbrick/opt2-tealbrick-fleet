@@ -199,7 +199,7 @@ test("timer: refreshes outside calls, first after a short delay, and stops on on
   assert.deepEqual(cachedAgentHandles(db).get(AGENT_A.id), [SLACK_A], "kept while down");
   // onStart wires it, onStop stops it (no Connect call before the first delay)
   const c3 = fakeConnect([]);
-  await definition.onStart?.({ db, callApp: c3.callApp, log } as never);
+  await definition.onStart?.({ db, callApp: c3.callApp, log, schedule: () => ({ id: "job_x", status: "queued" }) } as never);
   await definition.onStop?.({} as never);
   await new Promise((r) => setTimeout(r, 30));
   assert.equal(c3.calls.length, 0);
