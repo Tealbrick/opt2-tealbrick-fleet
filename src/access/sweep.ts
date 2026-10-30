@@ -15,6 +15,8 @@ export const SWEEP_CRON = "17 */6 * * *";
 export const PAGE_CAP = 50;
 export const CALL_CAP = 2000;
 export const WAIT_CAP = 6;
+export const KEPT_CAP = 64;
+const KEPT_REASON_CHARS = 120;
 const ACTIVE = ["queued", "running", "waiting", "paused"] as const;
 
 interface SweepState {
@@ -39,18 +41,18 @@ interface SweepState {
 export type SweepEnv = AccessEnv & Pick<JobContext, "db" | "job" | "checkpoint"> & { now?: () => number };
 
 /** Rows of this target not seen by this sweep, except what the rule keeps. Runs in the transaction of the last page. */
-export function deleteUnseen(db: Db, target: AccessTarget, s: Pick<SweepState, "at" | "phase" | "keptAll" | "keptPeople">): number {
+export function deleteUnseen(db: Db, target: AccessTarget, s: Pick<SweepState, "sweepId" | "at" | "phase" | "after" | "keptAll" | "keptPeople">): number {
   const coveredByPeople = s.phase === "people";
   const keptAll = new Set(s.keptAll.map((n) => n.kind));
   const keptPeople = new Set(s.keptPeople.map((n) => n.kind));
-  const rows = db.prepare("SELECT item_id, kind, subject_kind, subject_id FROM fleet_access_items WHERE target = ? AND last_seen < ?").all(target, s.at);
+  const rows = db.prepare("SELECT item_id, kind, subject_kind, subject_id FROM fleet_access_items WHERE target = ? AND last_seen < ? AND last_sweep IS NOT ?").all(target, s.at, s.sweepId);
   const people = rows.some((r) => keptAll.has(String(r.kind))) ? new Set(db.prepare("SELECT id FROM fleet_people WHERE kind = 'person'").all().map((r) => String(r.id))) : new Set<string>();
   const del = db.prepare("DELETE FROM fleet_access_items WHERE target = ? AND item_id = ?");
   let n = 0;
   for (const r of rows) {
     const kind = String(r.kind);
     // Not in the `all` answer: only a people answer covered it, and only for a person who was asked about.
-    if (keptAll.has(kind) && (!coveredByPeople || keptPeople.has(kind) || r.subject_kind !== "person" || !people.has(String(r.subject_id)))) continue;
+    if (keptAll.has(kind) && (!coveredByPeople || keptPeople.has(kind) || r.subject_kind !== "person" || !people.has(String(r.subject_id)) || String(r.subject_id) > s.after)) continue;
     del.run(target, r.item_id);
     n++;
   }
@@ -64,7 +66,11 @@ const nextBatch = (db: Db, after: string): string[] =>
     .map((r) => String(r.id));
 
 const nextTarget = (s: SweepState): SweepState => ({ ...s, i: s.i + 1, phase: "all", cursor: null, after: "", batch: [], pages: 0, waits: 0, keptAll: [], keptPeople: [] });
-const addKept = (list: readonly NotShown[], more: readonly NotShown[]): NotShown[] => [...list, ...more.filter((m) => !list.some((l) => l.kind === m.kind))];
+const addKept = (list: readonly NotShown[], more: readonly NotShown[]): NotShown[] => {
+  const out = [...list];
+  for (const m of more) if (!out.some((l) => l.kind === m.kind)) out.push({ kind: m.kind, reason: Array.from(m.reason).slice(0, KEPT_REASON_CHARS).join("") });
+  return out;
+};
 
 /** One tick: at most one call, then one transaction. `again` hands the event loop back. */
 export async function sweepTick(_input: Json, env: SweepEnv): Promise<JobOutcome> {
@@ -133,25 +139,31 @@ async function tick(env: SweepEnv, s: SweepState, target: AccessTarget, now: () 
   }
   const page = answer.page;
   const items = onlyAsked(page.items, subjects);
-  const base: SweepState = { ...s, calls, pages: s.pages + 1, waits: 0, batch };
+  // Every page counts: a kind one page could not list is not listed by the others, even when the last page has no `notShown`.
+  const keptAll = s.phase === "all" ? addKept(s.keptAll, page.notShown) : s.keptAll;
+  const keptPeople = s.phase === "people" ? addKept(s.keptPeople, page.notShown) : s.keptPeople;
+  if (keptAll.length + keptPeople.length > KEPT_CAP) {
+    // Each entry is in the job state, which has a limit. A list this long is no limit an app can state: not read, nothing deleted.
+    env.checkpoint({ ...nextTarget(s), calls } as unknown as Json, (db) => noteStop(db, target, { state: "not_read", code: "bad_answer", text: "The app gave an answer Governance cannot use." }, at));
+    return { status: "again" };
+  }
+  const base: SweepState = { ...s, calls, pages: s.pages + 1, waits: 0, batch, keptAll, keptPeople };
   if (page.nextCursor !== null) {
     const next = { ...base, cursor: page.nextCursor };
     env.checkpoint(next as unknown as Json, (db) => storeItems(db, target, items, s.sweepId, at));
     return { status: "again" };
   }
   if (s.phase === "all") {
-    const keptAll = addKept(s.keptAll, page.notShown);
     if (keptAll.some((n) => TARGET_KINDS[target].includes(n.kind))) {
-      const next: SweepState = { ...base, cursor: null, keptAll, phase: "people" };
+      const next: SweepState = { ...base, cursor: null, phase: "people" };
       env.checkpoint(next as unknown as Json, (db) => storeItems(db, target, items, s.sweepId, at));
       return { status: "again" };
     }
-    finishTarget(env, { ...base, keptAll }, target, items, at);
+    finishTarget(env, base, target, items, at);
     return { status: "again" };
   }
-  const keptPeople = addKept(s.keptPeople, page.notShown);
   const after = batch.at(-1) ?? s.after;
-  const next: SweepState = { ...base, cursor: null, batch: [], after, keptPeople };
+  const next: SweepState = { ...base, cursor: null, batch: [], after };
   env.checkpoint(next as unknown as Json, (db) => storeItems(db, target, items, s.sweepId, at));
   return { status: "again" };
 }

@@ -108,6 +108,46 @@ test("deletion: never for a kind in notShown of the answer that covered the subj
   assert.equal(readStateOf(db, "knowledge")?.state, "read", "complete: false from notShown is not an error");
 });
 
+test("deletion: notShown of any page counts, not only of the last page", async () => {
+  const db = migratedDb();
+  const clock = { now: 1_000_000 };
+  const area = wire("knowledge", { id: "person_area:x", kind: "person_area", resource: "x", level: "read", revocable: false });
+  await sweep(db, { knowledge: () => answer([area]) }, clock);
+  // Page 1: the store's directory is old, person_area is not listed. Page 2: it is current again and lists nothing after the cursor.
+  await sweep(db, { knowledge: (i) => (i.cursor ? answer([]) : answer([], { nextCursor: "c2", notShown: [{ kind: "person_area", reason: "old" }] })) }, clock);
+  assert.deepEqual(ids(db, "knowledge"), ["person_area:x"]);
+});
+
+test("deletion: the sweep's own rows stay when the clock steps back in the sweep", async () => {
+  const db = migratedDb();
+  const clock = { now: 1_000_000 };
+  await sweep(db, { evolution: () => answer([routine("a")]) }, clock);
+  const f = fakeStores({ ...quiet, evolution: () => answer([routine("a")]) });
+  const stepped = { now: 2_000_000 };
+  const { env } = jobEnv(db, accessEnv(f.callApp), "schedule", stepped);
+  for (let i = 0; i < 3; i++) await sweepTick({}, env);
+  stepped.now = 500_000;
+  await run(env);
+  assert.deepEqual(ids(db, "evolution"), ["routine:a"]);
+});
+
+test("an answer with too many kinds in notShown reads not_read and deletes nothing; the job state stays under its limit", async () => {
+  const db = migratedDb();
+  const clock = { now: 1_000_000 };
+  await sweep(db, { evolution: () => answer([routine("a")]) }, clock);
+  const many = (n: number) => Array.from({ length: 32 }, (_, i) => ({ kind: `k${n}_${i}`, reason: "\u{1f600}".repeat(200) }));
+  const f = fakeStores({ ...quiet, evolution: (i) => { const n = Number(i.cursor ?? 0); return answer([], { nextCursor: String(n + 1), notShown: many(n) }); } });
+  const { env, held } = jobEnv(db, accessEnv(f.callApp), "schedule", clock);
+  let largest = 0;
+  for (let t = 0; t < 12; t++) {
+    await sweepTick({}, env);
+    largest = Math.max(largest, Buffer.byteLength(JSON.stringify(held.state)));
+  }
+  assert.ok(largest < 64 * 1024, String(largest));
+  assert.equal(readStateOf(db, "evolution")?.code, "bad_answer");
+  assert.deepEqual(ids(db, "evolution"), ["routine:a"]);
+});
+
 test("per person: the all answer leaves channel_sender out; the named people cover it, and only those people can lose a row", async () => {
   const db = migratedDb();
   const clock = { now: 1_000_000 };
@@ -287,7 +327,7 @@ test("onStart: the 6 h clock always, the first read only when none finished", as
     await definition.onStop?.({ db, log } as never);
     return seen.map((s) => s.job);
   };
-  assert.deepEqual(await start(), ["access_sweep_cron", "access_sweep"]);
+  assert.deepEqual(await start(), ["access_sweep_cron", "access_sweep_cron"]);
   db.exec("INSERT INTO fleet_sweeps (id, started_by, started_at, finished_at) VALUES ('swp_1', 'schedule', 1, 2)");
   assert.deepEqual(await start(), ["access_sweep_cron"]);
 });

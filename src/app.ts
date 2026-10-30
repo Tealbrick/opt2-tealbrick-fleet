@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { type AppDefinition, defineApp, type HandlerSpec, type HookHandler, type SdkAppDefinition } from "@opt2-tealbrick/miniapp-sdk";
 import type { OpId } from "#kit";
 import { accessJobs } from "./access/env.ts";
-import { lastSweepAt, SWEEP_CRON, SWEEP_CRON_JOB, SWEEP_JOB } from "./access/sweep.ts";
+import { lastSweepAt, SWEEP_CRON, SWEEP_CRON_JOB } from "./access/sweep.ts";
 import { startAgentHandlesTimer } from "./agent-handles.ts";
 import { factsAnswer } from "./facts.ts";
 import { noteRestore } from "./lifecycle/events.ts";
@@ -58,11 +58,15 @@ export const definition: SdkAppDefinition = {
   async onStart(ctx) {
     noteRestore(ctx.db, Date.now());
     stopDatesTimer = startDatesTimer(ctx.db, ctx.log);
-    // Every 6 h (C380 §4): the full read of the stores, and once soon after the first start, so the page does not wait 6 h.
-    ctx.schedule({ job: SWEEP_CRON_JOB }, { cron: SWEEP_CRON }, { key: SWEEP_CRON_JOB });
-    if (lastSweepAt(ctx.db) === null) ctx.schedule({ job: SWEEP_JOB, input: { by: "schedule" } }, { at: Date.now() + 120_000 }, { key: "access_sweep_first" });
     stopTimer = startProposalTimer(ctx.db, ctx.callApp, ctx.log);
     stopHandlesTimer = startAgentHandlesTimer(ctx.db, ctx.callApp, ctx.log);
+    // Every 6 h (C380 §4): the full read of the stores, and once soon after the first start, so the page does not wait 6 h. Last: a refusal here stops no timer above.
+    try {
+      ctx.schedule({ job: SWEEP_CRON_JOB }, { cron: SWEEP_CRON }, { key: SWEEP_CRON_JOB });
+      if (lastSweepAt(ctx.db) === null) ctx.schedule({ job: SWEEP_CRON_JOB }, { at: Date.now() + 120_000 }, { key: "access_sweep_first" });
+    } catch (e) {
+      ctx.log.warn("access_sweep_not_scheduled", { error: e instanceof Error ? e.message : "error" });
+    }
   },
   async onStop() {
     stopTimer?.();

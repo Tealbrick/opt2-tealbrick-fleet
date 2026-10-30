@@ -27,10 +27,14 @@ const jobEnv = (ctx: JobContext): SweepEnv => ({
 
 export const accessJobs: Record<string, { run: JobHandler; timeoutMs?: number }> = {
   [SWEEP_JOB]: { run: (input, ctx) => sweepTick(input, jobEnv(ctx)), timeoutMs: 120_000 },
-  // The clock only starts the read; a running read is enough. It never fails, so the cron job stays.
+  // The clock only starts the read; a running read is enough. It never fails: a failed keyed cron job would stop the clock.
   [SWEEP_CRON_JOB]: {
     run: async (_input, ctx) => {
-      startSweep(ctx, "schedule");
+      try {
+        startSweep(ctx, "schedule");
+      } catch (e) {
+        ctx.log.warn("access_sweep_not_started", { error: e instanceof Error ? e.message : "error" });
+      }
     },
   },
 };
