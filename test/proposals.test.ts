@@ -649,7 +649,7 @@ test("C88 a/b: no agent op, hook, event, review verdict or timer tick calls rule
   assert.ok(timerRules.calls.length >= 1, "the timer did poll");
   assert.deepEqual([...new Set(timerRules.ops())], ["draft_status"], "the timer reads; it never submits");
   // onStart/onStop wire it (stopped on stop)
-  await definition.onStart?.({ db, callApp: timerRules.callApp, log } as never);
+  await definition.onStart?.({ db, callApp: timerRules.callApp, log, schedule: () => ({ id: "job_x", status: "queued" }) } as never);
   await definition.onStop?.({} as never);
 });
 
@@ -657,7 +657,7 @@ test("C88 b: Governance calls only rule_draft_submit and draft_status, and the c
   const rulesCompanion = (manifest.companions ?? []).filter((c) => c.product === "rules");
   assert.deepEqual(rulesCompanion.map((c) => [c.product, c.operations, c.crud]), [["rules", ["rule_draft_submit", "draft_status"], ["create", "read"]]]);
   assert.deepEqual([...p.RULES_OPS], rulesCompanion[0]?.operations);
-  assert.deepEqual((manifest.companions ?? []).map((c) => c.product).sort(), ["connect", "rules"]);
+  assert.deepEqual((manifest.companions ?? []).map((c) => c.product).sort(), ["connect", "inbox", "rules"]);
   // a whole scenario: send, retry, poll, list
   const { db } = fresh();
   const rules = fakeRules();
