@@ -26,15 +26,26 @@ export interface TickResult {
   waiting: number;
 }
 
+/** One subject that fails stays for the next tick and does not stop the others. */
+function attempt(fn: () => unknown, onError?: (e: unknown) => void): boolean {
+  try {
+    fn();
+    return true;
+  } catch (e) {
+    onError?.(e);
+    return false;
+  }
+}
+
 /** One tick. `seen` holds what the last tick saw and is replaced by what this one saw. */
-export function tickDates(db: Db, seen: Seen, now = Date.now()): TickResult {
+export function tickDates(db: Db, seen: Seen, now = Date.now(), onError?: (e: unknown) => void): TickResult {
   const out: TickResult = { stopped: 0, started: 0, waiting: 0 };
   const next: Seen = new Set();
   for (const r of dated(db, "valid_from", now)) {
     const key = `from:${r.kind}:${r.id}:${r.at}`;
     next.add(key);
     if (!seen.has(key)) continue;
-    startDatePassed(db, r.kind, r.id, now);
+    if (!attempt(() => startDatePassed(db, r.kind, r.id, now), onError)) continue;
     next.delete(key);
     out.started++;
   }
@@ -47,7 +58,7 @@ export function tickDates(db: Db, seen: Seen, now = Date.now()): TickResult {
       out.waiting++;
       continue;
     }
-    transition(db, { kind: r.kind, id: r.id, to: "suspended", reason: "contract_ended", note: "The end date passed.", actor: SYSTEM }, now);
+    if (!attempt(() => transition(db, { kind: r.kind, id: r.id, to: "suspended", reason: "contract_ended", note: "The end date passed.", actor: SYSTEM }, now), onError)) continue;
     next.delete(key);
     out.stopped++;
   }
@@ -58,11 +69,12 @@ export function tickDates(db: Db, seen: Seen, now = Date.now()): TickResult {
 
 export function startDatesTimer(db: Db, log: { warn(msg: string, f?: Record<string, string>): void }, everyMs = TICK_MS, firstMs = FIRST_TICK_MS): () => void {
   const seen: Seen = new Set();
+  const warn = (e: unknown) => log.warn("lifecycle date tick failed", { reason: e instanceof Error ? e.message.slice(0, 200) : "error" });
   const tick = () => {
     try {
-      tickDates(db, seen);
+      tickDates(db, seen, Date.now(), warn);
     } catch (e) {
-      log.warn("lifecycle date tick failed", { reason: e instanceof Error ? e.message.slice(0, 200) : "error" });
+      warn(e);
     }
   };
   const first = setTimeout(tick, firstMs);

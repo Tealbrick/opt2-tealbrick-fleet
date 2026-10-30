@@ -47,6 +47,11 @@ export function setAgentMoved(db: Db, input: Parameters<typeof store.setAgent>[1
       const who = db.prepare("SELECT kind, lifecycle FROM fleet_people WHERE id = ?").get(input.owner);
       if (who && who.kind === "person" && who.lifecycle !== "active") fail("owner_inactive", "The new owner must be an active person.", 409);
     }
+    // Taking the owner away would lift the stop that comes from a stopped owner, with no guard. A transfer names an active owner instead.
+    if (changing && input.owner === null && old?.owner_id !== null) {
+      const cur = db.prepare("SELECT lifecycle FROM fleet_people WHERE id = ?").get(old?.owner_id as string)?.lifecycle;
+      if (cur === "suspended" || cur === "leaving" || cur === "archived") fail("owner_stopped", "The owner is stopped. Name an active owner: taking the owner away would end the stop.", 409);
+    }
     const agent = store.setAgent(db, input, now);
     if (changing) {
       clearAgentKeep(db, agent.id);

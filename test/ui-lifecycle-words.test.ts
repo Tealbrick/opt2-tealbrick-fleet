@@ -2,6 +2,7 @@
 // said before a change never claims a stop, and the refusals of `lifecycle_set` read as sentences.
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { NOT_CHANGED as SERVER_NOT_CHANGED } from "../src/plans/portal-link.ts";
 import { featuresOf } from "../src/ui/pages/features.ts";
 import { lifecycleError, stopCapOf } from "../src/ui/pages/lifecycle-errors.ts";
 import { subjectFromUrl, subjectHref } from "../src/ui/pages/subject-link.ts";
@@ -38,6 +39,9 @@ describe("words before a change", () => {
     assert.equal(floorTone({ state: "not_installed" }), "neutral");
     assert.equal(beforeChangeTone({ state: "not_read" }), "needs-you");
     assert.equal(beforeChangeTone({ state: "confirmed" }), "neutral");
+  });
+  it("the page's Not changed block is the server's, word for word (the browser cannot import server code)", () => {
+    assert.deepEqual([...NOT_CHANGED], [...SERVER_NOT_CHANGED]);
   });
   it("the Not changed block names the owner's limits", () => {
     assert.ok(NOT_CHANGED.some((t) => /own logins/.test(t)));

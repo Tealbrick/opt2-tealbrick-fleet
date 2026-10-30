@@ -34,16 +34,17 @@ export const personStatusOf = (l: Lifecycle): "active" | "departed" => (l === "a
 /** What an agent may read: `departed` from `archived` only, so no agent learns of a leaver before the person knows (S2-8). Outside agents have no lifecycle. */
 export const leanPersonStatus = (status: "active" | "departed", lifecycle: string | null): "active" | "departed" => (lifecycle === null ? status : lifecycle === "archived" ? "departed" : "active");
 
-export function effectivePerson(p: { lifecycle: Lifecycle; validFrom: number | null }, now: number): Effective {
-  if ((p.lifecycle === "active" || p.lifecycle === "proposed") && p.validFrom !== null && p.validFrom > now) return "not_started";
+/** A stored start date reads `not_started` until the timer ends it (two ticks agree, the revision moves). So time alone never changes an answer at one revision. */
+export function effectivePerson(p: { lifecycle: Lifecycle; validFrom: number | null }): Effective {
+  if ((p.lifecycle === "active" || p.lifecycle === "proposed") && p.validFrom !== null) return "not_started";
   return p.lifecycle;
 }
 
 /** An agent whose owner is stopped is effectively `suspended` unless its keep-running tick is set. Lifts by itself when the owner's state lifts. */
-export function effectiveAgent(a: { lifecycle: Lifecycle; validFrom: number | null; keepRunning: boolean }, ownerLifecycle: string | null, now: number): Effective {
+export function effectiveAgent(a: { lifecycle: Lifecycle; validFrom: number | null; keepRunning: boolean }, ownerLifecycle: string | null): Effective {
   if (a.lifecycle === "suspended" || a.lifecycle === "leaving" || a.lifecycle === "archived") return a.lifecycle;
   if (OWNER_STOPS.includes(ownerLifecycle) && !a.keepRunning) return "suspended";
-  if (a.validFrom !== null && a.validFrom > now) return "not_started";
+  if (a.validFrom !== null) return "not_started";
   return a.lifecycle;
 }
 

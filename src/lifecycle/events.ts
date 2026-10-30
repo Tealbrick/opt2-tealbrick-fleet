@@ -96,9 +96,9 @@ export function lastLeavingSnapshot(db: Db, kind: string, id: string): Record<st
   return r ? (JSON.parse(String(r.snapshot_json)) as Record<string, unknown>) : null;
 }
 
-/** Stops (T3, T5) since `since` (ms). The one count behind the cap and the "stopped today" banner. */
+/** Stops (T3, T5, a start date in the future) since `since` (ms). The one count behind the cap and the "stopped today" banner. */
 export function stopsSince(db: Db, since: number): number {
-  return Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_lifecycle_events WHERE kind = 'transition' AND to_state IN ('suspended', 'leaving') AND at > ?").get(since)?.n ?? 0);
+  return Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_lifecycle_events WHERE kind IN ('transition', 'changed') AND to_state IN ('suspended', 'leaving', 'not_started') AND at > ?").get(since)?.n ?? 0);
 }
 
 /**

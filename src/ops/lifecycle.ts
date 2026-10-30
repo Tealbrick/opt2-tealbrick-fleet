@@ -16,7 +16,7 @@ import {
   type SummaryGetOutput,
 } from "#kit";
 import { setSettings } from "../lifecycle/settings.ts";
-import { type Actor, loadSubject, setDates, setKeepRunning, transition } from "../lifecycle/transitions.ts";
+import { type Actor, assertCap, loadSubject, setDates, setKeepRunning, transition } from "../lifecycle/transitions.ts";
 import { colleagueDetail, colleaguesList, grantsOf, readTopology, summaryGet } from "../lifecycle/view.ts";
 import { fail } from "../meta.ts";
 import { op } from "./op.ts";
@@ -67,14 +67,24 @@ export const lifecycleOps = {
             else transition(db, { kind: "agent", id: d.agent, to: "leaving", reason: input.reason ?? "other", actor, noCap: true, grants: grantsOf(db, topology, "agent", d.agent) }, now);
           }
         };
-        if (input.validFrom !== undefined || input.validUntil !== undefined) {
-          setDates(db, { kind: input.kind, id: input.id, ...(input.validFrom !== undefined ? { validFrom: input.validFrom } : {}), ...(input.validUntil !== undefined ? { validUntil: input.validUntil } : {}), confirmPastDate: input.confirmPastDate, actor }, now);
-        }
-        // A stop counts against the cap before its own decisions do. A close needs the decisions before its guard.
+        const dates = () => {
+          if (input.validFrom === undefined && input.validUntil === undefined) return;
+          setDates(db, { kind: input.kind, id: input.id, ...(input.validFrom !== undefined ? { validFrom: input.validFrom } : {}), ...(input.validUntil !== undefined ? { validUntil: input.validUntil } : {}), confirmPastDate: input.confirmPastDate, confirmCount: input.confirmCount, noCap: stopping, actor }, now);
+        };
+        const change = () => (input.to === undefined ? null : transition(db, { kind: input.kind, id: input.id, to: input.to, reason: input.reason ?? "other", note: input.note, actor, confirmCount: input.confirmCount, waive: input.waive, grants: input.to === "leaving" ? grantsOf(db, topology, input.kind, input.id) : [] }, now));
+        // One call passes the cap once. A stop goes first and counts for its dates and decisions. Otherwise the dates and decisions go first:
+        // a resume can need a new end date, and a close needs the decisions. Stop decisions with no stop of their own pass the cap here.
         const stopping = input.to === "suspended" || input.to === "leaving";
-        if (!stopping) decide();
-        const out = input.to === undefined ? null : transition(db, { kind: input.kind, id: input.id, to: input.to, reason: input.reason ?? "other", note: input.note, actor, confirmCount: input.confirmCount, waive: input.waive, grants: input.to === "leaving" ? grantsOf(db, topology, input.kind, input.id) : [] }, now);
-        if (stopping) decide();
+        if (stopping) {
+          const out = change();
+          dates();
+          decide();
+          return out;
+        }
+        dates();
+        if (input.decisions?.some((d) => d.decision === "stop")) assertCap(db, input.confirmCount, now);
+        decide();
+        const out = change();
         return out;
       });
       return { colleague: await colleagueDetail(ctx, input.kind, input.id), transition: made ? { from: made.from, to: made.to, event: made.event } : null };
