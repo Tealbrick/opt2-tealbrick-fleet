@@ -952,12 +952,11 @@ test("D2 review: a transfer to the current owner is refused; a plan with no Core
   assert.match(view.note, /2 agents stay paused with the key/);
   assert.doesNotMatch(view.headline, /^Done/);
 
-  // only an entry new in this window needs the confirm: a keep-running agent was not stopped with its owner
+  // only an entry new in this window needs the confirm: the owner stopped an hour ago, two others just now, the cap is 2
   const v = makeWorld();
-  v.db.prepare("UPDATE fleet_agents SET keep_running = 1, keep_reason = 'x' WHERE id = ?").run(HENRY);
-  set(v.db, "person", v.ann.id, "suspended", {}, Date.now());
-  v.db.prepare("UPDATE fleet_agents SET keep_running = 0, keep_reason = NULL WHERE id = ?").run(HENRY);
-  v.db.prepare("INSERT INTO fleet_settings (key, value) VALUES ('stop_cap', '1') ON CONFLICT (key) DO UPDATE SET value = '1'").run();
+  set(v.db, "person", v.ann.id, "suspended", {}, Date.now() - 3_600_000);
+  for (const name of ["P1", "P2"]) set(v.db, "person", store.setPerson(v.db, { name }, v.clock.t).id, "suspended", {}, Date.now());
+  v.db.prepare("INSERT INTO fleet_settings (key, value) VALUES ('stop_cap', '2') ON CONFLICT (key) DO UPDATE SET value = '2'").run();
   await assert.rejects(run("plan_send", { kind: "person", id: v.ann.id, decisions: [{ agent: HENRY, decision: "stop" }] }, ctxOf(v)), refused("stop_cap_reached", 409));
   assert.equal(stateOf(v.db, "agent", HENRY), "active");
   const ok = await run("plan_send", { kind: "person", id: v.ann.id, decisions: [{ agent: HENRY, decision: "stop" }], confirmCount: 3 }, ctxOf(v));
