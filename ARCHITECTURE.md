@@ -20,6 +20,14 @@ State: verified against the repo on 2026-10-17. Claims cite paths in this repo. 
 
 Governance (0.3.1; formerly Organization Plane) is the workspace directory and its trust record. Rules (since Rules 0.3.0) and Knowledge read the directory feed `directory_feed` (contract `fleet.directory_feed/1`, reader apps only: `FEED_READERS` in `src/feed.ts`); `directory_get` is the lean agent view. A context hook adds facts about the requester (with its trust) and the agent owner to every call. Handle format is `<channel>:<value>` (`buzz:npub1...`, `slack:U...`, `telegram:123...`), canonicalized by `normalizeHandle` from `@opt2-tealbrick/manifest` (no local parser). Trust reviews: an agent asks, the owner decides. Design: `coordination/leads/fleet/DESIGN.md` (private).
 
+## Source layout (C380 B9-0, pure move)
+
+- `src/app.ts`: manifest, hook, events, timers, and `handlers` = the spread of the op group maps. `satisfies Record<OpId, HandlerSpec>` stays: a manifest op without a handler does not compile.
+- `src/ops/<group>.ts`: handler maps per group (`directory`, `reviews`, `proposals`, `topology`; `op.ts` is the typed wrapper). A new op goes in its group file; a new group is a new file plus one spread in `src/app.ts`.
+- Domain logic stays in `src/*.ts` (store, reviews, proposals, access, topology, feed, lean, ...). A lane that adds a domain adds its own files, for example `src/lifecycle/`, `src/plans/`.
+- `src/ui/App.tsx`: shell, routes, nav, badges only. `src/ui/pages/<page>.tsx`: one file per directory page (`teams`, `people`, `agents`, `identities`; `directory.tsx` loads the directory, `shared.tsx` holds shared types and the delete button). Feature pages stay beside `App.tsx` (`reviews`, `topology`, `access-page`, `contact-rules`). New pages: `src/ui/pages/<page>.tsx` plus one route in `App.tsx`.
+- `test/boundaries.test.ts` still forbids server imports from `src/ui`.
+
 ## Operations (from `tealbrick.manifest.json`)
 
 22 operations.
