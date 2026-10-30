@@ -128,6 +128,10 @@ const stopInput = () => stub.calls.filter((c) => c.op === "lifecycle_set").map((
 
 type Summary = typeof import("../src/ui/pages/summary.tsx");
 type Everyone = typeof import("../src/ui/pages/everyone.tsx");
+type Flow = typeof import("../src/ui/pages/leave-flow.tsx");
+type Changes = typeof import("../src/ui/pages/change-dialogs.tsx");
+let flow: Flow;
+let changes: Changes;
 let summary: Summary;
 let everyone: Everyone;
 before(() => {
@@ -137,6 +141,8 @@ before(() => {
 before(async () => {
   summary = (await import(pathToFileURL(join(outDir, "ui", "pages", "summary.js")).href)) as Summary;
   everyone = (await import(pathToFileURL(join(outDir, "ui", "pages", "everyone.js")).href)) as Everyone;
+  flow = (await import(pathToFileURL(join(outDir, "ui", "pages", "leave-flow.js")).href)) as Flow;
+  changes = (await import(pathToFileURL(join(outDir, "ui", "pages", "change-dialogs.js")).href)) as Changes;
 });
 after(() => rmSync(outDir, { recursive: true, force: true }));
 const reset = () => {
@@ -280,6 +286,118 @@ describe("People and agents, Stop now", () => {
     stub.answers.colleagues_list = refuse(500, "internal", "x");
     m = await mount(h(everyone.EveryonePage, {}));
     assert.ok(button(m.host, "Try again"));
+    await m.unmount();
+  });
+});
+
+describe("the person flow", () => {
+  const person = (over: Record<string, unknown> = {}) =>
+    DETAIL({ kind: "person", id: "per_1", name: "Marco", lifecycle: "active", effective: "active", runtime: null, owner: null, line: "Active", plan: null, agents: [ROW(), ROW({ id: "agt_L", name: "Already leaving", lifecycle: "leaving", effective: "leaving" })], rev: 7, ...over }) as never;
+  /** A step change fades with a timer: wait until it is done, as in test/ui-reviews.test.ts. */
+  const next = async (host: Element, label = "Next") => {
+    await click(button(host, label));
+    await act(async () => new Promise((r) => setTimeout(r, 450)));
+    await flush();
+  };
+  it("one send: a decision for each agent that can still decide, the revision it read, then only the result", async () => {
+    reset();
+    stub.answers.lifecycle_set = ok({ colleague: DETAIL({ kind: "person", name: "Marco" }), transition: null });
+    const m = await mount(h(flow.LeaveFlow, { c: person(), onClose: () => {}, onChanged: () => {} }));
+    const dlg = m.host.querySelector("dialog") as Element;
+    assert.equal(button(dlg, "Next").disabled, true, "no reason, no Next");
+    await chooseReason(dlg, "They left");
+    await next(dlg);
+    assert.match(dlg.textContent ?? "", /Henry/);
+    assert.doesNotMatch(dlg.textContent ?? "", /Already leaving/);
+    await next(dlg);
+    assert.match(dlg.textContent ?? "", /Not changed/);
+    assert.match(dlg.textContent ?? "", /Their own logins/);
+    assert.doesNotMatch(dlg.textContent ?? "", /last day:/i);
+    await next(dlg, "Stop");
+    assert.deepEqual(stopInput(), [{ kind: "person", id: "per_1", to: "leaving", reason: "left", expectedRev: 7, decisions: [{ agent: "agt_A", decision: "stop" }] }]);
+    const after = m.host.querySelector("dialog")?.textContent ?? "";
+    assert.match(after, /Not applied: do these in Portal/);
+    assert.doesNotMatch(after, /Their agents/, "the earlier steps are gone: going back could not change what was sent");
+    assert.equal(stopInput().length, 1);
+    await m.unmount();
+  });
+  it("a refused send stays on Confirm with the sentence; a stale page is read again", async () => {
+    reset();
+    stub.answers.lifecycle_set = refuse(409, "lifecycle_stale", "This entry changed since you looked. Open it again.");
+    let reloaded = 0;
+    const m = await mount(h(flow.LeaveFlow, { c: person(), onClose: () => {}, onChanged: () => void reloaded++ }));
+    const dlg = m.host.querySelector("dialog") as Element;
+    await chooseReason(dlg, "Security");
+    await next(dlg);
+    await next(dlg);
+    await next(dlg, "Stop");
+    assert.match(dlg.querySelector('[role="alert"]')?.textContent ?? "", /This entry changed since you looked/);
+    assert.ok(button(dlg, "Stop"));
+    assert.equal(reloaded, 1);
+    await m.unmount();
+  });
+  it("Keep running needs a named reason before Next", async () => {
+    reset();
+    const m = await mount(h(flow.LeaveFlow, { c: person(), onClose: () => {}, onChanged: () => {} }));
+    const dlg = m.host.querySelector("dialog") as Element;
+    await chooseReason(dlg, "They left");
+    await next(dlg);
+    const keep = [...dlg.querySelectorAll('[role="radio"]')].find((r) => r.textContent?.includes("Keep running"));
+    assert.ok(keep);
+    await click(keep as Element);
+    assert.match(dlg.textContent ?? "", /may still hold this agent's key/);
+    assert.equal(button(dlg, "Next").disabled, true);
+    await m.unmount();
+  });
+});
+
+describe("Close and Bring back", () => {
+  const leaving = (over: Record<string, unknown> = {}) => DETAIL({ lifecycle: "leaving", effective: "leaving", runtime: "paused", reason: "migrated", close: { coolingDays: 30, coolingEndsAt: "2026-11-29T00:00:00Z", coolingOver: false, limits: ["Connect could not be read."] }, ...over }) as never;
+  const closeAction = { to: "archived", label: "Close", blocked: null, needsWaive: true } as never;
+  it("before the cooling period ends a waive is required and sent; a migrated reason is not offered as chosen", async () => {
+    reset();
+    stub.answers.lifecycle_set = ok({ colleague: DETAIL(), transition: null });
+    const m = await mount(h(changes.CloseDialog, { c: leaving(), action: closeAction, onClose: () => {}, onChanged: () => {} }));
+    const dlg = m.host.querySelector("dialog") as Element;
+    const close = () => button(dlg, "Close this entry");
+    assert.equal(close().disabled, true);
+    assert.match(dlg.textContent ?? "", /Nothing closes by itself/);
+    assert.match(dlg.textContent ?? "", /Connect could not be read/);
+    await chooseReason(dlg, "They left");
+    assert.equal(close().disabled, true, "still no waive");
+    const input = [...dlg.querySelectorAll("input")].filter((i) => i.type !== "hidden").at(-1) as HTMLInputElement;
+    await act(async () => {
+      const set = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value")?.set;
+      set?.call(input, "Handover done");
+      input.dispatchEvent(new (win as any).Event("input", { bubbles: true }));
+    });
+    await flush();
+    assert.equal(close().disabled, false);
+    await click(close());
+    assert.deepEqual(stopInput(), [{ kind: "agent", id: "agt_A", expectedRev: 2, to: "archived", reason: "left", waive: "Handover done" }]);
+    await m.unmount();
+  });
+  it("Bring back after a close restores nothing, and says so", async () => {
+    reset();
+    const c = DETAIL({ lifecycle: "archived", effective: "archived" }) as never;
+    const m = await mount(h(changes.ChangeDialog, { c, action: { to: "proposed", label: "Bring back", blocked: null, needsWaive: false } as never, onClose: () => {}, onChanged: () => {} }));
+    assert.match(m.host.querySelector("dialog")?.textContent ?? "", /This restores nothing\. Teams and access do not come back/);
+    await m.unmount();
+  });
+  it("Bring back before a close does not say that teams are gone", async () => {
+    reset();
+    const c = DETAIL({ lifecycle: "leaving", effective: "leaving" }) as never;
+    const m = await mount(h(changes.ChangeDialog, { c, action: { to: "proposed", label: "Bring back", blocked: null, needsWaive: false } as never, onClose: () => {}, onChanged: () => {} }));
+    const text = m.host.querySelector("dialog")?.textContent ?? "";
+    assert.match(text, /Access that was removed does not come back/);
+    assert.doesNotMatch(text, /Teams/);
+    await m.unmount();
+  });
+  it("Mark as reviewed grants nothing, and says so", async () => {
+    reset();
+    const c = DETAIL({ lifecycle: "proposed", effective: "proposed" }) as never;
+    const m = await mount(h(changes.ChangeDialog, { c, action: { to: "active", label: "Mark as reviewed", blocked: null, needsWaive: false } as never, onClose: () => {}, onChanged: () => {} }));
+    assert.match(m.host.querySelector("dialog")?.textContent ?? "", /It grants nothing/);
     await m.unmount();
   });
 });
