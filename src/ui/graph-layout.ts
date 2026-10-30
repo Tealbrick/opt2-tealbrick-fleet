@@ -418,7 +418,7 @@ export function graphSummary(l: GraphLayout): string {
     n(l.wires.length + l.contained, "link", "links"),
   ];
   const more = moreNote(l);
-  return `Topology graph, read only: ${parts.join(", ")}.${more ? ` ${more}` : ""}`;
+  return `Who owns what, graph, read only: ${parts.join(", ")}.${more ? ` ${more}` : ""}`;
 }
 
 /** "+M more — see the table." when the caps left something out; "" when everything is drawn. */
