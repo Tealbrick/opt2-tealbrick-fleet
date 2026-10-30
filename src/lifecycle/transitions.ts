@@ -123,8 +123,8 @@ export function guardOf(db: Db, s: Subject, to: Lifecycle, opts: { waive?: strin
     if (coolingEnd(s, days) > now && !cleanText(opts.waive ?? "")) return no("cooling_not_over", `You can close this after the cooling period of ${days} days. To close it now, give a reason.`);
     if (s.kind === "agent" && s.runtime === "active") return no("plan_open", "This agent still runs. Pause it in Portal first.");
     if (s.kind === "person") {
-      const unnamed = unnamedAccounts(db, now);
-      if (unnamed > 0) return no("unlinked_accounts", `${unnamed} accounts in Connect have no person. Check them, and name each one that is not this person's.`);
+      const unnamed = unnamedAccounts(db, s.id, now);
+      if (unnamed > 0) return no("unlinked_accounts", `${unnamed} accounts in Connect have no person. Check them. If none is this person's, accept that with a reason.`);
       const open = undecidedAgents(db, s.id);
       if (open.length > 0) return no("agents_undecided", `Decide for these agents first: ${open.slice(0, 5).join(", ")}${open.length > 5 ? ` and ${open.length - 5} more` : ""}.`);
       const running = stillRunning(db, s.id);

@@ -2,9 +2,12 @@
 // A list reads the whole directory in a few indexed queries and builds it once (no query per row): `fleet_facts` shares this event loop (F12).
 import type { Db, OpContext, SdkOpContext } from "@opt2-tealbrick/miniapp-sdk";
 import type { ColleagueGetOutput, ColleaguesListOutput, SummaryGetOutput } from "#kit";
+import { readStates } from "../access/client.ts";
+import { ACCESS_AFTER_LEAVE, accessAfterLeave, openDifferences } from "../access/differences.ts";
+import { type AccessTarget, TARGET_NAMES } from "../access/items.ts";
 import { type Finding, findingsOf } from "../findings.ts";
 import { fail, revision } from "../meta.ts";
-import { latestPlanStates } from "../plans/guards.ts";
+import { latestPlanStates, unnamedAccounts } from "../plans/guards.ts";
 import { type PlanAgent, portalPlan } from "../plans/portal-link.ts";
 import { cleanTopology, type DecodedTopology, decodeTopology } from "../topology-slice.ts";
 import type { Trust } from "../trust.ts";
@@ -58,7 +61,7 @@ export function loadColleagues(db: Db, now: number): Loaded {
       trust: p.trust as Trust,
       owner: null,
       line: lineOf("person", lifecycle, effective, null, p.valid_from),
-      findings: findingsOf({ kind: "person", lifecycle, effective, runtime: null, hasOwner: false, ownerLifecycle: null, reason: p.lifecycle_reason === null ? null : String(p.lifecycle_reason), at: Number(p.lifecycle_at), validUntil: p.valid_until === null ? null : Number(p.valid_until), noCard: false, handleConflict: false, planState: plans.get(`person:${String(p.id)}`) ?? null }, now),
+      findings: findingsOf({ kind: "person", lifecycle, effective, runtime: null, hasOwner: false, ownerLifecycle: null, reason: p.lifecycle_reason === null ? null : String(p.lifecycle_reason), at: Number(p.lifecycle_at), validUntil: p.valid_until === null ? null : Number(p.valid_until), noCard: false, handleConflict: false, planState: plans.get(`person:${String(p.id)}`) ?? null, unnamedAccounts: lifecycle === "leaving" ? unnamedAccounts(db, String(p.id), now) : 0 }, now),
       validFrom: isoOf(p.valid_from),
       validUntil: isoOf(p.valid_until),
       keepRunning: false,
@@ -96,6 +99,8 @@ export function loadColleagues(db: Db, now: number): Loaded {
       at: isoOf(a.lifecycle_at),
     });
   }
+  const leave = accessAfterLeave(db);
+  for (const r of rows) if (leave.has(`${r.kind}:${r.id}`)) r.findings.push(ACCESS_AFTER_LEAVE);
   rows.sort((x, y) => x.name.toLowerCase().localeCompare(y.name.toLowerCase()) || x.id.localeCompare(y.id));
   return { rows, byId: new Map(rows.map((r) => [`${r.kind}:${r.id}`, r])) };
 }
@@ -120,6 +125,10 @@ export function readTopology(ctx: OpContext): DecodedTopology | null {
   const read = cleanTopology(view, view.agentIds.length);
   return read ? decodeTopology(read.topology, view.agentIds) : null;
 }
+
+/** Portal's list of who can use what, as a stated limit: no consent or a cut list. Its agents and their state are read either way. */
+export const portalReadState = (topology: DecodedTopology | null): { read: true } | { read: false; text: string } =>
+  !topology ? { read: false, text: "Which apps an agent can use is not shown. Turn on 'See who has access' for Governance in Portal." } : topology.truncated ? { read: false, text: "The list of access is too long to show here. Check it in Portal." } : { read: true };
 
 /** What each agent can reach now, for the snapshot of T5. */
 export function grantsOf(db: Db, topology: DecodedTopology | null, kind: SubjectKind, id: string): Grant[] {
@@ -225,11 +234,13 @@ export async function summaryGet(ctx: OpContext, now = Date.now()): Promise<Summ
     },
     people: { total: people.length, leaving: people.filter((r) => r.lifecycle === "leaving").length, suspended: people.filter((r) => r.lifecycle === "suspended").length },
     noOwner,
-    differences: rows.reduce((n, r) => n + r.findings.length, 0),
+    differences: openDifferences(db, rows, now),
     canWriteOrSend: topology && !topology.truncated ? new Set(topology.edges.filter((e) => e.crud.some((c) => c !== "read")).map((e) => e.agent)).size : null,
     stores: [
       { product: "core", name: "Portal", state: "read", text: "Agents and their state come from the workspace copy.", at: null },
       { product: "rules", name: "Rules & Approvals", state: floor.state === "not_installed" ? "not_installed" : floor.state === "not_read" || floor.state === "older" ? "not_read" : "read", text: floor.text, at: rulesOn ? new Date(now).toISOString() : null },
+      // A refused or held read could not be read either; the text says which.
+      ...readStates(db).map((s) => ({ product: s.target, name: TARGET_NAMES[s.target as AccessTarget] ?? s.target, state: s.state === "read" || s.state === "not_installed" ? s.state : ("not_read" as const), text: s.text ?? "Read.", at: s.readAt === null ? null : new Date(s.readAt).toISOString() })),
     ],
     readiness: [
       { id: "rules", state: rulesOn ? "ok" : "missing", text: rulesOn ? "Rules & Approvals can stop a call early." : floor.text, path: null },

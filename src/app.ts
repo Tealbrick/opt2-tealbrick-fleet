@@ -6,11 +6,14 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { type AppDefinition, defineApp, type HandlerSpec, type HookHandler, type SdkAppDefinition } from "@opt2-tealbrick/miniapp-sdk";
 import type { OpId } from "#kit";
+import { accessJobs } from "./access/env.ts";
+import { lastSweepAt, SWEEP_CRON, SWEEP_CRON_JOB } from "./access/sweep.ts";
 import { startAgentHandlesTimer } from "./agent-handles.ts";
 import { factsAnswer } from "./facts.ts";
 import { noteRestore } from "./lifecycle/events.ts";
 import { assignDefaultOwner } from "./lifecycle/settings.ts";
 import { startDatesTimer } from "./lifecycle/validity.ts";
+import { accessOps } from "./ops/access.ts";
 import { directoryOps } from "./ops/directory.ts";
 import { lifecycleOps } from "./ops/lifecycle.ts";
 import { planOps } from "./ops/plans.ts";
@@ -37,6 +40,7 @@ export const handlers = {
   ...proposalOps,
   ...topologyOps,
   ...lifecycleOps,
+  ...accessOps,
   ...planOps,
 } satisfies Record<OpId, HandlerSpec>;
 
@@ -54,6 +58,7 @@ export const definition: SdkAppDefinition = {
   manifest,
   handlers,
   hooks,
+  jobs: { ...accessJobs, ...planJobs },
   // Every 60 s (C85): the status of drafts sent to Rules. draft_status only; the timer never submits a draft.
   // Every 60 s (C373 §3): the agent handles cache from Connect identities_list, outside every call (read only).
   // Every 60 s (C380 §2): end and start dates; two ticks must agree. It calls nothing.
@@ -65,6 +70,13 @@ export const definition: SdkAppDefinition = {
     startPlanClock(ctx);
     stopTimer = startProposalTimer(ctx.db, ctx.callApp, ctx.log);
     stopHandlesTimer = startAgentHandlesTimer(ctx.db, ctx.callApp, ctx.log);
+    // Every 6 h (C380 §4): the full read of the stores, and once soon after the first start, so the page does not wait 6 h. Last: a refusal here stops no timer above.
+    try {
+      ctx.schedule({ job: SWEEP_CRON_JOB }, { cron: SWEEP_CRON }, { key: SWEEP_CRON_JOB });
+      if (lastSweepAt(ctx.db) === null) ctx.schedule({ job: SWEEP_CRON_JOB }, { at: Date.now() + 120_000 }, { key: "access_sweep_first" });
+    } catch (e) {
+      ctx.log.warn("access_sweep_not_scheduled", { error: e instanceof Error ? e.message : "error" });
+    }
   },
   async onStop() {
     stopTimer?.();
@@ -75,7 +87,6 @@ export const definition: SdkAppDefinition = {
     stopDatesTimer = null;
   },
   migrations: migrationsDir,
-  jobs: planJobs,
   events: {
     // needsAgentDirectory: the slice lists every workspace agent; the full list arrives on every change (SDK 0.1.13).
     async agentsChanged(agents, ctx) {

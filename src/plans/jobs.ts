@@ -28,7 +28,7 @@ export const planJobs: Record<string, { run: JobHandler; timeoutMs?: number; max
 /** The same key finds the job a restore brought back. If that one had failed, it starts again: no clock means no plan moves. */
 export const startPlanClock = (ctx: { schedule: JobContext["schedule"]; jobs: JobContext["jobs"] }): void => {
   const job = ctx.schedule({ job: PLANS_JOB }, { cron: PLANS_CRON }, { key: PLANS_JOB });
-  if (job.status === "failed") ctx.jobs.resume(job.id);
+  if (job?.status === "failed") ctx.jobs.resume(job.id);
 };
 export const kickPlans = (ctx: { jobs: JobContext["jobs"] }): void => {
   ctx.jobs.enqueue(PLANS_JOB, {});

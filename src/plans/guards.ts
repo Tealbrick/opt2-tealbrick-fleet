@@ -24,15 +24,18 @@ export function lastPlanUnfinished(db: Db, kind: string, id: string): boolean {
   return !!db.prepare("SELECT 1 FROM fleet_plans WHERE group_id = ? AND state IN ('expired', 'rejected', 'lost', 'failed', 'stale', 'withdrawn') LIMIT 1").get(String(last.group_id));
 }
 
-/** T7 (Domain 6): Connect accounts tied to nobody. A person cannot close while one is unnamed: it may be theirs. The owner names one with an exception: code `unlinked_account`, subject `item`, id `<target>:<item>`. */
-export const unnamedAccounts = (db: Db, now: number): number =>
+/**
+ * T7 (Domain 6): Connect accounts tied to nobody. A person cannot close while one is unchecked: it may be theirs. The owner answers with exception_set, code `unlinked_account`, on this person:
+ * "none of these is this person's". An account first seen after that answer counts again.
+ */
+export const unnamedAccounts = (db: Db, personId: string, now: number): number =>
   Number(
     db
       .prepare(
         `SELECT COUNT(*) AS n FROM fleet_access_items i WHERE i.target = 'connect' AND i.subject_kind = 'unlinked' AND i.kind IN ('account_as_me', 'account_as_itself')
-           AND NOT EXISTS (SELECT 1 FROM fleet_exceptions e WHERE e.code = 'unlinked_account' AND e.subject_kind = 'item' AND e.subject_id = i.target || ':' || i.item_id AND e.until > ?)`,
+           AND NOT EXISTS (SELECT 1 FROM fleet_exceptions e WHERE e.code = 'unlinked_account' AND e.subject_kind = 'person' AND e.subject_id = ? AND e.until > ? AND e.at >= i.first_seen)`,
       )
-      .get(now)?.n ?? 0,
+      .get(personId, now)?.n ?? 0,
   );
 
 /** The state of the latest plan of each entry: `kind:id`. An agent in a person's plan counts too. One query for the whole list. */

@@ -371,14 +371,22 @@ test("the actor in a plan row is the owner; a person's plan is not stale because
   assert.equal(w.plan(id).state, "waiting");
 });
 
-test("T7: a person cannot close while a Connect account has no person, until the owner names it", async () => {
+test("T7: a person cannot close while a Connect account has no person, until the owner answers with exception_set; a later account counts again", async () => {
   const w = makeWorld();
   w.db.prepare("UPDATE fleet_agents SET owner_id = NULL").run();
   set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
-  w.db.prepare("INSERT INTO fleet_access_items (target, item_id, kind, subject_kind, subject_id, resource, direction, level, label, state, revocable, since, digest, first_seen, last_seen) VALUES ('connect', 'account_as_me:acc', 'account_as_me', 'unlinked', NULL, 'acc', 'held_by', 'use', 'Mail', 'active', 0, NULL, 'd', 1, 1)").run();
+  const add = (id: string, seen: number) => w.db.prepare("INSERT INTO fleet_access_items (target, item_id, kind, subject_kind, subject_id, resource, direction, level, label, state, revocable, since, digest, first_seen, last_seen) VALUES ('connect', ?, 'account_as_me', 'unlinked', NULL, ?, 'held_by', 'use', 'Mail', 'active', 0, NULL, 'd', ?, ?)").run(id, id, seen, seen);
+  add("account_as_me:acc", w.clock.t);
   assert.throws(() => set(w.db, "person", w.ann.id, "archived", { waive: WAIVE }, w.clock.t), refused("unlinked_accounts", 409));
-  w.db.prepare("INSERT INTO fleet_exceptions (code, subject_kind, subject_id, reason, until, by_id, at) VALUES ('unlinked_account', 'item', 'connect:account_as_me:acc', 'Mine, not hers', ?, NULL, 1)").run(w.clock.t + 1000);
-  set(w.db, "person", w.ann.id, "archived", { waive: WAIVE }, w.clock.t);
+  // the finding the owner answers, through the real op
+  const c = { ...(ctxOf(w) as object) } as OpContext;
+  const until = new Date(Date.now() + 86_400_000).toISOString();
+  w.clock.t = Date.now();
+  await run("exception_set", { code: "unlinked_account", kind: "person", id: w.ann.id, reason: "Not hers: this is the company mailbox", until }, c);
+  add("account_as_me:later", Date.now() + 5_000);
+  assert.throws(() => set(w.db, "person", w.ann.id, "archived", { waive: WAIVE }, Date.now()), refused("unlinked_accounts", 409));
+  w.db.prepare("DELETE FROM fleet_access_items WHERE item_id = 'account_as_me:later'").run();
+  set(w.db, "person", w.ann.id, "archived", { waive: WAIVE }, Date.now());
   assert.equal(stateOf(w.db, "person", w.ann.id), "archived");
 });
 
