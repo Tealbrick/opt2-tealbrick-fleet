@@ -1,7 +1,7 @@
 // Review round ops (C380 T2-b). Person ops only: no agent and no app can call them, and each handler checks that again. A verdict is the existing
 // review (src/reviews.ts); the removal it may ask for is a plan by the plan path, and the runner is the only one that calls an app.
 import type { HandlerSpec } from "@opt2-tealbrick/miniapp-sdk";
-import { OP, type OpId, type RoundCreateInput, type RoundCreateOutput, type RoundVerdictInput, type RoundVerdictOutput, type RoundGetInput, type RoundGetOutput, type RoundSetInput, type RoundSetOutput } from "#kit";
+import { OP, type OpId, type RoundCreateInput, type RoundCreateOutput, type RoundGetInput, type RoundGetOutput, type RoundSetInput, type RoundSetOutput, type RoundVerdictInput, type RoundVerdictOutput } from "#kit";
 import { kickPlans } from "../plans/jobs.ts";
 import { closeRound, createRound, decide, listRounds, roundDetail, roundRow, sendQueued, summaryOf } from "../rounds.ts";
 import { assertOwner } from "./lifecycle.ts";

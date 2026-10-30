@@ -37,7 +37,12 @@ function pick(db: Db, scope: string, chosen: readonly Ref[] | undefined): Ref[] 
   if (scope === "everyone") return [...agents(), ...people()];
   if (scope === "chosen") {
     const seen = new Set<string>();
-    return (chosen ?? []).filter((r) => (seen.has(`${r.kind}:${r.id}`) ? false : (seen.add(`${r.kind}:${r.id}`), true)));
+    return (chosen ?? []).filter((r) => {
+      const key = `${r.kind}:${r.id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
   return fail("input_invalid", "Choose agents, people, everyone or a list.", 400);
 }
