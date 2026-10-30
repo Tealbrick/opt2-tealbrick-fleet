@@ -12,8 +12,10 @@ import { useLoad } from "./common.tsx";
 import { ContactRulesPage } from "./contact-rules.tsx";
 import { DirectoryPage } from "./pages/directory.tsx";
 import { EveryonePage } from "./pages/everyone.tsx";
+import { CannotHoldBothPage } from "./pages/exclusions.tsx";
 import { FEATURES } from "./pages/features.ts";
 import { Identities } from "./pages/identities.tsx";
+import { JoinPage } from "./pages/join-page.tsx";
 import { liveBanners } from "./pages/plan-poll.ts";
 import { RecordPage } from "./pages/record.tsx";
 import { RolesPage } from "./pages/roles.tsx";
@@ -32,9 +34,9 @@ const STILLS = new URL("./stills/", import.meta.url).href;
 /** Shell page id → path under the base `/a/fleet/`. Teams is the launch page and the configure page (manifest `ui.launchPath` = `ui.configurePath` = "/"). */
 const OLD_ROUTES = { teams: "", topology: "topology", access: "access", reviews: "reviews", rules: "contact-rules", people: "people", agents: "agents", identities: "identities", holds: "holds" } as const;
 /** With the lifecycle ops (C380): Summary is the launch page; /people and /agents stay as routes and leave the nav for one release. */
-const NEW_ROUTES = { ...OLD_ROUTES, summary: "", everyone: "people-and-agents", subject: SUBJECT_PATH, teams: "teams" } as const;
+const NEW_ROUTES = { ...OLD_ROUTES, summary: "", everyone: "people-and-agents", subject: SUBJECT_PATH, teams: "teams", join: "join" } as const;
 /** Tier 2: a route exists when the ops are there; the nav entry waits for the QA rows (features.ts). */
-const TIER2_ROUTES = { ...(FEATURES.roles ? { roles: "roles" } : {}), ...(FEATURES.rounds ? { rounds: "review-rounds" } : {}), ...(FEATURES.record ? { record: "access-record" } : {}) };
+const TIER2_ROUTES = { ...(FEATURES.roles ? { roles: "roles" } : {}), ...(FEATURES.exclusions ? { exclusions: "cannot-hold-both" } : {}), ...(FEATURES.rounds ? { rounds: "review-rounds" } : {}), ...(FEATURES.record ? { record: "access-record" } : {}) };
 const ROUTES: Readonly<Record<string, string>> = { ...(FEATURES.lifecycle ? NEW_ROUTES : OLD_ROUTES), ...TIER2_ROUTES };
 const LAUNCH = FEATURES.lifecycle ? "summary" : "teams";
 const OLD_PAGES = [
@@ -59,9 +61,15 @@ const NEW_PAGES = [
   { id: "identities", label: "Identities" },
   { id: "holds", label: "Waiting for approval" },
 ];
-/** Review rounds follow Reviews, the Access record follows Access, Roles follows Teams. */
+/** Review rounds follow Reviews, the Access record follows Access, Roles follows Teams, Cannot hold both follows Roles (or Teams when Roles is not in the navigation). */
 function withTier2(pages: { id: string; label: string }[]): { id: string; label: string }[] {
-  return pages.flatMap((p) => [p, ...(p.id === "reviews" && FEATURES.roundsNav ? [{ id: "rounds", label: "Review rounds" }] : []), ...(p.id === "access" && FEATURES.recordNav ? [{ id: "record", label: "Access record" }] : []), ...(p.id === "teams" && FEATURES.rolesInNav ? [{ id: "roles", label: "Roles" }] : [])]);
+  return pages.flatMap((p) => [
+    p,
+    ...(p.id === "reviews" && FEATURES.roundsNav ? [{ id: "rounds", label: "Review rounds" }] : []),
+    ...(p.id === "access" && FEATURES.recordNav ? [{ id: "record", label: "Access record" }] : []),
+    ...(p.id === "teams" && FEATURES.rolesInNav ? [{ id: "roles", label: "Roles" }] : []),
+    ...(p.id === "teams" && FEATURES.exclusionsInNav ? [{ id: "exclusions", label: "Cannot hold both" }] : []),
+  ]);
 }
 const PAGES = withTier2(FEATURES.lifecycle ? NEW_PAGES : OLD_PAGES);
 
@@ -86,7 +94,7 @@ export function App() {
       art={appArt("fleet", STILLS)}
       portalHref={portal}
       pages={pages}
-      current={nav.page === "subject" ? "everyone" : nav.page === "roles" && !FEATURES.rolesInNav ? LAUNCH : nav.page}
+      current={nav.page === "subject" || nav.page === "join" ? "everyone" : (nav.page === "roles" && !FEATURES.rolesInNav) || (nav.page === "exclusions" && !FEATURES.exclusionsInNav) ? LAUNCH : nav.page}
       onNavigate={nav.go}
       pageHref={nav.href}
       actions={
@@ -122,6 +130,8 @@ export function App() {
         <EveryonePage portalHref={portalLink} />
       ) : nav.page === "subject" ? (
         <SubjectPage portalHref={portalLink} />
+      ) : nav.page === "join" && FEATURES.join ? (
+        <JoinPage portalHref={portalLink} />
       ) : nav.page === "holds" ? (
         <HoldsPage title="Waiting for approval" list={holds} only={nav.hold} empty="No calls wait for your approval." />
       ) : nav.page === "topology" ? (
@@ -140,6 +150,8 @@ export function App() {
         <Identities />
       ) : nav.page === "roles" ? (
         <RolesPage />
+      ) : nav.page === "exclusions" ? (
+        <CannotHoldBothPage />
       ) : (
         <DirectoryPage page={nav.page as "teams" | "people" | "agents"} />
       )}

@@ -12,7 +12,7 @@ const upTo = (db: ReturnType<typeof migratedDb>, files: { sql: string }[]) => {
 test("0012 is its own file, after 0011, and no two migration files share a number", () => {
   const names = migrationFiles().map((m) => m.name);
   assert.ok(names.includes(FILE));
-  assert.equal(names.indexOf(FILE), names.length - 1, "nothing after it in this tree");
+  assert.equal(names[names.indexOf(FILE) - 1], "0011_roles.sql", "right after 0011; only the later Tier 2 lanes (0013) come after it");
   assert.equal(new Set(names.map((n) => n.slice(0, 4))).size, names.length);
 });
 

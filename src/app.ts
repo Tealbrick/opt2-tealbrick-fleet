@@ -15,6 +15,7 @@ import { assignDefaultOwner } from "./lifecycle/settings.ts";
 import { startDatesTimer } from "./lifecycle/validity.ts";
 import { accessOps } from "./ops/access.ts";
 import { directoryOps } from "./ops/directory.ts";
+import { exclusionOps } from "./ops/exclusions.ts";
 import { lifecycleOps } from "./ops/lifecycle.ts";
 import { planOps } from "./ops/plans.ts";
 import { proposalOps } from "./ops/proposals.ts";
@@ -49,6 +50,7 @@ export const handlers = {
   ...roundOps,
   ...recordOps,
   ...roleOps,
+  ...exclusionOps,
 } satisfies Record<OpId, HandlerSpec>;
 
 export const hooks: Record<string, HookHandler> = {

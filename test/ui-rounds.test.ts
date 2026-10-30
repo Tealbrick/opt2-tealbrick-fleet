@@ -171,10 +171,10 @@ describe("the nav waits for the QA rows", () => {
     assert.deepEqual(TIER2_PASSED, { rounds: false, record: false }, "nothing is passed until QA says so");
     const hidden = featuresOf(ops);
     assert.deepEqual([hidden.rounds, hidden.record, hidden.roundsNav, hidden.recordNav], [true, true, false, false]);
-    const shown = featuresOf(ops, false, { rounds: true, record: true });
+    const shown = featuresOf(ops, false, false, { rounds: true, record: true });
     assert.deepEqual([shown.roundsNav, shown.recordNav], [true, true]);
-    const none = featuresOf(["round_create"], false, { rounds: true, record: true });
+    const none = featuresOf(["round_create"], false, false, { rounds: true, record: true });
     assert.deepEqual([none.rounds, none.roundsNav, none.record, none.recordNav], [false, false, false, false], "a build without the ops shows nothing, even when the rows passed");
-    assert.equal(featuresOf(["record_export", "round_create", "round_get", "round_verdict"], false, { rounds: true, record: false }).roundsNav, false, "all four round ops");
+    assert.equal(featuresOf(["record_export", "round_create", "round_get", "round_verdict"], false, false, { rounds: true, record: false }).roundsNav, false, "all four round ops");
   });
 });

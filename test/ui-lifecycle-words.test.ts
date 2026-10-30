@@ -12,7 +12,7 @@ import { afterChangeText, beforeChangeText, beforeChangeTone, floorTone, NOT_CHA
 
 describe("features come from the ops of this build", () => {
   it("on when every op is there", () => {
-    assert.deepEqual(featuresOf(["summary_get", "colleagues_list", "colleague_get", "lifecycle_set", "plan_preview", "findings_list"]), { lifecycle: true, preview: true, differences: true, plans: false, roles: false, rolesInNav: false, rounds: false, record: false, roundsNav: false, recordNav: false });
+    assert.deepEqual(featuresOf(["summary_get", "colleagues_list", "colleague_get", "lifecycle_set", "plan_preview", "findings_list"]), { lifecycle: true, preview: true, differences: true, plans: false, roles: false, rolesInNav: false, exclusions: false, exclusionsInNav: false, rounds: false, record: false, roundsNav: false, recordNav: false, join: false, joinInNav: false });
   });
   it("off when one op is missing", () => {
     assert.equal(featuresOf(["summary_get", "colleagues_list", "colleague_get"]).lifecycle, false);

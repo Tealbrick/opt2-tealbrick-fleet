@@ -219,6 +219,107 @@ const PARTIAL = planOf({
 });
 const PERSON = `person-or-agent?kind=person&id=${ID.p}`;
 
+const JOIN_OPS = [...LIFECYCLE_OPS, "person_set", "members_set"];
+const joinOps = { ...shell, overview_get: ok(overview), person_set: (i: unknown): Answer => ({ kind: "ok", value: { person: { id: "per_01J00000000000000000000N1", name: (i as { name: string }).name } } }), members_set: ok({ team: { id: ID.t } }) };
+const settle = (p: Page) => p.waitForTimeout(500);
+async function joinNext(p: Page, label = "Next") {
+  await button(p, label);
+  await settle(p);
+}
+/** Join, one person, to its Confirm step as a contractor with a last day. */
+async function joinOneToConfirm(p: Page) {
+  await button(p, "Add a person");
+  await p.getByLabel("Name").fill("Dana Lee");
+  await p.getByLabel("Email").fill("dana@acme.example");
+  await joinNext(p);
+  await p.getByRole("radio", { name: /contractor/i }).click();
+  await p.getByLabel("Last day").first().fill("2099-12-31");
+  await joinNext(p);
+}
+function joinScenes(): Scene[] {
+  const base = { path: "join", personOps: JOIN_OPS, strict: true, ops: joinOps } as const;
+  const list = async (p: Page, text: string) => {
+    await button(p, "Add people from a list");
+    await p.getByLabel("The list").fill(text);
+    await joinNext(p);
+  };
+  return [
+    { ...base, name: "join-page", ready: "Add a person", expect: ["gives no access", "A contractor has a last day"] },
+    { ...base, name: "join-one-who", ready: "Add a person", steps: (p) => button(p, "Add a person"), expect: ["Channel handles", "It gives no access to anything"] },
+    { ...base, name: "join-one-loading", ops: { ...joinOps, overview_get: hang }, ready: "Add a person", steps: (p) => button(p, "Add a person"), expect: ["Reading your directory."] },
+    { ...base, name: "join-one-directory-error", ops: { ...joinOps, overview_get: fail("internal") }, ready: "Add a person", steps: (p) => button(p, "Add a person"), expect: ["could not be read, so Join cannot check"] },
+    {
+      ...base,
+      name: "join-one-confirm",
+      ready: "Add a person",
+      steps: joinOneToConfirm,
+      expect: ["At the end of 2099-12-31 (UTC)", "It gives no access in any app", "does not end their own logins"],
+      forbid: ["have stopped"],
+    },
+    {
+      ...base,
+      name: "join-one-result",
+      ready: "Add a person",
+      steps: async (p) => {
+        await joinOneToConfirm(p);
+        await joinNext(p, "Add person");
+      },
+      expect: ["Dana Lee is added.", "Last day saved: 2099-12-31 (UTC)", "Joining gives no access", "grant it in Portal"],
+    },
+    {
+      ...base,
+      name: "join-list-check",
+      ready: "Add a person",
+      steps: (p) => list(p, "Name, Email\nBo Bell, bo@acme.example, slack:U3BO00003\nMarco Rossi\nCy Cole\tcy@acme.example\tDesigner\nx@y.example, a@b.example, Zed"),
+      expect: ["2 ready to add, 1 in the directory already, 1 to fix.", "The first line is a header and is left out.", "There is more than one email."],
+    },
+    {
+      ...base,
+      name: "join-list-partial",
+      ops: { ...joinOps, person_set: (i: unknown): Answer => ((i as { name: string }).name === "Cy Cole" ? { kind: "error", status: 409, code: "handle_taken", message: "slack:u3cy00003 belongs to another person" } : { kind: "ok", value: { person: { id: "per_01J00000000000000000000N2", name: (i as { name: string }).name } } }) },
+      ready: "Add a person",
+      steps: async (p) => {
+        await list(p, "Bo Bell\nCy Cole, slack:U3CY00003\nDi Dole");
+        await joinNext(p);
+        await joinNext(p);
+        await joinNext(p, "Add 3 people");
+      },
+      expect: ["2 added, 1 did not go through, 0 not tried.", "Send again", "Nothing was added twice"],
+    },
+    {
+      ...base,
+      name: "join-agent-which",
+      ops: { ...joinOps, colleagues_list: (i: unknown): Answer => ({ kind: "ok", value: { items: (i as { kind: string }).kind === "agent" ? [row({ id: ID.b, name: "Sales helper", lifecycle: "proposed", effective: "proposed", owner: null })] : rows.filter((r) => r.kind === "person"), nextCursor: null, total: 1 } }) },
+      ready: "Add a person",
+      steps: (p) => button(p, "Review a new agent"),
+      expect: ["not reviewed yet", "It grants nothing"],
+    },
+    {
+      ...base,
+      name: "join-agent-none",
+      ops: { ...joinOps, colleagues_list: ok({ items: [], nextCursor: null, total: 0 }) },
+      ready: "Add a person",
+      steps: (p) => button(p, "Review a new agent"),
+      expect: ["No new agent waits for a review."],
+    },
+    {
+      ...base,
+      name: "join-agent-reach",
+      personOps: [...JOIN_OPS, "plan_preview"],
+      ops: { ...joinOps, plan_preview: ok(previewOut), colleagues_list: (i: unknown): Answer => ({ kind: "ok", value: { items: (i as { kind: string }).kind === "agent" ? [row({ id: ID.b, name: "Sales helper", lifecycle: "proposed", effective: "proposed", owner: null })] : rows.filter((r) => r.kind === "person"), nextCursor: null, total: 1 } }) },
+      ready: "Add a person",
+      steps: async (p) => {
+        await button(p, "Review a new agent");
+        await pick(p, "Agent", "Sales helper");
+        await joinNext(p);
+        await pick(p, "Owner", "Marco Rossi");
+        await joinNext(p);
+      },
+      expect: ["Reviewing it changes none of this", "Slack account as itself"],
+      forbid: ["Would stop", "Would stay", "You would do this"],
+    },
+  ];
+}
 
 // ── Tier 2 pages (C380 T2-b): review rounds and the Access record. The route works with the ops; the nav entry waits for the QA rows. ──
 const TIER2_OPS = ["round_create", "round_get", "round_verdict", "round_set", "record_export", "overview_get", "reviews_list"];
@@ -332,6 +433,61 @@ const rolesScenes = (): Scene[] => [
   { name: "roles-not-in-nav", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: pageOps, ready: "Ready to stop an agent?", forbid: ["Roles"] },
 ];
 
+// ── Cannot hold both (C380 T2-c) ──────────────────────────────────────────
+const RULE_OPS = [...ROLE_OPS, "exclusions_list", "exclusion_set"];
+const ruleRow = (over: Record<string, unknown> = {}) => ({
+  id: "xcl_01J000000000000000000000X1",
+  kind: "roles",
+  a: { id: "rol_01J000000000000000000000R1", name: "Approver" },
+  b: { id: "rol_01J000000000000000000000R2", name: "Payer" },
+  text: "No one may have both Approver and Payer.",
+  note: "Finance policy",
+  archived: false,
+  idle: false,
+  clashCount: 0,
+  clashes: [],
+  createdAt: "2026-10-30T09:00:00Z",
+  ...over,
+});
+const ruleOps = {
+  ...roleOps,
+  exclusions_list: ok({
+    rules: [
+      ruleRow({ clashCount: 1, clashes: [{ subject: { kind: "person", id: ID.p, name: "Marco Rossi" }, text: "Marco Rossi has Approver and Payer now. A rule says no one may have both." }] }),
+      ruleRow({ id: "xcl_01J000000000000000000000X2", kind: "holder_owner", note: null, text: "An agent may not have Writes very long invoices while its owner has Approves very long invoices on a phone." }),
+      ruleRow({ id: "xcl_01J000000000000000000000X3", archived: true, text: "No one may have both Treasurer and Clerk." }),
+    ],
+  }),
+  exclusion_set: ok({ rule: ruleRow() }),
+};
+const ruleScenes = (): Scene[] => [
+  { name: "cannot-hold-both", path: "cannot-hold-both", personOps: RULE_OPS, strict: true, ops: ruleOps, ready: "Broken by 1", expect: ["This checks roles only. Portal grants are not checked.", "Agent and owner", "Archived", "Not broken"], forbid: ["Roles Teams"] },
+  { name: "cannot-hold-both-empty", path: "cannot-hold-both", personOps: RULE_OPS, strict: true, ops: { ...ruleOps, exclusions_list: ok({ rules: [] }) }, ready: "No rules yet", expect: ["Nothing is checked until you add one"] },
+  { name: "cannot-hold-both-loading", path: "cannot-hold-both", personOps: RULE_OPS, strict: true, ops: { ...ruleOps, exclusions_list: hang }, ready: "Loading the rules" },
+  { name: "cannot-hold-both-error", path: "cannot-hold-both", personOps: RULE_OPS, strict: true, ops: { ...ruleOps, exclusions_list: fail("internal") }, ready: "Try again" },
+  {
+    name: "cannot-hold-both-new",
+    path: "cannot-hold-both",
+    personOps: RULE_OPS,
+    strict: true,
+    ops: ruleOps,
+    ready: "Broken by 1",
+    steps: (p) => button(p, "New rule"),
+    expect: ["This checks roles only. Portal grants are not checked.", "Kind of rule", "First role", "Second role"],
+  },
+  {
+    name: "cannot-hold-both-archive",
+    path: "cannot-hold-both",
+    personOps: RULE_OPS,
+    strict: true,
+    ops: ruleOps,
+    ready: "Broken by 1",
+    steps: (p) => button(p, /^Archive: No one may have both Approver and Payer/),
+    expect: ["The rule is no longer checked.", "No Portal grant changes."],
+  },
+  { name: "cannot-hold-both-not-in-nav", path: "", personOps: [...LIFECYCLE_OPS, ...RULE_OPS], strict: true, ops: pageOps, ready: "Ready to stop an agent?", forbid: ["Cannot hold both"] },
+];
+
 export const scenes: Scene[] = [
   { name: "summary", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: pageOps, ready: "Ready to stop an agent?", expect: ["Could not be read", "Not installed", "Rules has this change", "cannot see that switch"] },
   { name: "summary-no-stop-open", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, summary_get: ok({ ...summary, agents: { ...summary.agents, stopping: 0 }, people: { ...summary.people, leaving: 0 } }) }, ready: "Ready to stop an agent?", forbid: ["Rules has this change"] },
@@ -419,7 +575,7 @@ export const scenes: Scene[] = [
     expect: ["This makes 6 people and agents stopped in the last 10 minutes"],
     forbid: ["You stopped"],
   },
-  { name: "agent", path: AGENT, personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, colleague_get: ok(agentDetail()) }, ready: "History", expect: ["Stop now", "Stop and remove access"] },
+  { name: "agent", path: AGENT, personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, colleague_get: ok(agentDetail()) }, ready: "History", expect: ["Stop now", "Stop and remove access", "Key age and last use", "Not available. Portal does not pass it to Governance yet."] },
   { name: "agent-loading", path: AGENT, personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, colleague_get: hang }, ready: "Loading this entry" },
   { name: "agent-error", path: AGENT, personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, colleague_get: fail("internal") }, ready: "Try again" },
   { name: "agent-no-link", path: "person-or-agent", personOps: LIFECYCLE_OPS, strict: true, ops: pageOps, ready: "not in the link" },
@@ -497,6 +653,7 @@ export const scenes: Scene[] = [
   })),
   // ── Roles (C380 T2-a): reachable by its address; in the navigation only after its rows passed ─────────────────
   ...rolesScenes(),
+  ...ruleScenes(),
   { name: "see-what-would-stop", path: "people-and-agents", personOps: INVENTORY_OPS, strict: true, ops: invOps, ready: "Marco Rossi", steps: (p) => button(p, "See what would stop"), expect: ["This is a preview of Stop and remove access", "Could not be read", "Not installed", "Knowledge reports nothing for Henry", "A partial app lists nothing for Henry, and it cannot list everything", "Refused", "You would do this", "3 accounts have no person", "Not changed", "Reported by Connect"], assertCalls: (calls) => (calls.some((c) => c.op === "lifecycle_set") ? ["a preview called lifecycle_set"] : []) },
   { name: "see-what-would-stop-loading", path: "people-and-agents", personOps: INVENTORY_OPS, strict: true, ops: { ...invOps, plan_preview: hang }, ready: "Marco Rossi", steps: (p) => button(p, "See what would stop"), expect: ["what each app reports"] },
   { name: "see-what-would-stop-error", path: "people-and-agents", personOps: INVENTORY_OPS, strict: true, ops: { ...invOps, plan_preview: fail("internal") }, ready: "Marco Rossi", steps: async (p) => { await button(p, "See what would stop"); await p.getByText("Try again").first().waitFor(); }, forbid: ["reports nothing"] },
@@ -610,4 +767,6 @@ export const scenes: Scene[] = [
   { name: "record-error", path: "access-record", personOps: TIER2_OPS, strict: true, ops: { ...shell, record_export: fail("record_too_big", 409, "This period has too many rows for one file. Choose a shorter period.") }, ready: "Make the record", steps: (p) => button(p, "Make the record"), expect: ["Choose a shorter period"] },
   { name: "nav-waits-for-qa", path: "", personOps: [...LIFECYCLE_OPS, ...TIER2_OPS], strict: true, ops: pageOps, ready: "Ready to stop an agent?", forbid: ["Review rounds", "Access record"] },
   { name: "signed-out", path: "people", ops: {}, signedOut: true, ready: "Open this app from Portal" },
+  // Join (C380 T2-d). A route with no nav entry until R12 to R14 pass, so each scene opens it by its address.
+  ...joinScenes(),
 ];

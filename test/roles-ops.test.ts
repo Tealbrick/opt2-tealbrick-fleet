@@ -26,8 +26,10 @@ const validIn = (id: string, input: unknown) => validateAgainstSchema(specOf(id)
 test("the role ops are person ops, appended last; the agent surface did not change", () => {
   assert.equal(validateManifest(manifest).ok, true);
   const ids = manifest.operations.map((o) => o.id as string);
-  const LATER_LANES = ["round_create", "round_get", "round_verdict", "round_set", "record_export"]; // T2-b merged after T2-a: both lists stay last, in merge order
-  assert.deepEqual(ids.slice(-(ROLE_OPS.length + LATER_LANES.length)), [...ROLE_OPS, ...LATER_LANES], "appended after every op of the lanes before");
+  // the block is whole, and after it come only the ops of the Tier 2 lanes merged after it (T2-b, then "Cannot hold both", T2-c)
+  const at = ids.indexOf("roles_list");
+  assert.deepEqual(ids.slice(at, at + ROLE_OPS.length), ROLE_OPS, "appended after every op of the lanes before");
+  assert.deepEqual(ids.slice(at + ROLE_OPS.length), ["round_create", "round_get", "round_verdict", "round_set", "record_export", "exclusions_list", "exclusion_set"]);
   for (const id of ROLE_OPS) assert.equal(specOf(id).audience, "person", id);
   assert.deepEqual(manifest.operations.filter((o) => (o as { audience?: string }).audience !== "person").map((o) => o.id), ["teams_list", "team_get", "directory_get", "resolve_sender", "review_request", "directory_feed"]);
   assert.equal(specOf("role_assign").idempotency, "required");

@@ -8,6 +8,7 @@ import { LoadFailed, Loading, PageHead, useLoad } from "../common.tsx";
 import { canChoose } from "./agent-choice.ts";
 import { ChooseDialog } from "./agent-choices.tsx";
 import { ChangeDialog, CloseDialog } from "./change-dialogs.tsx";
+import { KEY_USE_TEXT } from "./credential.ts";
 import { FEATURES } from "./features.ts";
 import { LeaveFlow } from "./leave-flow.tsx";
 import { PlanResult } from "./plan-result.tsx";
@@ -177,6 +178,7 @@ function Facts({ c }: { c: Colleague }) {
   const rows: [string, string][] = [];
   if (c.title) rows.push(["Title", c.title]);
   if (c.kind === "agent") rows.push(["Owner", c.owner?.name ?? "No owner"]);
+  if (c.kind === "agent") rows.push(["Key age and last use", KEY_USE_TEXT]);
   if (c.teams.length) rows.push(["Teams", c.teams.map((t) => t.name).join(", ")]);
   if (c.reason) rows.push(["Reason", reasonLabel(c.reason)]);
   if (c.note) rows.push(["Note", c.note]);

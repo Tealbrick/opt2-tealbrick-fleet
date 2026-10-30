@@ -7,6 +7,7 @@ import { useCallback, useState } from "react";
 import type { ColleaguesListOutput } from "#kit";
 import { LoadFailed, Loading, PageHead, useLoad } from "../common.tsx";
 import { FEATURES } from "./features.ts";
+import { JoinButton } from "./join-page.tsx";
 import { StopNow } from "./stop-now.tsx";
 import { openSubject, subjectHref } from "./subject-link.ts";
 import { WhatWouldStop } from "./what-would-stop.tsx";
@@ -51,6 +52,7 @@ export function EveryonePage({ portalHref }: { portalHref?: string }) {
         lede="Who is working, who owns each agent, and what no longer matches."
         action={
           <span className="tb-row">
+            {FEATURES.joinInNav ? <JoinButton /> : null}
             <ButtonLink href="./people">Edit people</ButtonLink>
             <ButtonLink href="./agents">Edit agents</ButtonLink>
           </span>
