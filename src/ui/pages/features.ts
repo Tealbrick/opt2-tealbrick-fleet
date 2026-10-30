@@ -13,6 +13,10 @@ export type Features = {
   roles: boolean;
   /** The Roles page is in the navigation: its ops are on AND the QA rows R1 to R4 passed. */
   rolesInNav: boolean;
+  /** The Cannot hold both page has a route (C380 T2-c): the role ops and the two rule ops are in this build. */
+  exclusions: boolean;
+  /** The page is in the navigation: its ops are on AND the QA rows R9 to R11 passed. */
+  exclusionsInNav: boolean;
 };
 
 /**
@@ -22,9 +26,13 @@ export type Features = {
  */
 export const ROLES_ROWS_PASSED = false;
 
-const ROLE_OPS = ["roles_list", "role_get", "role_set", "role_assign", "role_end"];
+/** Same switch for "Cannot hold both" (C380 T2-c): the PR that sets it to true carries the BOARD line with R9 to R11 PASS. */
+export const EXCLUSION_ROWS_PASSED = false;
 
-export function featuresOf(ops: readonly string[], rolesRowsPassed: boolean = ROLES_ROWS_PASSED): Features {
+const ROLE_OPS = ["roles_list", "role_get", "role_set", "role_assign", "role_end"];
+const EXCLUSION_OPS = ["exclusions_list", "exclusion_set"];
+
+export function featuresOf(ops: readonly string[], rolesRowsPassed: boolean = ROLES_ROWS_PASSED, exclusionRowsPassed: boolean = EXCLUSION_ROWS_PASSED): Features {
   const has = (...names: string[]) => names.every((n) => ops.includes(n));
   return {
     lifecycle: has("summary_get", "colleagues_list", "colleague_get", "lifecycle_set"),
@@ -32,6 +40,9 @@ export function featuresOf(ops: readonly string[], rolesRowsPassed: boolean = RO
     differences: has("findings_list"),
     roles: has(...ROLE_OPS),
     rolesInNav: has(...ROLE_OPS) && rolesRowsPassed,
+    // the page lists roles and makes rules: it needs both sets of ops
+    exclusions: has(...ROLE_OPS, ...EXCLUSION_OPS),
+    exclusionsInNav: has(...ROLE_OPS, ...EXCLUSION_OPS) && exclusionRowsPassed,
   };
 }
 

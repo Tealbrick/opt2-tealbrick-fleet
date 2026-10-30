@@ -5,8 +5,8 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import { errorMessage } from "./standard.tsx";
 
 /** Codes whose message this app wrote as a plain sentence (src/store.ts); everything else gets the shared wording. */
-export const OWN_CODES = new Set(["input_invalid", "handle_invalid", "handle_taken", "team_name_taken", "limit_reached", "owner_not_person", "lifecycle_open", "use_bring_back", "role_name_taken", "role_archived", "role_full", "too_many_roles", "already_assigned", "already_ended", "subject_leaving", "no_roles_for_outside_agent", "agent_removed", "date_in_past"]);
-export const GONE_CODES = new Set(["team_not_found", "person_not_found", "agent_not_found", "review_not_found", "subject_not_found", "role_not_found", "assignment_not_found"]);
+export const OWN_CODES = new Set(["input_invalid", "handle_invalid", "handle_taken", "team_name_taken", "limit_reached", "owner_not_person", "lifecycle_open", "use_bring_back", "role_name_taken", "role_archived", "role_full", "too_many_roles", "already_assigned", "already_ended", "subject_leaving", "no_roles_for_outside_agent", "agent_removed", "date_in_past", "cannot_hold_both", "rule_exists", "same_role"]);
+export const GONE_CODES = new Set(["team_not_found", "person_not_found", "agent_not_found", "review_not_found", "subject_not_found", "role_not_found", "assignment_not_found", "rule_not_found"]);
 /** Codes of the review ops with their own plain sentence. */
 export const REVIEW_MESSAGES: Record<string, string> = {
   snapshot_stale: "The subject changed after you looked. Close this and open the review again.",

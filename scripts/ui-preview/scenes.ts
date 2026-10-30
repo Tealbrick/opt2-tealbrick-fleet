@@ -226,6 +226,61 @@ const rolesScenes = (): Scene[] => [
   { name: "roles-not-in-nav", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: pageOps, ready: "Ready to stop an agent?", forbid: ["Roles"] },
 ];
 
+// ── Cannot hold both (C380 T2-c) ──────────────────────────────────────────
+const RULE_OPS = [...ROLE_OPS, "exclusions_list", "exclusion_set"];
+const ruleRow = (over: Record<string, unknown> = {}) => ({
+  id: "xcl_01J000000000000000000000X1",
+  kind: "roles",
+  a: { id: "rol_01J000000000000000000000R1", name: "Approver" },
+  b: { id: "rol_01J000000000000000000000R2", name: "Payer" },
+  text: "No one may have both Approver and Payer.",
+  note: "Finance policy",
+  archived: false,
+  idle: false,
+  clashCount: 0,
+  clashes: [],
+  createdAt: "2026-10-30T09:00:00Z",
+  ...over,
+});
+const ruleOps = {
+  ...roleOps,
+  exclusions_list: ok({
+    rules: [
+      ruleRow({ clashCount: 1, clashes: [{ subject: { kind: "person", id: ID.p, name: "Marco Rossi" }, text: "Marco Rossi has Approver and Payer now. A rule says no one may have both." }] }),
+      ruleRow({ id: "xcl_01J000000000000000000000X2", kind: "holder_owner", note: null, text: "An agent may not have Writes very long invoices while its owner has Approves very long invoices on a phone." }),
+      ruleRow({ id: "xcl_01J000000000000000000000X3", archived: true, text: "No one may have both Treasurer and Clerk." }),
+    ],
+  }),
+  exclusion_set: ok({ rule: ruleRow() }),
+};
+const ruleScenes = (): Scene[] => [
+  { name: "cannot-hold-both", path: "cannot-hold-both", personOps: RULE_OPS, strict: true, ops: ruleOps, ready: "Broken by 1", expect: ["This checks roles only. Portal grants are not checked.", "Agent and owner", "Archived", "Not broken"], forbid: ["Roles Teams"] },
+  { name: "cannot-hold-both-empty", path: "cannot-hold-both", personOps: RULE_OPS, strict: true, ops: { ...ruleOps, exclusions_list: ok({ rules: [] }) }, ready: "No rules yet", expect: ["Nothing is checked until you add one"] },
+  { name: "cannot-hold-both-loading", path: "cannot-hold-both", personOps: RULE_OPS, strict: true, ops: { ...ruleOps, exclusions_list: hang }, ready: "Loading the rules" },
+  { name: "cannot-hold-both-error", path: "cannot-hold-both", personOps: RULE_OPS, strict: true, ops: { ...ruleOps, exclusions_list: fail("internal") }, ready: "Try again" },
+  {
+    name: "cannot-hold-both-new",
+    path: "cannot-hold-both",
+    personOps: RULE_OPS,
+    strict: true,
+    ops: ruleOps,
+    ready: "Broken by 1",
+    steps: (p) => button(p, "New rule"),
+    expect: ["This checks roles only. Portal grants are not checked.", "Kind of rule", "First role", "Second role"],
+  },
+  {
+    name: "cannot-hold-both-archive",
+    path: "cannot-hold-both",
+    personOps: RULE_OPS,
+    strict: true,
+    ops: ruleOps,
+    ready: "Broken by 1",
+    steps: (p) => button(p, /^Archive: No one may have both Approver and Payer/),
+    expect: ["The rule is no longer checked.", "No Portal grant changes."],
+  },
+  { name: "cannot-hold-both-not-in-nav", path: "", personOps: [...LIFECYCLE_OPS, ...RULE_OPS], strict: true, ops: pageOps, ready: "Ready to stop an agent?", forbid: ["Cannot hold both"] },
+];
+
 export const scenes: Scene[] = [
   { name: "summary", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: pageOps, ready: "Ready to stop an agent?", expect: ["Could not be read", "Not installed", "Rules has this change", "cannot see that switch"] },
   { name: "summary-no-stop-open", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, summary_get: ok({ ...summary, agents: { ...summary.agents, stopping: 0 }, people: { ...summary.people, leaving: 0 } }) }, ready: "Ready to stop an agent?", forbid: ["Rules has this change"] },
@@ -392,6 +447,7 @@ export const scenes: Scene[] = [
   })),
   // ── Roles (C380 T2-a): reachable by its address; in the navigation only after its rows passed ─────────────────
   ...rolesScenes(),
+  ...ruleScenes(),
   { name: "people-old", path: "people", ops: { ...shell, overview_get: ok(overview) }, ready: "Marco Rossi" },
   { name: "people-old-empty", path: "people", ops: { ...shell, overview_get: ok({ revision: 0, teams: [], people: [], agents: [] }) }, ready: "No people yet" },
   { name: "people-old-loading", path: "people", ops: { ...shell, overview_get: hang }, ready: "Loading the directory" },
