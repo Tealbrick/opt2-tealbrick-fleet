@@ -230,7 +230,7 @@ describe("Trust reviews page", () => {
   it("lists the open request, what is due, the history, and the schedule", async () => {
     reset();
     const m = await mount(h(ui.ReviewsPage, {}));
-    assert.equal(m.host.querySelector("h1")?.textContent, "Trust reviews");
+    assert.equal(m.host.querySelector("h1")?.textContent, "Reviews");
     const [open, due] = rows(m.host);
     assert.equal(open?.querySelector("h3")?.textContent?.startsWith("Brightline intake"), true);
     assert.match(open?.textContent ?? "", /Unreviewed/);
