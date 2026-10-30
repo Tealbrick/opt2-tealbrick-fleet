@@ -60,16 +60,17 @@ describe("reasons", () => {
 describe("refusals of lifecycle_set", () => {
   const fallback = () => "Something went wrong.";
   it("the stop cap names the count and hands it back for the confirm", () => {
-    const e = { code: "stop_cap_reached", details: { used: 5, windowMinutes: 10 } };
-    assert.equal(stopCapOf(e), 5);
+    const e = { code: "stop_cap_reached", details: { count: 6 } };
+    assert.equal(stopCapOf(e), 6);
     assert.match(lifecycleError(e, fallback).message, /You stopped 5 entries in the last 10 minutes/);
   });
   it("another error is no cap and gets the shared wording", () => {
     assert.equal(stopCapOf({ code: "internal" }), null);
     assert.equal(lifecycleError({ code: "internal" }, fallback).message, "Something went wrong.");
   });
-  it("a stale entry says what to do", () => {
-    assert.match(lifecycleError({ code: "lifecycle_stale" }, fallback).message, /changed after you opened it/);
+  it("a guard shows the server's sentence; an unknown code never shows its own text", () => {
+    assert.equal(lifecycleError({ code: "lifecycle_stale", message: "This entry changed since you looked. Open it again." }, fallback).message, "This entry changed since you looked. Open it again.");
+    assert.equal(lifecycleError({ code: "boom", message: "stack at x.ts" }, fallback).message, "Something went wrong.");
   });
 });
 

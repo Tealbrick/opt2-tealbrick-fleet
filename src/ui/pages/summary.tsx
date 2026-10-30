@@ -1,15 +1,20 @@
 // Summary, the launch page (DESIGN-C380 §10, business F1, F11): what my agents can do, what is out of line, which apps were
 // read and when, and "Ready to stop an agent?". Read only: every number and sentence comes from `summary_get`.
 import { callOp } from "@opt2-tealbrick/miniapp-sdk/client";
-import { ButtonLink, Card, EmptyState, Notice, Table, Tag, TextLink } from "@opt2-tealbrick/ui";
+import { Button, ButtonLink, Card, EmptyState, Notice, Table, Tag, TextLink } from "@opt2-tealbrick/ui";
+import { useState } from "react";
 import type { SummaryGetOutput } from "#kit";
 import { LoadFailed, Loading, PageHead, useLoad } from "../common.tsx";
+import { SettingsDialog } from "./settings-dialog.tsx";
 import { floorTone, when } from "./words.ts";
 
 const load = () => callOp<SummaryGetOutput>("summary_get", {});
 
 const READY_TAG = { ok: { status: "live", word: "Ready" }, missing: { status: "needs-you", word: "Not ready" }, fallback: { status: "default", word: "Works another way" } } as const;
 const STORE_TAG = { read: { status: "live", word: "Read" }, not_installed: { status: "idle", word: "Not installed" }, not_read: { status: "needs-you", word: "Could not be read" } } as const;
+
+/** The server's path is from the app root; the page base is the app's. */
+const localHref = (path: string) => (path.startsWith("/") ? `.${path}` : path);
 
 function Stat({ label, value, note, href }: { label: string; value: string; note?: string; href?: string }) {
   return (
@@ -24,11 +29,17 @@ function Stat({ label, value, note, href }: { label: string; value: string; note
 
 export function SummaryPage() {
   const { data, error, loading, reload } = useLoad(load);
+  const [settings, setSettings] = useState(false);
   return (
     <section className="app-page" aria-label="Summary">
-      <PageHead title="Summary" lede="See who can do what, and what no longer matches. Governance records this. Core and Rules enforce it." />
+      <PageHead
+        title="Summary"
+        lede="See who can do what, and what no longer matches. Governance records this. Core and Rules enforce it."
+        action={data ? <Button onClick={() => setSettings(true)}>Settings</Button> : null}
+      />
       {error ? <LoadFailed message={data ? `This page may be old. ${error}` : error} retrying={loading} onRetry={() => void reload()} /> : null}
       {data === null ? error ? null : <Loading what="the summary" /> : <SummaryBody data={data} />}
+      {settings && data ? <SettingsDialog settings={data.settings} onClose={() => setSettings(false)} onChanged={reload} /> : null}
     </section>
   );
 }
@@ -60,7 +71,7 @@ function SummaryBody({ data }: { data: SummaryGetOutput }) {
             <li key={r.id}>
               <Tag status={READY_TAG[r.state].status}>{READY_TAG[r.state].word}</Tag>
               <span>{r.text}</span>
-              {r.path ? <TextLink href={r.path}>Open</TextLink> : null}
+              {r.path ? <TextLink href={localHref(r.path)}>Open</TextLink> : null}
             </li>
           ))}
         </ul>

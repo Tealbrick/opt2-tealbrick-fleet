@@ -73,7 +73,7 @@ const summary = {
   readiness: [
     { id: "rules", state: "ok", text: "Rules & Approvals 0.7.0 is installed. Check in Portal that its hook is on.", path: null },
     { id: "consent", state: "missing", text: "See who has access is off for Governance.", path: null },
-    { id: "owners", state: "missing", text: "1 agent has no owner.", path: "./people-and-agents" },
+    { id: "owners", state: "missing", text: "1 agent has no owner.", path: "/people-and-agents" },
     { id: "alerts", state: "fallback", text: "Inbox is not installed. Governance shows a banner here and no message is sent.", path: null },
   ],
   stoppedToday: 0,
@@ -90,7 +90,7 @@ const rows = [
   row({ kind: "person", id: ID.p, name: "Marco Rossi", runtime: null, owner: null, line: "Active" }),
   row({ kind: "person", id: "per_01J00000000000000000000P2", name: "Bob Bianchi", runtime: null, owner: null, lifecycle: "leaving", effective: "leaving", line: "Leaving: 2 agents wait for you in Portal" }),
 ];
-const NOT_CHANGED_SERVER = ["Their own logins, such as Slack, Google or a bank.", "The agent's machine and its native tools.", "Copies of data that were already made.", "Other people who use the shared Portal login. Change the Portal login if they had it.", "Engine steps that run after an agent step.", "Scheduled posts, until you approve the stop in Portal."];
+const NOT_CHANGED_SERVER = ["Their own logins, such as Slack, Google or a bank.", "The agent's machine and its native tools.", "Copies of data that were already made.", "Other people with the shared Portal login. Change the Portal login if they had it.", "Engine steps after an agent step.", "Scheduled posts before you approve."];
 const plan = {
   mode: "portal_link",
   applied: false,
@@ -140,6 +140,16 @@ export const scenes: Scene[] = [
   { name: "summary-error", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, summary_get: fail("internal") }, ready: "Try again" },
   { name: "summary-no-rules", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, summary_get: ok({ ...summary, floor: FLOOR_ABSENT, stoppedToday: 2 }) }, ready: "It is not installed", expect: ["adds an early stop", "2 entries were stopped today"], forbid: ["Rules has this change"] },
   { name: "summary-old-gate", path: "", personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, summary_get: ok({ ...summary, floor: FLOOR_OLD_GATE }) }, ready: "has not checked a call" },
+  {
+    name: "summary-settings",
+    path: "",
+    personOps: LIFECYCLE_OPS,
+    strict: true,
+    ops: pageOps,
+    ready: "Ready to stop an agent?",
+    steps: (p) => button(p, "Settings"),
+    expect: ["Default owner", "Cooling period"],
+  },
   { name: "feature-off", path: "", personOps: ["overview_get", "reviews_list"], ops: { ...shell, overview_get: ok(overview) }, ready: "Support", forbid: ["Summary", "People and agents", "Stop now", "See what would stop"] },
   { name: "everyone", path: "people-and-agents", personOps: LIFECYCLE_OPS, strict: true, ops: pageOps, ready: "Marco Rossi", expect: ["New: working, not reviewed", "Stop now", "No owner", "2 differences"], forbid: ["See what would stop"] },
   { name: "everyone-empty", path: "people-and-agents", personOps: LIFECYCLE_OPS, strict: true, ops: { ...pageOps, colleagues_list: ok({ items: [], nextCursor: null, total: 0 }) }, ready: "Add your first person" },
@@ -198,7 +208,7 @@ export const scenes: Scene[] = [
     path: "people-and-agents",
     personOps: LIFECYCLE_OPS,
     strict: true,
-    ops: { ...pageOps, lifecycle_set: () => ({ kind: "error", status: 409, code: "stop_cap_reached", details: { used: 5, limit: 5, windowMinutes: 10 } }) },
+    ops: { ...pageOps, lifecycle_set: () => ({ kind: "error", status: 409, code: "stop_cap_reached", details: { count: 6 } }) },
     ready: "Marco Rossi",
     steps: async (p) => {
       await button(p, "Stop now");
