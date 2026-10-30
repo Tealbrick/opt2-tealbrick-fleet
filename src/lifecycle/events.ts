@@ -19,6 +19,7 @@ export interface NewEvent {
   reason?: string | null;
   note?: string | null;
   snapshot?: Json;
+  plan?: { id: string; draftId: string | null; receiptId: string | null };
   at: number;
 }
 
@@ -42,9 +43,9 @@ export function appendEvent(db: Db, e: NewEvent): string {
   const id = `lev_${ulid(e.at)}`;
   const snapshot = e.snapshot === undefined ? null : JSON.stringify(e.snapshot);
   db.prepare(
-    `INSERT INTO fleet_lifecycle_events (id, subject_kind, subject_id, subject_name, kind, from_state, to_state, actor_kind, actor_id, reason, note, snapshot_json, snapshot_digest, prev_hash, at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(id, e.subject.kind, e.subject.id, e.subject.name, e.kind, e.from ?? null, e.to ?? null, e.actor.kind, e.actor.id, e.reason ?? null, e.note ?? null, snapshot, e.snapshot === undefined ? null : digestOf(e.snapshot), prev, e.at);
+    `INSERT INTO fleet_lifecycle_events (id, subject_kind, subject_id, subject_name, kind, from_state, to_state, actor_kind, actor_id, reason, note, plan_id, draft_id, receipt_id, snapshot_json, snapshot_digest, prev_hash, at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(id, e.subject.kind, e.subject.id, e.subject.name, e.kind, e.from ?? null, e.to ?? null, e.actor.kind, e.actor.id, e.reason ?? null, e.note ?? null, e.plan?.id ?? null, e.plan?.draftId ?? null, e.plan?.receiptId ?? null, snapshot, e.snapshot === undefined ? null : digestOf(e.snapshot), prev, e.at);
   return id;
 }
 
