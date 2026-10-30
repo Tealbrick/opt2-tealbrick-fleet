@@ -4,7 +4,9 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { validateAgainstSchema } from "@opt2-tealbrick/manifest";
+import { ownerDraftsRailOff, type OwnerDraftsApi as SdkOwnerDrafts, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { parseRevoke } from "../src/plans/access-port.ts";
+import { type OwnerDraftsApi, railAnswerOf } from "../src/plans/core-rail.ts";
 
 const raw = (f: string) => readFileSync(new URL(`./contracts/${f}`, import.meta.url));
 const json = (f: string) => JSON.parse(raw(f).toString("utf8"));
@@ -33,4 +35,26 @@ test("parseRevoke: fire on a result for an item not asked, an unknown outcome, n
   assert.equal(parseRevoke({ v: 2, results: [] }, input), null);
   assert.deepEqual(parseRevoke({ v: 1, results: [{ id: "k:1", outcome: "failed", detail: "a‮b<script>" }] }, input)?.[0]?.outcome, "failed");
   assert.doesNotMatch(String(parseRevoke({ v: 1, results: [{ id: "k:1", outcome: "failed", detail: "a‮b" }] }, input)?.[0]?.detail), /‮/);
+});
+
+test("SDK 0.1.46: its ownerDrafts fits what the runner calls, and the runner's `off` is exactly the SDK's rail-off rule", () => {
+  // compile time: the pinned SDK's API is assignable to the runner's port
+  const fits = (a: SdkOwnerDrafts): OwnerDraftsApi => a as OwnerDraftsApi;
+  assert.equal(typeof fits, "function");
+  const cases: [TbError, boolean][] = [
+    [new TbError("bridge_cap_missing", "x", 409, { cap: "owner_drafts" }), true],
+    [new TbError("bridge_cap_missing", "x", 409, { cap: "owner_drafts", reason: "slice_stale" }), false],
+    [new TbError("owner_drafts_unsupported", "x", 409), true],
+    [new TbError("not_found", "x", 404), true],
+    [new TbError("not_found", "x", 404, { pointer: "/key" }), false],
+    [new TbError("not_found", "x", 404, { pointer: "/steps/0/agt" }), false],
+    [new TbError("forbidden", "x", 403, { reason: "topology_consent" }), false],
+    [new TbError("portal_unavailable", "x", 503), false],
+    [new TbError("owner_drafts_full", "x", 409), false],
+    [new TbError("draft_state", "x", 409), false],
+  ];
+  for (const [e, off] of cases) {
+    assert.equal(ownerDraftsRailOff(e), off, `SDK: ${e.code} ${JSON.stringify(e.details)}`);
+    assert.equal(railAnswerOf(e).kind === "off", off, `runner: ${e.code} ${JSON.stringify(e.details)}`);
+  }
 });

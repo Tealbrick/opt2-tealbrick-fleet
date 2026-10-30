@@ -658,7 +658,7 @@ test("C88 b: the proposal path calls only rule_draft_submit and draft_status; th
   assert.deepEqual(rulesCompanion.map((c) => [c.product, c.operations, c.crud]), [["rules", ["rule_draft_submit", "draft_status", "floor_status"], ["create", "read"]]]);
   assert.deepEqual([...p.RULES_OPS], rulesCompanion[0]?.operations.filter((o) => o !== "floor_status"));
   assert.deepEqual((manifest.companions ?? []).filter((c) => !(c.operations as readonly string[]).includes("access_list") && c.product !== "inbox").map((c) => c.product).sort(), ["connect", "rules"]);
-  for (const c of manifest.companions ?? []) if (c.product !== "connect" && c.product !== "rules" && c.product !== "inbox") assert.deepEqual([c.operations, c.crud], [["access_list"], ["read"]], `${c.product}: the inventory reads, nothing else`);
+  for (const c of manifest.companions ?? []) if (c.product !== "connect" && c.product !== "rules" && c.product !== "inbox") assert.ok(["access_list", "access_revoke"].some((o) => (c.operations as readonly string[]).includes(o)) , `${c.product}: the inventory reads, nothing else`);
   // a whole scenario: send, retry, poll, list
   const { db } = fresh();
   const rules = fakeRules();

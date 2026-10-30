@@ -2,6 +2,18 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
+## 0.4.0-dev.3 - 2026-10-30
+
+C380 plan runner, DEV only. Not for stable until Martin has read C380-DECISIONS.md.
+
+- A stop now has a plan: `plan_send`, `plan_get`, `plan_retry`, `plan_cancel` and the job `plans_tick` (migration 0010). Governance asks Portal for a draft; you approve there. It has no approve button.
+- Nothing reads as done until its owner proves it: a Core step by the slice, an item by a fresh list from its store. What Core or an app only said is shown as said.
+- Retry takes a new attempt with a new key, after a fresh list. A restart goes on from the tables. A held call keeps its key.
+- With the rail off, no consent `topology` or an older bridge, plans run in Portal link mode, with proof from the slice.
+- An open plan reads its stores every 60 s for 30 minutes, then every 15. Three or more open plans share one read.
+- T6 is refused after an apply, T7 while a plan is open or did not finish (a named reason passes), and while a Connect account with no person is unchecked. T4 and T6 take the draft back first.
+- Companions: `access_revoke` on Knowledge and Evolving Workflows, `inbox_ask` on Operator Inbox. Connect follows when its 0.7.14 is on qa1. SDK 0.1.46, `requires.bridge` 0.2.14.
+
 ## 0.4.0-dev.2 - 2026-10-30
 
 C380 inventory, DEV only. Not for stable until Martin has read C380-DECISIONS.md.
