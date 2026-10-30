@@ -54,7 +54,7 @@ const isoDay = (ms: number | null): string => (ms === null ? "no date" : new Dat
 const ISO = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2}))?$/;
 function parseDate(raw: string | null | undefined, what: string): number | null {
   if (raw === null || raw === undefined) return null;
-  if (!ISO.test(raw)) fail("input_invalid", `${what} is not a date: use a date, or a date and time with a zone`, 400);
+  if (!ISO.test(raw)) fail("input_invalid", `${what} is not a date. Use a date, or a date and time with a zone.`, 400);
   const ms = Date.parse(raw);
   if (!Number.isFinite(ms) || ms < 0 || ms > MAX_DATE_MS) fail("input_invalid", `${what} is not a date`, 400);
   return ms;
@@ -243,8 +243,8 @@ export function assignRole(db: Db, input: AssignInput, actorId: string | null, n
     const role = db.prepare("SELECT id, name, archived_at FROM fleet_roles WHERE id = ?").get(input.role);
     if (!role) return fail("role_not_found", "No such role.", 404);
     checkAssignable(db, input, role);
-    const from = parseDate(input.validFrom, "validFrom");
-    const until = parseDate(input.validUntil, "validUntil");
+    const from = parseDate(input.validFrom, "The start date");
+    const until = parseDate(input.validUntil, "The end date");
     if (until !== null && until <= now) fail("date_in_past", "The end date has passed. Choose a later end date.", 400);
     if (from !== null && until !== null && from >= until) fail("input_invalid", "The start date must be before the end date.", 400);
     const held = Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_role_assignments WHERE role_id = ? AND ended_at IS NULL").get(input.role)?.n ?? 0);
