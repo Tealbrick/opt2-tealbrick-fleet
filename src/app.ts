@@ -19,6 +19,7 @@ import { reviewOps } from "./ops/reviews.ts";
 import { topologyOps } from "./ops/topology.ts";
 import { wakePlans } from "./plans/control.ts";
 import { kickPlans, planJobs, startPlanClock } from "./plans/jobs.ts";
+import { releaseTicks } from "./plans/runner.ts";
 import { startProposalTimer } from "./proposals.ts";
 import * as reviews from "./reviews.ts";
 import * as store from "./store.ts";
@@ -60,6 +61,7 @@ export const definition: SdkAppDefinition = {
   async onStart(ctx) {
     noteRestore(ctx.db, Date.now());
     stopDatesTimer = startDatesTimer(ctx.db, ctx.log);
+    releaseTicks(ctx.db);
     startPlanClock(ctx);
     stopTimer = startProposalTimer(ctx.db, ctx.callApp, ctx.log);
     stopHandlesTimer = startAgentHandlesTimer(ctx.db, ctx.callApp, ctx.log);

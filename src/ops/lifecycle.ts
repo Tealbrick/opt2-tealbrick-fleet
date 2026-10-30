@@ -62,6 +62,7 @@ export const lifecycleOps = {
       // T4, T6 (§2): the draft is taken back first, and only then the state moves. A change its own guard refuses takes nothing back. An apply that won the race ends this here.
       if (input.to === "active" || input.to === "proposed") {
         const s = loadSubject(db, input.kind, input.id);
+        if (s && input.expectedRev !== undefined && s.rev !== input.expectedRev) fail("lifecycle_stale", "This entry changed since you looked. Open it again.", 409);
         const problem = s ? guardOf(db, s, input.to, { waive: input.waive }, now) : null;
         if (problem) throw new TbError(problem.code, problem.message, problem.status);
         await closeOpenPlans(planCtxOf(ctx as never), openPlansOf(db, input.kind, input.id), "withdrawn");

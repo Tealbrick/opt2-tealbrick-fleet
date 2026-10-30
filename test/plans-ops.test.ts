@@ -461,3 +461,71 @@ test("canRetry says what plan_retry takes", async () => {
   assert.equal(w.plan(id).state, "done");
   assert.equal(await can(), false);
 });
+
+test("the rail went away with a draft in Portal: T6 and cancel still ask to take it back, and say so when they cannot", async () => {
+  const w = makeWorld();
+  leave(w);
+  const id = w.makePlan({ kind: "agent", id: HENRY });
+  await w.tick(id);
+  // one read says the rail is off; the draft stands
+  w.core.flag = false;
+  await w.tick(id);
+  assert.equal(w.plan(id).rail, "portal_link");
+  // back on: cancel takes it back, whatever the mode says
+  w.core.flag = true;
+  await run("plan_cancel", { plan: id }, ctxOf(w));
+  assert.equal(w.core.open().length, 0);
+  assert.equal(w.plan(id).state, "cancelled");
+
+  const v = makeWorld();
+  leave(v);
+  const pid = v.makePlan({ kind: "agent", id: HENRY });
+  await v.tick(pid);
+  v.core.flag = false;
+  await run("lifecycle_set", { kind: "agent", id: HENRY, to: "active", reason: "mistake" }, ctxOf(v));
+  assert.equal(v.plan(pid).state, "withdrawn");
+  assert.equal(v.plan(pid).code, "not_taken_back");
+  const view = (await run("plan_get", { plan: pid }, ctxOf(v))).plans[0];
+  assert.match(view.headline, /could not take this request back/);
+  assert.equal(v.core.open().length, 1, "it is still there, and the page says it may be");
+});
+
+test("lifecycle_set with a stale expectedRev takes nothing back", async () => {
+  const w = makeWorld();
+  leave(w);
+  const id = w.makePlan({ kind: "agent", id: HENRY });
+  await w.tick(id);
+  await assert.rejects(run("lifecycle_set", { kind: "agent", id: HENRY, to: "active", reason: "mistake", expectedRev: 0 }, ctxOf(w)), refused("lifecycle_stale", 409));
+  assert.equal(w.plan(id).state, "waiting");
+  assert.equal(w.core.open().length, 1);
+});
+
+test("T7: the last plan did not finish: Close needs a new plan or a named reason", async () => {
+  const w = makeWorld();
+  leave(w);
+  const id = w.makePlan({ kind: "agent", id: HENRY });
+  await w.tick(id);
+  w.core.reject(String(w.plan(id).draft_key));
+  await w.tick(id);
+  w.db.prepare("UPDATE fleet_agents SET status = 'paused' WHERE id = ?").run(HENRY);
+  w.clock.t += 40 * DAY_MS;
+  assert.throws(() => set(w.db, "agent", HENRY, "archived", {}, w.clock.t), refused("plan_not_finished", 409));
+  set(w.db, "agent", HENRY, "archived", { waive: WAIVE }, w.clock.t);
+  assert.equal(stateOf(w.db, "agent", HENRY), "archived");
+});
+
+test("Try again in link mode asks Portal again: consent may be on now", async () => {
+  const w = makeWorld();
+  leave(w);
+  w.core.consent = false;
+  const id = w.makePlan({ kind: "agent", id: HENRY });
+  await w.tick(id);
+  assert.equal(w.plan(id).rail, "portal_link");
+  assert.equal((await run("plan_get", { plan: id }, ctxOf(w))).plans[0].canRetry, true);
+  w.core.consent = true;
+  await run("plan_retry", { plan: id }, ctxOf(w));
+  await w.tick(id);
+  assert.equal(w.plan(id).rail, "draft");
+  assert.equal(w.plan(id).state, "waiting");
+  assert.equal(w.core.open().length, 1);
+});

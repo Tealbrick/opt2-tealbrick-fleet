@@ -7,7 +7,7 @@
 import { canonicalize } from "@opt2-tealbrick/manifest";
 import { type Db, type Json, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { bump, fail, revision } from "../meta.ts";
-import { hasAppliedStop, hasOpenPlan, unnamedAccounts } from "../plans/guards.ts";
+import { hasAppliedStop, hasOpenPlan, lastPlanUnfinished, unnamedAccounts } from "../plans/guards.ts";
 import { cleanText } from "../text.ts";
 import type { Trust } from "../trust.ts";
 import { appendEvent, SNAPSHOT_MAX, stopsSince } from "./events.ts";
@@ -118,6 +118,7 @@ export function guardOf(db: Db, s: Subject, to: Lifecycle, opts: { waive?: strin
   }
   if (to === "archived") {
     if (hasOpenPlan(db, s.kind, s.id)) return no("plan_open", "A plan for this entry is still open. Finish it or cancel it first.");
+    if (lastPlanUnfinished(db, s.kind, s.id) && !cleanText(opts.waive ?? "")) return no("plan_not_finished", "The last plan for this entry did not finish. Make a new plan, or give a reason to close it now.");
     const days = coolingDays(db);
     if (coolingEnd(s, days) > now && !cleanText(opts.waive ?? "")) return no("cooling_not_over", `You can close this after the cooling period of ${days} days. To close it now, give a reason.`);
     if (s.kind === "agent" && s.runtime === "active") return no("plan_open", "This agent still runs. Pause it in Portal first.");
