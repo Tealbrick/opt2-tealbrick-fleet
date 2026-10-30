@@ -72,7 +72,7 @@ export function undecidedKeys(db: Db, kind: string, id: string): Set<string> {
 
 /**
  * N2-6: this person is marked leaving, has handles, and Connect has not shown the bar since. Proof is a read of Connect in a plan made after the mark, with no sender step left open.
- * A step the owner left unticked is his choice. Connect not installed: nothing can be barred, and nothing can reach an agent through it.
+ * A step the owner left unticked is his choice. Connect not installed: nothing can be barred, and nothing can reach an agent through it. `manual` is not proof: the messages still come. New handles are in Not changed.
  */
 export function senderBarOpen(db: Db, personId: string): boolean {
   const open = db
@@ -80,7 +80,7 @@ export function senderBarOpen(db: Db, personId: string): boolean {
       `SELECT 1 FROM fleet_people w WHERE w.id = ? AND w.lifecycle = 'leaving' AND EXISTS (SELECT 1 FROM fleet_handles h WHERE h.person_id = w.id)
          AND NOT EXISTS (SELECT 1 FROM fleet_plans x JOIN fleet_plan_steps r ON r.plan_id = x.id
            WHERE x.subject_kind = 'person' AND x.subject_id = w.id AND x.opened_at >= w.lifecycle_at AND r.phase = 'read' AND r.target = 'connect' AND r.state IN ('done', 'not_installed')
-             AND NOT EXISTS (SELECT 1 FROM fleet_plan_steps s WHERE s.plan_id = x.id AND s.item_kind = 'channel_sender' AND s.state NOT IN ('done', 'listed', 'manual', 'not_installed', 'excepted')))`,
+             AND NOT EXISTS (SELECT 1 FROM fleet_plan_steps s WHERE s.plan_id = x.id AND s.item_kind = 'channel_sender' AND s.state NOT IN ('done', 'listed', 'not_installed', 'excepted')))`,
     )
     .get(personId);
   return !!open;

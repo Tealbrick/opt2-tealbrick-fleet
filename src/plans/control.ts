@@ -117,12 +117,12 @@ function owedBars(db: Db, now: number, warn: (m: string, f?: Record<string, stri
     .prepare(
       `SELECT p.id FROM fleet_people p WHERE p.lifecycle = 'leaving' AND COALESCE(p.lifecycle_reason, '') <> 'migrated' AND p.lifecycle_at <= ?
          AND EXISTS (SELECT 1 FROM fleet_handles h WHERE h.person_id = p.id)
-         AND NOT EXISTS (SELECT 1 FROM fleet_plans x WHERE x.subject_kind = 'person' AND x.subject_id = p.id AND x.opened_at >= p.lifecycle_at) LIMIT 20`,
+         AND NOT EXISTS (SELECT 1 FROM fleet_plans x WHERE x.subject_kind = 'person' AND x.subject_id = p.id AND x.opened_at >= p.lifecycle_at AND x.state <> 'stale') LIMIT 20`,
     )
     .all(now - BAR_WAIT_MS);
   for (const r of rows) {
     try {
-      createPlan(db, { kind: "person", id: String(r.id), barOnly: true, actor: { kind: "owner", id: null } }, now);
+      createPlan(db, { kind: "person", id: String(r.id), barOnly: true, actor: { kind: "system", id: null } }, now);
     } catch (err) {
       // An older plan still open: it ends by itself as stale, and the next run makes this one.
       if (!(err instanceof TbError)) warn("sender bar plan failed", { reason: err instanceof Error ? err.message.slice(0, 200) : "error" });

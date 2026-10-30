@@ -1082,3 +1082,34 @@ test("N2-6: fire on Close while the bar is open, a named reason passes; quiet: n
   await un.tick(un.makePlan({ kind: "person", id: un.ann.id, items: [] }));
   assert.equal(senderBarOpen(un.db, un.ann.id), false, "his choice, and the step says it stays");
 });
+
+test("N2-6 review: a sender step that cannot be ended keeps the finding; a stale bar plan is made again; the record says the system made it, with no alert about a date", async () => {
+  const { senderBarOpen } = await import("../src/plans/guards.ts");
+  const w = makeWorld();
+  withSender(w);
+  (w.connect.data.rows[0] as { revocable?: boolean }).revocable = false;
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  w.clock.t += 21_000;
+  scanPlans(w.db, w.clock.t, () => {});
+  const id = barPlan(w) as string;
+  await w.tick(id);
+  assert.equal(w.item(id, "channel_sender:slack:UANN").state, "manual");
+  assert.equal(senderBarOpen(w.db, w.ann.id), true, "a step someone must do by hand bars nobody yet");
+  assert.equal(w.inbox.asks.length, 0, "the bar plan is no date alert");
+  const row = w.db.prepare("SELECT actor_kind, note FROM fleet_lifecycle_events WHERE plan_id = ? ORDER BY seq LIMIT 1").get(id);
+  assert.equal(row?.actor_kind, "system");
+  assert.match(String(row?.note), /sender bar only/);
+
+  const v = makeWorld();
+  withSender(v);
+  set(v.db, "person", v.ann.id, "leaving", {}, v.clock.t);
+  v.clock.t += 21_000;
+  scanPlans(v.db, v.clock.t, () => {});
+  const first = barPlan(v) as string;
+  v.db.prepare("UPDATE fleet_people SET lifecycle_rev = lifecycle_rev + 1 WHERE id = ?").run(v.ann.id);
+  await v.tick(first);
+  assert.equal(v.plan(first).state, "stale");
+  v.clock.t += 60_000;
+  scanPlans(v.db, v.clock.t, () => {});
+  assert.equal(v.db.prepare("SELECT COUNT(*) AS n FROM fleet_plans WHERE purpose = 'bar'").get()?.n, 2);
+});

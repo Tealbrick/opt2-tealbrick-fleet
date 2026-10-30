@@ -270,7 +270,7 @@ function absorb(pc: PlanCtx, p: Row, target: string, items: readonly AccessItem[
       let code: string | null = null;
       if (!item.revocable) state = item.level === "info" ? "listed" : "manual";
       // The owner confirmed nothing in a plan the system opened: what needs a confirm waits for a plan he makes. Only what stands on his approval in Portal runs.
-      else if (!wanted || (phase === "now" && p.trigger_kind === "system")) state = "listed";
+      else if (!wanted || (phase === "now" && p.trigger_kind === "system" && p.purpose !== "bar")) state = "listed";
       else if (tick?.digest !== undefined && tick.digest !== item.digest) {
         state = "changed";
         code = "changed_since_preview";
@@ -536,7 +536,7 @@ async function alerts(pc: PlanCtx, p: Row): Promise<void> {
   if (p.state === "waiting" && p.trigger_kind === "system") await alertOnce(pc, p, "waiting");
   if (p.state === "expired") await alertOnce(pc, p, "expired");
   // A date passed and no draft waits (a person with no agents): the owner still hears of it.
-  if (p.trigger_kind === "system" && p.rail === "none") await alertOnce(pc, p, "date_passed");
+  if (p.trigger_kind === "system" && p.rail === "none" && p.purpose !== "bar") await alertOnce(pc, p, "date_passed");
 }
 
 /** Boot: no tick of this process runs yet, so no lease is alive. A plan cut off by a crash goes on at once. */
