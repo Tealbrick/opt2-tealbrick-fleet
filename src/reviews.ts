@@ -268,8 +268,16 @@ export interface RequestInput {
 
 /** C380: an agent may ask about others. It never asks about itself, by id or by a handle Connect gave it: no agent moves its own record. */
 function assertNotSelf(db: Db, agent: string, subject: RequestInput["subject"]): void {
-  const self = (subject.kind === "agent" && subject.id === agent) || (subject.id === undefined && subject.handle !== undefined && db.prepare("SELECT 1 FROM fleet_agent_handles WHERE agent_id = ? AND handle = ?").get(agent, fleetHandle(subject.handle) ?? "") !== undefined);
-  if (self) fail("no_self_request", "An agent cannot ask for a review of itself. The owner decides.", 403);
+  const refuse = () => fail("no_self_request", "An agent cannot ask for a review of itself. The owner decides.", 403);
+  if (subject.kind === "agent") {
+    if (subject.id === agent) refuse();
+    return;
+  }
+  const own = (handle: string) => db.prepare("SELECT 1 FROM fleet_agent_handles WHERE agent_id = ? AND handle = ?").get(agent, handle) !== undefined;
+  // the same order as requestReview: an id wins when it is not empty, else the handle
+  if (subject.id) {
+    if (db.prepare("SELECT 1 FROM fleet_handles h JOIN fleet_agent_handles a ON a.handle = h.handle WHERE h.person_id = ? AND a.agent_id = ?").get(subject.id, agent)) refuse();
+  } else if (subject.handle !== undefined && own(fleetHandle(subject.handle) ?? "")) refuse();
 }
 
 /**
