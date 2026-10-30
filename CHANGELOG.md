@@ -11,7 +11,8 @@ C380 skeleton, DEV only. Not for stable until Martin has read C380-DECISIONS.md.
 - New person ops: `summary_get`, `colleagues_list`, `colleague_get`, `lifecycle_set`, `settings_set`. No agent can call them. An agent can only ask (`review_request`), and never about itself (`no_self_request`).
 - A plan is "Portal link" mode only: Governance applies nothing and lists the steps to do in Portal, with proof from the slice.
 - Agent views say `departed` from `archived` only. `person_set` with `departed` is now a stop; `active` on a departed person is refused. `person_delete` is refused while stopped, leaving or closed.
-- Companion `rules.floor_status` (read). `requires.bridge` 0.2.13. A Rules older than 0.7.0 cannot serve it: the Rules companion entry stops working, and with it contact-rule drafts, until Rules is updated.
+- Companion `rules.floor_status` (read). `requires.bridge` 0.2.13. This version cannot be deployed or updated while the deployed Rules is older than 0.7.0 (M-CP-2). A workspace with no Rules is not checked.
+- Migration 0009 (empty tables for the inventory, C380 B9b) ships here and is not used yet.
 - Rollback: E3 to 0.3.2 restores the data and drops later events. Stops already applied in Core stay. Rules dev keeps its entries: clear them on the Rules page.
 
 ## 0.3.2 - 2026-10-28

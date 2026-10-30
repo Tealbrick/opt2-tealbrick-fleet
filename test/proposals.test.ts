@@ -695,7 +695,7 @@ test("M-CP-2: the companion matches Rules 0.4.1; an older Rules without draft_st
   assert.equal(ok.ok, true, ok.ok ? "" : JSON.stringify(ok.errors));
   const old = validateCompanions(manifest as never, targets(["rule_draft_submit"]) as never);
   assert.equal(old.ok, false);
-  assert.deepEqual(old.ok ? [] : old.errors.map((e) => [e.rule, e.code]), [["M-CP-2", "companion_op_invalid"], ["M-CP-2", "companion_op_invalid"]]);
+  assert.deepEqual(old.ok ? [] : old.errors.map((e) => [e.rule, e.code]), [["M-CP-2", "companion_op_invalid"]]);
   assert.equal(validateCompanions(manifest as never, []).ok, true, "no Rules deployed: nothing to check");
   // Rules 0.4.1 has both as agent operations with the crud the companion asks for
   assert.deepEqual([rulesOp("rule_draft_submit").crud, rulesOp("draft_status").crud, rulesOp("rule_draft_submit").idempotency], [["create"], ["read"], "required"]);
