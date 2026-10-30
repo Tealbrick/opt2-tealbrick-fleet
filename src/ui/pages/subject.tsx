@@ -70,10 +70,10 @@ function Subject({ kind, id, portalHref }: { kind: SubjectKind; id: string; port
               ))}
             </section>
           ) : null}
-          {c.plan ? (
+          {c.plan || (FEATURES.plans && c.lifecycle !== "active" && c.lifecycle !== "proposed") ? (
             <section className="tb-stack" aria-label="What happens now">
               <h2 className="sub-head">What happens now</h2>
-              <PlanResult colleague={c} portalHref={portalHref} showLine={false} />
+              <PlanResult colleague={c} portalHref={portalHref} showLine={false} onEnded={() => void reload()} />
             </section>
           ) : null}
           {FEATURES.preview ? <AccessByStore kind={c.kind} id={c.id} name={c.name} /> : null}

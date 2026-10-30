@@ -97,10 +97,12 @@ export function EveryonePage({ portalHref }: { portalHref?: string }) {
                     </span>
                   </td>
                   <td>
+                    <span className="row-name">
                     {r.line}
                     {r.findings.length ? (
                       <span className="row-tag tb-hint">{r.findings.length === 1 ? (r.findings[0]?.text ?? "") : `${r.findings[0]?.text ?? ""} And ${r.findings.length - 1} more.`}</span>
                     ) : null}
+                  </span>
                   </td>
                   <td className={r.kind === "agent" ? undefined : "is-empty"}>{r.kind === "agent" ? (r.owner?.name ?? "No owner") : ""}</td>
                   <td className={FEATURES.preview || canStop(r) ? undefined : "is-empty"}>

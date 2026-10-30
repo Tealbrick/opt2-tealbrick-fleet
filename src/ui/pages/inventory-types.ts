@@ -3,7 +3,7 @@
 export type StoreState = "read" | "not_installed" | "not_read" | "refused" | "waiting";
 export type ItemEffect = "stops" | "manual" | "stays" | "about";
 
-export type PreviewItem = { id: string; kind: string; label: string; level: string; direction: string; state: string; effect: ItemEffect; who: string | null };
+export type PreviewItem = { id: string; kind: string; label: string; level: string; direction: string; state: string; effect: ItemEffect; who: string | null; digest?: string };
 export type PreviewStore = { product: string; name: string; state: StoreState; text: string | null; at: string | null; notShown: { kind: string; reason: string }[]; items: PreviewItem[] };
 export type PlanPreviewOutput = { subject: { kind: "person" | "agent"; id: string; name: string }; asOf: string; unlinkedAccounts: number; stores: PreviewStore[] };
 

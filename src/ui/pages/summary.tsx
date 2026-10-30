@@ -2,10 +2,12 @@
 // read and when, and "Ready to stop an agent?". Read only: every number and sentence comes from `summary_get`.
 import { callOp } from "@opt2-tealbrick/miniapp-sdk/client";
 import { Button, ButtonLink, Card, EmptyState, Notice, Table, Tag, TextLink } from "@opt2-tealbrick/ui";
-import { useState } from "react";
-import type { SummaryGetOutput } from "#kit";
+import { useCallback, useState } from "react";
+import type { PlanGetOutput, SummaryGetOutput } from "#kit";
 import { LoadFailed, Loading, PageHead, useLoad } from "../common.tsx";
+import { FEATURES } from "./features.ts";
 import { SettingsDialog } from "./settings-dialog.tsx";
+import { subjectHref } from "./subject-link.ts";
 import { afterChangeText, floorTone, when } from "./words.ts";
 
 const load = () => callOp<SummaryGetOutput>("summary_get", {});
@@ -60,6 +62,27 @@ function RulesNotice({ data }: { data: SummaryGetOutput }) {
   );
 }
 
+/** Alerts that reached nobody (§5): shown here, and the page says that no message was sent. */
+function PlanAlerts() {
+  const { data } = useLoad(useCallback(() => (FEATURES.plans ? callOp<PlanGetOutput>("plan_get", {}) : Promise.resolve(null)), []));
+  if (!data?.banners.length) return null;
+  return (
+    <>
+      {data.banners.map((b) => {
+        const s = data.plans.find((p) => p.id === b.plan)?.subject;
+        return (
+          <Notice key={`${b.plan}:${b.kind}`} tone="needs-you" role="status">
+            <span className="tb-row">
+              <span>{b.text}</span>
+              {s ? <TextLink href={subjectHref(s.kind as "person" | "agent", s.id)}>{`Open ${s.name}`}</TextLink> : null}
+            </span>
+          </Notice>
+        );
+      })}
+    </>
+  );
+}
+
 function SummaryBody({ data }: { data: SummaryGetOutput }) {
   if (data.agents.total === 0 && data.people.total === 0)
     return (
@@ -74,6 +97,7 @@ function SummaryBody({ data }: { data: SummaryGetOutput }) {
           {data.stoppedToday === 1 ? "1 entry was stopped today." : `${data.stoppedToday} entries were stopped today.`} Check this if you did not do it.
         </Notice>
       ) : null}
+      <PlanAlerts />
       <div className="cards stats">
         <Stat label="Agents" value={String(data.agents.total)} note={`${data.agents.running} running, ${data.agents.paused} paused, ${data.agents.notReviewed} not reviewed`} href="./people-and-agents" />
         <Stat label="No owner" value={String(data.noOwner)} note={data.settings.defaultOwner ? `Default owner: ${data.settings.defaultOwner.name}` : "No default owner"} />
