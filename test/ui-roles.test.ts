@@ -303,8 +303,8 @@ describe("the Roles page", () => {
 describe("the page stays out of the navigation until its rows pass", () => {
   const ROLE_OPS = ["roles_list", "role_get", "role_set", "role_assign", "role_end"];
   it("ops on and rows not passed: a route, no navigation entry. Both on: in the navigation. An op missing: neither", () => {
-    assert.equal(features.ROLES_ROWS_PASSED, false, "flip this constant only in the PR that carries the BOARD line with R1 to R4 PASS");
-    assert.deepEqual([features.featuresOf(ROLE_OPS).roles, features.featuresOf(ROLE_OPS).rolesInNav], [true, false]);
+    assert.equal(features.ROLES_ROWS_PASSED, true, "R1 to R4 PASS on BOARD");
+    assert.deepEqual([features.featuresOf(ROLE_OPS, false).roles, features.featuresOf(ROLE_OPS, false).rolesInNav], [true, false]);
     assert.deepEqual([features.featuresOf(ROLE_OPS, true).roles, features.featuresOf(ROLE_OPS, true).rolesInNav], [true, true]);
     assert.deepEqual([features.featuresOf(ROLE_OPS.slice(1), true).roles, features.featuresOf(ROLE_OPS.slice(1), true).rolesInNav], [false, false]);
     assert.deepEqual([features.featuresOf([], true).roles, features.featuresOf([], true).rolesInNav], [false, false]);

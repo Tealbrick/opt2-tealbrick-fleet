@@ -219,7 +219,7 @@ function RoundView({ id, onBack }: { id: string; onBack: () => void }) {
         )
       ) : (
         <>
-          <Notice tone="neutral">Your review records your decision. Access you tick goes into a plan that asks the app to remove it. The app may refuse. Governance shows what each app reports, and nothing more.</Notice>
+          <Notice tone="neutral">Your review records your decision. Access you tick goes into a plan that asks the app to remove it. The app may refuse. Governance shows what each app reports, and nothing more. A verdict makes no request in Portal by itself: removing access is your next step on that entry. Removal for several entries from one round has not been proved end to end on this version, so check the plan on each entry.</Notice>
           <Table>
             <thead>
               <tr>

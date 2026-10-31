@@ -37,10 +37,10 @@ export type Features = {
  * on BOARD it is not in the navigation: this one constant is the switch, and the PR that sets it to true carries the BOARD line.
  * The route /roles works whenever the ops exist, so QA can open it by its address.
  */
-export const ROLES_ROWS_PASSED = false;
+export const ROLES_ROWS_PASSED = true; // QA R1 to R4 PASS, BOARD 2026-10-31 (Closed-mode allow variant not run)
 
 /** Same switch for "Cannot hold both" (C380 T2-c): the PR that sets it to true carries the BOARD line with R9 to R11 PASS. */
-export const EXCLUSION_ROWS_PASSED = false;
+export const EXCLUSION_ROWS_PASSED = true; // QA R9 to R11 PASS, BOARD 2026-10-31
 
 const ROLE_OPS = ["roles_list", "role_get", "role_set", "role_assign", "role_end"];
 const EXCLUSION_OPS = ["exclusions_list", "exclusion_set"];
@@ -49,7 +49,7 @@ const EXCLUSION_OPS = ["exclusions_list", "exclusion_set"];
  * Tier 2 pages (C380 T2-b) stay off the nav until their QA rows pass: no half-shown page. One line flips each, in the PR that follows the PASS line on BOARD.
  * R5 = rounds, R6 to R8 = the access record.
  */
-export const TIER2_PASSED = { rounds: false, record: false } as const;
+export const TIER2_PASSED = { rounds: true, record: true } as const; // QA R5 to R7 PASS, BOARD 2026-10-31; stated gaps: one plan over 3 agents, print, chain (R8 unit only)
 
 /**
  * "A page stays hidden unless its ops are on and its rows pass" (C380 T2). Join is built, but until the QA lead records R12 to R14 as

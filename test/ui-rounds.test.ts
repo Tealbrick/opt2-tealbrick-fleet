@@ -168,8 +168,8 @@ describe("Review rounds", () => {
 describe("the nav waits for the QA rows", () => {
   const ops = ["round_create", "round_get", "round_verdict", "round_set", "record_export"];
   it("with the ops and no passed rows: the route works, the nav entry does not; with both: both", () => {
-    assert.deepEqual(TIER2_PASSED, { rounds: false, record: false }, "nothing is passed until QA says so");
-    const hidden = featuresOf(ops);
+    assert.deepEqual(TIER2_PASSED, { rounds: true, record: true }, "R5 to R7 PASS on BOARD");
+    const hidden = featuresOf(ops, false, false, { rounds: false, record: false });
     assert.deepEqual([hidden.rounds, hidden.record, hidden.roundsNav, hidden.recordNav], [true, true, false, false]);
     const shown = featuresOf(ops, false, false, { rounds: true, record: true });
     assert.deepEqual([shown.roundsNav, shown.recordNav], [true, true]);

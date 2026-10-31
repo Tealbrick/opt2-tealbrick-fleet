@@ -8,7 +8,9 @@ import { featuresOf } from "../src/ui/pages/features.ts";
 import { lifecycleError, stopCapOf } from "../src/ui/pages/lifecycle-errors.ts";
 import { currentPlans, liveBanners, pollDelay } from "../src/ui/pages/plan-poll.ts";
 import { subjectFromUrl, subjectHref } from "../src/ui/pages/subject-link.ts";
-import { afterChangeText, beforeChangeText, beforeChangeTone, floorTone, NOT_CHANGED, REASONS, reasonLabel, when } from "../src/ui/pages/words.ts";
+import { afterChangeText, age, beforeChangeText, beforeChangeTone, floorTone, NOT_CHANGED, REASONS, reasonLabel, when } from "../src/ui/pages/words.ts";
+import { withoutIds } from "../src/ui/rule-text.ts";
+import { followSystemTheme } from "../src/ui/theme.ts";
 
 describe("features come from the ops of this build", () => {
   it("on when every op is there", () => {
@@ -172,6 +174,44 @@ describe("the subject link", () => {
   it("refuses a bad kind or no id", () => {
     assert.equal(subjectFromUrl("?kind=team&id=x"), null);
     assert.equal(subjectFromUrl("?kind=agent"), null);
+  });
+});
+
+describe("age (D10) and the theme (D8)", () => {
+  const T = Date.parse("2026-10-31T12:00:00Z");
+  it("reads the age of a read", () => {
+    assert.equal(age("2026-10-31T11:59:40Z", T), "just now");
+    assert.equal(age("2026-10-31T11:59:00Z", T), "1 minute ago");
+    assert.equal(age("2026-10-31T11:15:00Z", T), "45 minutes ago");
+    assert.equal(age("2026-10-31T10:00:00Z", T), "2 hours ago");
+    assert.equal(age("2026-10-29T12:00:00Z", T), "2 days ago");
+    assert.equal(age(null, T), "");
+    assert.equal(age("not a date", T), "");
+  });
+  it("follows the system: dark sets data-theme, light clears it, a change is followed, paper is light", () => {
+    const root = { dataset: {} as Record<string, string | undefined> };
+    let change = () => {};
+    const handlers: Record<string, () => void> = {};
+    const media = { matches: true, addEventListener: (_: string, f: () => void) => { change = f; } };
+    followSystemTheme(root, media as never, { addEventListener: (n: string, f: () => void) => { handlers[n] = f; } } as never);
+    assert.equal(root.dataset.theme, "dark");
+    handlers.beforeprint?.();
+    assert.equal(root.dataset.theme, undefined);
+    handlers.afterprint?.();
+    assert.equal(root.dataset.theme, "dark");
+    media.matches = false;
+    change();
+    assert.equal(root.dataset.theme, undefined);
+    followSystemTheme(root, undefined);
+    assert.equal(root.dataset.theme, undefined);
+  });
+});
+
+describe("no id on the face of Contact rules (D9)", () => {
+  it("takes the id out and keeps the sentence", () => {
+    assert.equal(withoutIds("Hold the team Support (tm_01J00000000000000000T1) until I approve."), "Hold the team Support until I approve.");
+    assert.equal(withoutIds("Hold every outward action of the agent Front desk (agt_01J0000000000000000000000A)."), "Hold every outward action of the agent Front desk.");
+    assert.equal(withoutIds("Refuse for the sender slack:UBOT000001."), "Refuse for the sender slack:UBOT000001.");
   });
 });
 

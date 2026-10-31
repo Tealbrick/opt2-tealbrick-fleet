@@ -217,6 +217,7 @@ const PARTIAL = planOf({
     pStep({ id: "st_4", store: "knowledge", storeName: "Knowledge", label: "Team grant", state: "reported", text: "Knowledge says this ended. This version cannot list it.", final: true }),
   ],
 });
+const ROUND = { id: "rnd_01J00000000000000000R1", title: "Q4 review", scope: "agents", createdAt: "2026-10-30T10:00:00Z", dueAt: null, closedAt: null, state: "open", overdue: false, counts: { total: 3, open: 3, trusted: 0, limited: 0, blocked: 0, dismissed: 0, removalQueued: 0, removalPlanned: 0 } };
 const PERSON = `person-or-agent?kind=person&id=${ID.p}`;
 
 const JOIN_OPS = [...LIFECYCLE_OPS, "person_set", "members_set"];
@@ -485,7 +486,7 @@ const ruleScenes = (): Scene[] => [
     steps: (p) => button(p, /^Archive: No one may have both Approver and Payer/),
     expect: ["The rule is no longer checked.", "No Portal grant changes."],
   },
-  { name: "cannot-hold-both-not-in-nav", path: "", personOps: [...LIFECYCLE_OPS, ...RULE_OPS], strict: true, ops: pageOps, ready: "Ready to stop an agent?", forbid: ["Cannot hold both"] },
+  { name: "cannot-hold-both-in-nav", path: "", personOps: [...LIFECYCLE_OPS, ...RULE_OPS], strict: true, ops: pageOps, ready: "Ready to stop an agent?", expect: ["Cannot hold both"] },
 ];
 
 export const scenes: Scene[] = [
@@ -723,6 +724,14 @@ export const scenes: Scene[] = [
           }
         : undefined,
   })),
+  // the real manifest's nav: Tier 2 pages in (R1 to R7, R9 to R11 passed), Join stays out (R12 to R14 not passed)
+  { name: "nav-all", path: "", strict: true, ops: { ...planOps([]) }, ready: "Ready to stop an agent?", expect: ["Check now", "Access record", "Review rounds", "Roles", "Cannot hold both", "Who owns what", "Waiting for approval", "ago)"], forbid: ["Add people"] },
+  { name: "tier2-rounds", path: "review-rounds", strict: true, ops: { ...planOps([]), round_get: ok({ rounds: [ROUND], round: null }), overview_get: ok(overview) }, ready: "Q4 review" },
+  { name: "tier2-round", path: "review-rounds", strict: true, ops: { ...planOps([]), round_get: ok({ rounds: [ROUND], round: { ...ROUND, items: [] } }), overview_get: ok(overview) }, ready: "Q4 review", steps: async (p) => { await p.getByRole("button", { name: "Open Q4 review" }).click(); await p.getByText("A verdict makes no request in Portal by itself").waitFor(); }, expect: ["has not been proved end to end"] },
+  { name: "tier2-roles", path: "roles", strict: true, ops: { ...planOps([]), roles_list: ok({ roles: [{ id: "rol_01J00000000000000000R1", name: "Support", description: "Front line", archived: false, members: 1, scheduled: 0, createdAt: "2026-10-30T10:00:00Z" }], assignments: [] }), overview_get: ok(overview) }, ready: "Front line" },
+  { name: "tier2-cannot-hold-both", path: "cannot-hold-both", strict: true, ops: { ...planOps([]), roles_list: ok({ roles: [], assignments: [] }), exclusions_list: ok({ rules: [] }), overview_get: ok(overview) }, ready: "This checks roles only" },
+  { name: "tier2-record", path: "access-record", strict: true, ops: { ...planOps([]) }, ready: "Our own apps report this data" },
+  { name: "contact-rules-no-ids", path: "contact-rules", strict: true, ops: { ...planOps([]), overview_get: ok(overview), proposals_list: ok({ proposals: [{ id: "prp_01J0000000000000000001", template: "hold_outward_for_team", params: { team: ID.t }, text: `Hold the outward actions of the team Support (${ID.t}) until I approve them.`, review: null, rulesDraftId: "drf_1", status: "sent", error: null, rulesStatus: "pending", decidedAt: null, createdAt: "2026-10-14T09:12:00.000Z" }], nextCursor: null }) }, ready: "Hold the outward actions of the team Support until I approve them" },
   { name: "people-old", path: "people", ops: { ...shell, overview_get: ok(overview) }, ready: "Marco Rossi" },
   { name: "people-old-empty", path: "people", ops: { ...shell, overview_get: ok({ revision: 0, teams: [], people: [], agents: [] }) }, ready: "No people yet" },
   { name: "people-old-loading", path: "people", ops: { ...shell, overview_get: hang }, ready: "Loading the directory" },
@@ -765,7 +774,7 @@ export const scenes: Scene[] = [
     expect: ["The file is ready", "2 sweeps", "One person approved all items", "Not read: Connect", "Download the file", "Print"],
   },
   { name: "record-error", path: "access-record", personOps: TIER2_OPS, strict: true, ops: { ...shell, record_export: fail("record_too_big", 409, "This period has too many rows for one file. Choose a shorter period.") }, ready: "Make the record", steps: (p) => button(p, "Make the record"), expect: ["Choose a shorter period"] },
-  { name: "nav-waits-for-qa", path: "", personOps: [...LIFECYCLE_OPS, ...TIER2_OPS], strict: true, ops: pageOps, ready: "Ready to stop an agent?", forbid: ["Review rounds", "Access record"] },
+  { name: "nav-tier2-on", path: "", personOps: [...LIFECYCLE_OPS, ...TIER2_OPS], strict: true, ops: pageOps, ready: "Ready to stop an agent?", expect: ["Review rounds", "Access record"] },
   { name: "signed-out", path: "people", ops: {}, signedOut: true, ready: "Open this app from Portal" },
   // Join (C380 T2-d). A route with no nav entry until R12 to R14 pass, so each scene opens it by its address.
   ...joinScenes(),

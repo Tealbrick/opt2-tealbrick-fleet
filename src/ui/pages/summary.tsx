@@ -5,11 +5,12 @@ import { Button, ButtonLink, Card, EmptyState, Notice, Table, Tag, TextLink } fr
 import { useCallback, useState } from "react";
 import type { PlanGetOutput, SummaryGetOutput } from "#kit";
 import { LoadFailed, Loading, PageHead, useLoad } from "../common.tsx";
+import { CheckNow } from "./check-now.tsx";
 import { FEATURES } from "./features.ts";
 import { liveBanners } from "./plan-poll.ts";
 import { SettingsDialog } from "./settings-dialog.tsx";
 import { subjectHref } from "./subject-link.ts";
-import { afterChangeText, floorTone, when } from "./words.ts";
+import { afterChangeText, age, floorTone, when } from "./words.ts";
 
 const load = () => callOp<SummaryGetOutput>("summary_get", {});
 
@@ -41,7 +42,7 @@ export function SummaryPage() {
         action={data ? <Button onClick={() => setSettings(true)}>Settings</Button> : null}
       />
       {error ? <LoadFailed message={data ? `This page may be old. ${error}` : error} retrying={loading} onRetry={() => void reload()} /> : null}
-      {data === null ? error ? null : <Loading what="the summary" /> : <SummaryBody data={data} />}
+      {data === null ? error ? null : <Loading what="the summary" /> : <SummaryBody data={data} onRead={reload} />}
       {settings && data ? <SettingsDialog settings={data.settings} onClose={() => setSettings(false)} onChanged={reload} /> : null}
     </section>
   );
@@ -93,7 +94,7 @@ function PlanAlerts() {
   );
 }
 
-function SummaryBody({ data }: { data: SummaryGetOutput }) {
+function SummaryBody({ data, onRead }: { data: SummaryGetOutput; onRead: () => void | Promise<void> }) {
   if (data.agents.total === 0 && data.people.total === 0)
     return (
       <EmptyState title="Nothing to show yet." action={<ButtonLink href="./people">Add a person</ButtonLink>}>
@@ -141,6 +142,8 @@ function SummaryBody({ data }: { data: SummaryGetOutput }) {
       </section>
       <section className="tb-stack" aria-label="What was read">
         <h2 className="sub-head">What was read</h2>
+        <p className="tb-soft">Governance shows what each app last reported. This can be old: look at the time, and check now if it matters.</p>
+        {FEATURES.differences ? <CheckNow onRead={onRead} /> : null}
         <Table>
           <thead>
             <tr>
@@ -158,7 +161,7 @@ function SummaryBody({ data }: { data: SummaryGetOutput }) {
                     {STORE_TAG[s.state].word}
                   </Tag>
                 </td>
-                <td>{when(s.at) || "Not read yet"}</td>
+                <td>{s.at ? `${when(s.at)} (${age(s.at)})` : s.state === "read" ? "Now, from this workspace" : "Not read yet"}</td>
               </tr>
             ))}
           </tbody>

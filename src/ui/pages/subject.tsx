@@ -8,6 +8,7 @@ import { LoadFailed, Loading, PageHead, useLoad } from "../common.tsx";
 import { canChoose } from "./agent-choice.ts";
 import { ChooseDialog } from "./agent-choices.tsx";
 import { ChangeDialog, CloseDialog } from "./change-dialogs.tsx";
+import { CheckNow } from "./check-now.tsx";
 import { KEY_USE_TEXT } from "./credential.ts";
 import { FEATURES } from "./features.ts";
 import { LeaveFlow } from "./leave-flow.tsx";
@@ -205,6 +206,7 @@ function AccessByStore({ kind, id, name }: { kind: SubjectKind; id: string; name
     <section className="tb-stack" aria-label="Access">
       <h2 className="sub-head">Access</h2>
       <p className="tb-soft">What each app reports now, and what Stop and remove access would do to it. Stop now ends less.</p>
+      <CheckNow onRead={reload} />
       {error ? <LoadFailed message={error} retrying={loading} onRetry={() => void reload()} /> : null}
       {data === null ? error ? null : <Loading what="what each app reports" /> : <StoreRows stores={data.stores} subjectName={name} unlinkedAccounts={data.unlinkedAccounts} />}
     </section>
