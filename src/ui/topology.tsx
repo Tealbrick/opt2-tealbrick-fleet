@@ -10,7 +10,7 @@
 // those a big picture leaves out. "Print for a security review" prints the picture, the table and the people table.
 // Kit components only.
 import { callOp } from "@opt2-tealbrick/miniapp-sdk/client";
-import { Button, Card, EmptyState, Notice, Segmented, Table, Tag, TextLink } from "@opt2-tealbrick/ui";
+import { accessFilter, Button, Card, EmptyState, ListFilter, Notice, Segmented, Table, Tag, TextLink, useAccessFilter } from "@opt2-tealbrick/ui";
 import { Fragment, useMemo, useState } from "react";
 import type { AccessGetOutput, TopologyGetOutput } from "#kit";
 import { accessLayer } from "./access-rows.ts";
@@ -18,6 +18,7 @@ import type { SliceTopology } from "./access-types.ts";
 import { LoadFailed, Loading, PageHead, useLoad } from "./common.tsx";
 import { TopologyGraph } from "./graph.tsx";
 import type { GraphInput } from "./graph-layout.ts";
+import { FILTER_FROM, filterKey } from "./list-filter.ts";
 import { day, TrustTag } from "./reviews.tsx";
 
 type Topology = TopologyGetOutput;
@@ -171,10 +172,40 @@ function Inspector({ node, view, byId, layer, portalHref }: { node: Node; view: 
   );
 }
 
+/** The Relationships table. */
+function EdgeTable({ edges, byId, className }: { edges: readonly Edge[]; byId: Map<string, Node>; className?: string }) {
+  return (
+    <Table className={className}>
+      <thead>
+        <tr>
+          <th>From</th>
+          <th>Relationship</th>
+          <th>To</th>
+          <th>State</th>
+        </tr>
+      </thead>
+      <tbody>
+        {edges.map((e) => (
+          <tr key={e.id}>
+            <td className="strong">{who(byId.get(e.from))}</td>
+            <td>{`${relation(e)}${extra(e)}`}</td>
+            <td className="strong">{who(byId.get(e.to))}</td>
+            <td>
+              <Tag status={STATE_TAG[e.state].status}>{STATE_TAG[e.state].text}</Tag>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </Table>
+  );
+}
+
 export function TopologyPage({ portalHref }: { portalHref?: string } = {}) {
   const { data, error, loading, reload } = useLoad(loadTopology);
   const [layer, setLayer] = useState<Layer>("people");
   const [selected, setSelected] = useState<string | undefined>();
+  // C382 batch 4: a text filter on the Relationships table only (the picture and the print show everything). `topology_get` refuses a directory that is too big instead of cutting it, so the list is whole; a shortened access copy is the one case that is not.
+  const [query, setQuery] = useAccessFilter(filterKey("topology:relationships"));
   const topology = data && !("tooLarge" in data) ? data.topology : null;
   const access = data && !("tooLarge" in data) ? data.access : null;
   const slice = access?.status === "available" ? access.topology : null;
@@ -204,6 +235,13 @@ export function TopologyPage({ portalHref }: { portalHref?: string } = {}) {
   const people = data.topology.nodes.filter((n) => n.kind !== "team" && !isHandleNode(n));
   const edges = view?.edges ?? [];
   const chosen = selected ? byId.get(selected) : undefined;
+  const textFilter = accessFilter(query);
+  const wire = (e: Edge): string => {
+    const name = (id: string) => byId.get(id)?.name ?? "unknown";
+    return `${name(e.from)} ${relation(e)}${extra(e)} ${name(e.to)} ${STATE_TAG[e.state].text}`;
+  };
+  const shownEdges = edges.filter((e) => textFilter.test(wire(e)));
+  const showBar = edges.length >= FILTER_FROM || query.trim() !== "";
   return (
     <section className="app-page" aria-label="Who owns what">
       <PageHead
@@ -263,28 +301,24 @@ export function TopologyPage({ portalHref }: { portalHref?: string } = {}) {
           <EmptyState title="No relationships yet.">Give an agent an owner on the Agents page, or add members to a team on the Teams page.</EmptyState>
         ) : (
           <>
-            <Table>
-              <thead>
-                <tr>
-                  <th>From</th>
-                  <th>Relationship</th>
-                  <th>To</th>
-                  <th>State</th>
-                </tr>
-              </thead>
-              <tbody>
-                {edges.map((e) => (
-                  <tr key={e.id}>
-                    <td className="strong">{who(byId.get(e.from))}</td>
-                    <td>{`${relation(e)}${extra(e)}`}</td>
-                    <td className="strong">{who(byId.get(e.to))}</td>
-                    <td>
-                      <Tag status={STATE_TAG[e.state].status}>{STATE_TAG[e.state].text}</Tag>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
+            {showBar ? (
+              <ListFilter
+                className="no-print"
+                label="Filter the relationships"
+                value={query}
+                onChange={setQuery}
+                filter={textFilter}
+                placeholder="Name, relationship, or a regex"
+                noun={{ one: "relationship", many: "relationships" }}
+                shown={shownEdges.length}
+                total={edges.length}
+                more={layer === "access" && slice?.truncated === true}
+                onClear={() => setQuery("")}
+              />
+            ) : null}
+            {shownEdges.length === 0 ? null : <EdgeTable edges={shownEdges} byId={byId} className={shownEdges.length < edges.length ? "no-print" : undefined} />}
+            {/* the print is for a security review: it always lists every relationship, whatever the filter hides */}
+            {shownEdges.length < edges.length ? <EdgeTable edges={edges} byId={byId} className="print-only" /> : null}
             <p className="tb-soft page-note">Live: both sides are active. Off: one side is departed or paused. Blocked: one side is blocked.</p>
           </>
         )}

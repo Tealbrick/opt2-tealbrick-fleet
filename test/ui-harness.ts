@@ -12,7 +12,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 
 const win = new Window({ url: "http://localhost/a/fleet/", width: 1280, height: 860 });
 const g = globalThis as Record<string, unknown>;
-for (const k of ["window", "document", "navigator", "location", "history", "sessionStorage", "HTMLElement", "HTMLButtonElement", "HTMLDialogElement", "HTMLInputElement", "HTMLTextAreaElement", "Element", "Node", "Event", "MouseEvent", "KeyboardEvent", "MutationObserver", "PopStateEvent"]) {
+for (const k of ["window", "document", "navigator", "location", "history", "sessionStorage", "localStorage", "HTMLElement", "HTMLButtonElement", "HTMLDialogElement", "HTMLInputElement", "HTMLTextAreaElement", "Element", "Node", "Event", "MouseEvent", "KeyboardEvent", "MutationObserver", "PopStateEvent"]) {
   const v = (win as unknown as Record<string, unknown>)[k];
   if (v === undefined) continue;
   try {
