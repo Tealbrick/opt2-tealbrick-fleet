@@ -4,6 +4,7 @@ import { AccessBulk, type AccessChange, Button, EmptyState, Field, Notice, Selec
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { changeError, EditDialog, PageHead } from "../common.tsx";
 import { TrustTag } from "../reviews.tsx";
+import { apartLabels } from "./many.ts";
 import { type Agent, csv, type Dir, loadDirectory, type Reload } from "./shared.tsx";
 
 function AgentDialog({ agent, dir, onClose, reload }: { agent: Agent; dir: Dir; onClose: () => void; reload: Reload }) {
@@ -41,7 +42,7 @@ function OwnerMany({ dir, onBack, reload }: { dir: Dir; onBack: () => void; relo
   const agents = useMemo(() => dir.agents.filter((a) => a.status !== "removed"), [dir.agents]);
   const who = useMemo(() => agents.map((a) => ({ id: a.id, name: a.name, note: a.status === "paused" ? "paused" : "" })), [agents]);
   const cells = useMemo(() => ownerCells(agents), [agents]);
-  const owners = useMemo(() => dir.people.filter((p) => p.kind === "person" && p.status === "active").map((p) => ({ id: p.id, label: p.name })), [dir.people]);
+  const owners = useMemo(() => apartLabels(dir.people.filter((p) => p.kind === "person" && p.status === "active").map((p) => ({ id: p.id, label: p.name }))), [dir.people]);
   const names = useMemo(() => new Map(agents.flatMap((a) => (a.owner ? [[a.owner.id, a.owner.name] as const] : []))), [agents]);
   const write = useCallback((change: AccessChange) => callOp("agent_set", { agent: change.agent, owner: change.level }), []);
   const read = useCallback(async () => {
