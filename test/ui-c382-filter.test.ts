@@ -107,7 +107,7 @@ describe("People and agents filter", () => {
     const { EveryonePage } = (await loadPage("everyone")) as { EveryonePage: (p: any) => never };
     const m = await mount(h(EveryonePage, {}));
     assert.match(text(m.host), /No loaded person or agent matches\./);
-    assert.match(text(m.host), /The filter searches only the 10 people and agents loaded so far\./);
+    assert.match(text(m.host), /The filter searches only the 10 people and agents this page holds\./);
     assert.match(text(m.host), /Showing 0 of 10 loaded people and agents\./);
     await m.unmount();
   });
@@ -122,7 +122,7 @@ describe("People and agents filter, review round 1", () => {
     await click(buttons(m.host, "People")[0] ?? ([...m.host.querySelectorAll('[role="radio"],button,label')].find((e) => e.textContent?.trim() === "People") as Element));
     assert.equal(m.host.querySelectorAll("tbody tr").length, 0);
     assert.match(text(m.host), /No loaded person or agent matches\./);
-    assert.match(text(m.host), /The filter searches only the 10 people and agents loaded so far\./);
+    assert.match(text(m.host), /The filter searches only the 10 people and agents this page holds\./);
     assert.doesNotMatch(text(m.host), /The filter searched all/);
     await m.unmount();
   });
@@ -167,7 +167,7 @@ describe("Identities filter", () => {
     const { Identities } = (await loadPage("identities")) as { Identities: (p: any) => never };
     const m = await mount(h(Identities, {}));
     assert.match(text(m.host), /No loaded identity matches\./);
-    assert.match(text(m.host), /The filter searches only the 10 identities loaded so far\./);
+    assert.match(text(m.host), /The filter searches only the 10 identities this page holds\./);
     await m.unmount();
   });
 });
@@ -238,7 +238,7 @@ describe("Access filter", () => {
     remember("access", "zzz");
     const t = await mount(h(AccessView, { slice: slice(9, true), agents: agentList(9), identities: [] }));
     assert.match(text(t.host), /No loaded agent matches\./);
-    assert.match(text(t.host), /The filter searches only the 9 agents loaded so far\./);
+    assert.match(text(t.host), /The filter searches only the 9 agents this page holds\./);
     assert.match(text(t.host), /shortened copy of access/, "the page's own notice stays");
     await t.unmount();
   });

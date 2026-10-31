@@ -4,7 +4,7 @@ Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`
 
 ## 0.4.0-dev.100 - 2026-11-01
 
-C382 batch 4, DEV only. No function or CLI change; ui 0.7.0.
+C382 batch 4, DEV only. No function or CLI change; ui 0.7.1.
 
 - Holds and Receipts: a filter by agent and by text. A filter always shows "Showing N of M" and Clear. Receipts filters by agent on the server; the text filter reads the loaded rows and says so while more are not loaded, with Show older in reach. Held approvals that a filter hides are counted above the list.
 - People and agents, Access, the Relationships table and Identities: a text filter (plain text or a regex), remembered per viewer. A filter always shows "Showing N of M" and Clear. People and agents keeps the Show choice and counts it as a filter. Access keeps the Agent and App choices next to the text; the "Held for approval" column stays, and agents or apps with held calls that the text hides are counted above the list. The Relationships table prints every relationship, whatever the filter hides. When the list was cut (a long People list, a shortened copy of access, identities that Connect holds more of), the filter says it reads only the rows loaded so far.
