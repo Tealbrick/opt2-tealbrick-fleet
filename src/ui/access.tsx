@@ -28,12 +28,19 @@ export interface AccessProps {
 type Mode = "agent" | "app";
 const ALL = "";
 
-/** The end of an id (the random part), the full id in the title. */
-const short = (id: string): string => (id.length > 8 ? `…${id.slice(-6)}` : id);
-const Id = ({ id }: { id: string }) => (
-  <span className="mono id" title={id}>
-    {short(id)}
-  </span>
+/** Ids stay out of the card's face and go here (QA D9). */
+const IdDetails = ({ rows }: { rows: [string, string][] }) => (
+  <details className="details">
+    <summary>Details</summary>
+    <dl className="kv mono">
+      {rows.map(([k, v]) => (
+        <div className="kv-row" key={`${k}:${v}`}>
+          <dt>{k}</dt>
+          <dd>{v}</dd>
+        </div>
+      ))}
+    </dl>
+  </details>
 );
 const METHOD = { key: "Key", pairing: "Pairing" } as const;
 const held = holdWords;
@@ -59,7 +66,6 @@ function AgentCard({ a }: { a: AgentAccess }) {
     <Card as="section" className="access-card tb-stack" aria-label={`Agent ${a.name}`}>
       <div className="card-head">
         <h3 title={a.name}>{a.name}</h3>
-        <Id id={a.id} />
       </div>
       <dl className="kv">
         <dt>Connections</dt>
@@ -70,10 +76,7 @@ function AgentCard({ a }: { a: AgentAccess }) {
             <ul className="access-list">
               {a.connections.map((c) => (
                 <li key={c.con}>
-                  <span className="mono" title={c.con}>
-                    {c.con}
-                  </span>
-                  {` · ${METHOD[c.method]} `}
+                  {`${METHOD[c.method]} `}
                   {c.status === "active" ? <Tag status="live">Active</Tag> : <Tag status="default">Revoked</Tag>}
                 </li>
               ))}
@@ -116,7 +119,7 @@ function AgentCard({ a }: { a: AgentAccess }) {
           <tbody>
             {a.apps.map((r) => (
               <tr key={r.ins}>
-                <td className="strong" title={`${r.product} ${r.version} · ${r.ins}`}>
+                <td className="strong" title={`${r.product} ${r.version}`}>
                   {r.app}
                 </td>
                 <td>
@@ -133,6 +136,7 @@ function AgentCard({ a }: { a: AgentAccess }) {
           </tbody>
         </Table>
       )}
+      <IdDetails rows={[["Agent", a.id], ...a.connections.map((c): [string, string] => ["Connection", c.con]), ...a.apps.map((r): [string, string] => [r.app, r.ins])]} />
     </Card>
   );
 }
@@ -143,8 +147,7 @@ function AppCard({ a }: { a: AppAccess }) {
       <div className="card-head">
         <h3 title={a.name}>{a.name}</h3>
         <span className="tb-soft">
-          {`${a.product} ${a.version} `}
-          <Id id={a.ins} />
+          {`${a.product} ${a.version}`}
         </span>
       </div>
       <h4 className="access-sub">Agents that can use it</h4>
@@ -165,10 +168,7 @@ function AppCard({ a }: { a: AppAccess }) {
           <tbody>
             {a.agents.map((r) => (
               <tr key={r.id}>
-                <td className="strong">
-                  {`${r.name} `}
-                  <Id id={r.id} />
-                </td>
+                <td className="strong">{r.name}</td>
                 <td>
                   <Letters letters={r.letters} words={r.words} />
                 </td>
@@ -198,7 +198,7 @@ function AppCard({ a }: { a: AppAccess }) {
           <tbody>
             {a.callers.map((c) => (
               <tr key={c.ins}>
-                <td className="strong" title={c.ins}>
+                <td className="strong">
                   {c.name}
                 </td>
                 <td>
@@ -210,6 +210,7 @@ function AppCard({ a }: { a: AppAccess }) {
           </tbody>
         </Table>
       )}
+      <IdDetails rows={[["App instance", a.ins], ...a.agents.map((r): [string, string] => [r.name, r.id]), ...a.callers.map((c): [string, string] => [c.name, c.ins])]} />
     </Card>
   );
 }

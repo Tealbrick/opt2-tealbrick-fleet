@@ -54,3 +54,6 @@ export const RULES_STATUS: Record<RulesStatus, { tag: string; tone: "live" | "ne
   gone: { tag: "Rules no longer has this draft", tone: "default" },
   unknown: { tag: "Status not known: Rules did not answer", tone: "open" },
 };
+
+/** The rule's text names its subject by name and id, for Rules. The id goes under Details (QA D9). */
+export const withoutIds = (text: string): string => text.replace(/\s*\((?:agt|tm|team|per|psn)_[0-9A-Za-z_-]+\)/g, "");

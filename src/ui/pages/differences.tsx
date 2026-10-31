@@ -7,7 +7,7 @@ import { useCallback, useState } from "react";
 import { changeError, LoadFailed, Loading, useLoad } from "../common.tsx";
 import type { FindingRow, FindingsListOutput } from "./inventory-types.ts";
 import { openSubject, subjectHref } from "./subject-link.ts";
-import { NOTE_HINT, when } from "./words.ts";
+import { age, NOTE_HINT, when } from "./words.ts";
 
 const load = () => callOp<FindingsListOutput>("findings_list", {});
 
@@ -130,7 +130,7 @@ export function Differences() {
         <Button onClick={() => void check()} disabled={checking}>
           {checking ? "Checking" : "Check now"}
         </Button>
-        {data?.lastSweepAt ? <span className="tb-hint">{`Last check ${when(data.lastSweepAt)}. ${data.storesRead} apps read.`}</span> : null}
+        {data?.lastSweepAt ? <span className="tb-hint">{`Last check ${when(data.lastSweepAt)} (${age(data.lastSweepAt)}). ${data.storesRead} apps read.`}</span> : null}
       </div>
       {checkFailure ? (
         <Notice tone="needs-you" role="alert">

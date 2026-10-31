@@ -2,7 +2,7 @@
 // are three different facts and read as three different sentences; a store that was not read is never shown as empty.
 import { Notice, Switch, Tag } from "@opt2-tealbrick/ui";
 import type { ItemEffect, PreviewItem, PreviewStore, StoreState } from "./inventory-types.ts";
-import { when } from "./words.ts";
+import { age, when } from "./words.ts";
 
 const STATE_TAG: Record<StoreState, { status: "live" | "idle" | "needs-you" | "busy"; word: string }> = {
   read: { status: "live", word: "Read" },
@@ -71,7 +71,7 @@ export function StoreRows({ stores, subjectName, unlinkedAccounts = 0, ticks, ba
             <h3>{s.name}</h3>
             <Tag status={STATE_TAG[s.state].status}>{STATE_TAG[s.state].word}</Tag>
           </div>
-          {s.state === "read" && s.product === "core" ? <p className="tb-hint">From the copy of Portal's records in this workspace.</p> : s.state === "read" && s.at ? <p className="tb-hint">{`Reported by ${s.name}, ${when(s.at)}. This is what the app says, not a check of it.`}</p> : null}
+          {s.state === "read" && s.product === "core" ? <p className="tb-hint">From the copy of Portal's records in this workspace.</p> : s.state === "read" && s.at ? <p className="tb-hint">{`Reported by ${s.name}, ${when(s.at)} (${age(s.at)}). This is what the app says, not a check of it.`}</p> : null}
           <StoreBody store={s} subjectName={subjectName} ticks={ticks} bare={bare} />
         </section>
       ))}

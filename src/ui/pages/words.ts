@@ -76,6 +76,20 @@ export function afterChangeText(floor: Floor): string {
 /** A stop's Notice tone: only a change Rules confirmed reads as live, and even that is not "stopped". */
 export const floorTone = (floor: Pick<Floor, "state">): "live" | "needs-you" | "neutral" => (floor.state === "confirmed" ? "live" : floor.state === "not_installed" ? "neutral" : "needs-you");
 
+/** How old a read is, in words (QA D10). */
+export function age(iso: string | null | undefined, now = Date.now()): string {
+  if (!iso) return "";
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "";
+  const min = Math.floor((now - t) / 60_000);
+  if (min < 1) return "just now";
+  if (min < 60) return min === 1 ? "1 minute ago" : `${min} minutes ago`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return h === 1 ? "1 hour ago" : `${h} hours ago`;
+  const d = Math.floor(h / 24);
+  return d === 1 ? "1 day ago" : `${d} days ago`;
+}
+
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 /** `30 Oct 2026, 15:50 UTC`; empty when there is no valid time. */
 export function when(iso: string | null | undefined): string {

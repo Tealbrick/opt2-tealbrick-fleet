@@ -309,7 +309,7 @@ describe("AccessView", () => {
     const m = await mount(h(access.AccessView, { slice: SLICE(), agents: AGENTS, identities: IDENTITIES, portalHref: "https://portal.example/canvas" }));
     const front = m.host.querySelector('[aria-label="Agent Front desk"]');
     assert.ok(front);
-    assert.match(words(front), /Connections con_01J0000000000000000000KEY · Key Active/);
+    assert.match(words(front), /Connections Key Active/);
     assert.match(words(front), /Channels buzz · npub1frontdesk/);
     assert.deepEqual(
       [...front.querySelectorAll("tbody tr")].map((tr) => [...tr.querySelectorAll("td")].map((td) => text(td))),
@@ -320,7 +320,7 @@ describe("AccessView", () => {
     );
     assert.equal(front.querySelector("abbr")?.getAttribute("title"), "Create, read, update");
     const scout = m.host.querySelector('[aria-label="Agent Scout"]');
-    assert.match(words(scout), /con_01J0000000000000000000PAIR · Pairing Revoked/);
+    assert.match(words(scout), /Connections Pairing Revoked/);
     assert.deepEqual(
       [...(scout?.querySelectorAll("tbody tr td") ?? [])].map((td) => text(td)),
       ["Knowledge", "R", "bound", "None", "All", "Paused"],
@@ -343,7 +343,7 @@ describe("AccessView", () => {
     assert.equal(byApp.getAttribute("aria-pressed"), "true");
     const conn = m.host.querySelector('[aria-label="App Connect"]');
     assert.ok(conn);
-    assert.match(words(conn), /Agents that can use it.*Front desk …00000A CRU free first contact, money 1 Active/);
+    assert.match(words(conn), /Agents that can use it.*Front desk CRU free first contact, money 1 Active/);
     assert.match(words(conn), /Apps that can call it.*Knowledge R 2/);
     const kn = m.host.querySelector('[aria-label="App Knowledge"]');
     assert.match(words(kn), /No other app can call it\./);

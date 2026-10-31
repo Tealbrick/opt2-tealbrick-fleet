@@ -8,7 +8,7 @@
 //   node --run build && node scripts/ui-preview.ts [--out <dir>] [--only <regex>] [--serve <scene>]
 //
 // --serve keeps one scene running for a manual look. Dark mode: the kit's dark tokens are opt-in by `data-theme="dark"`
-// on <html>, so that is what the preview sets. The Chromium comes from Playwright's cache (`npx playwright-core install
+// on <html>; the app sets it from prefers-color-scheme (src/ui/theme.ts), and a cell fails if it did not. The Chromium comes from Playwright's cache (`npx playwright-core install
 // chromium`), or from env TB_PREVIEW_CHROMIUM. Output defaults to <repo>/.ui-preview (ignored by git).
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -31,9 +31,11 @@ const THEMES = ["light", "dark"] as const;
 const TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".txt": "text/plain; charset=utf-8" };
 
 /** Replaced words of the §10 table; a strict scene fails when one is visible. */
-const OLD_WORDS = /\b(Colleagues?|Offboard(?:ed|ing)?|Proposed|Rehire|Trust reviews?|Campaigns?|Topology|Holds|Exclusions?|Evidence)\b/i;
+const OLD_WORDS = /\b(Colleagues?|Offboard(?:ed|ing)?|Rehire|Trust reviews?|Campaigns?|Topology|Exclusions?|Evidence)\b/i;
+/** The name of a page or state, not the verb ("this file holds", "rules you proposed"). */
+const OLD_PAGE_WORD = /\b(?:Holds|Proposed)\b/;
 /** A raw id of this platform: prefix, underscore, at least 6 id characters. */
-const RAW_ID = /\b(?:agt|per|pln|ins|lev|rvw|drf|prp|hld|rcp|tm|team|ws|rel)_[0-9A-Za-z]{6,}\b/;
+const RAW_ID = /\b(?:agt|per|psn|pln|ins|con|lev|rvw|drf|prp|hld|rcp|tm|team|ws|rel|rnd|rol)_[0-9A-Za-z]{6,}\b/;
 
 const { values: args } = parseArgs({ options: { out: { type: "string" }, only: { type: "string" }, serve: { type: "string" } } });
 const out = resolve(args.out ?? join(root, ".ui-preview"));
@@ -55,11 +57,10 @@ function kitFor(scene: Scene): string {
   return source.replace(PERSON_OPS, `export const PERSON_OPS = ${JSON.stringify(scene.personOps)}`);
 }
 
-function indexFor(theme: string): string {
+function indexFor(): string {
   const built = readFileSync(join(ui, "index.html"), "utf8");
   if (!built.includes('<html lang="en">') || !built.includes('<script type="importmap">')) throw new Error("ui-preview: index.html changed shape");
-  const page = built.replace('<html lang="en">', theme === "dark" ? '<html lang="en" data-theme="dark">' : '<html lang="en">');
-  return page.replace(/<script type="importmap">(.*?)<\/script>/s, (_m, json: string) => {
+  return built.replace(/<script type="importmap">(.*?)<\/script>/s, (_m, json: string) => {
     const map = JSON.parse(json) as { imports: Record<string, string> };
     map.imports["#kit"] = "/__preview/kit.js"; // an override, not a change of the build
     return `<script type="importmap">${JSON.stringify(map)}</script>`;
@@ -133,7 +134,7 @@ function startServer(state: { current: Scene; theme: string; unknownOps: Set<str
       }
       // every other path under the base is a page of the app (SDK-API §14)
       res.writeHead(200, { "content-type": TYPES[".html"] as string });
-      res.end(indexFor(state.theme));
+      res.end(indexFor());
     })().catch((e: unknown) => {
       state.unexpected.add(`server error: ${e instanceof Error ? e.message : String(e)}`);
       if (!res.headersSent) res.writeHead(500);
@@ -165,8 +166,12 @@ async function shoot(page: Page, baseUrl: string, scene: Scene, state: { unknown
   await page.goto(new URL(scene.path, baseUrl).href, { waitUntil: "load" });
   if (scene.ready) await page.getByText(scene.ready, { exact: false }).first().waitFor({ timeout: 8000 });
   if (scene.steps) await scene.steps(page);
+  if (scene.check) problems.push(...(await scene.check(page)));
   await page.waitForTimeout(200);
   await page.screenshot({ path: file, fullPage: true });
+  // QA D8: the app itself follows the system setting; the preview only sets that setting
+  const dark = await page.evaluate(() => document.documentElement.dataset.theme === "dark");
+  if (dark !== file.endsWith("-dark.png")) problems.push(`theme: data-theme ${dark ? "dark" : "not dark"}`);
   const width = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, inner: window.innerWidth }));
   if (width.scroll > width.inner) problems.push(`sideways scroll: ${width.scroll} > ${width.inner}`);
   for (const op of state.unknownOps) problems.push(`op with no fixture: ${op}`);
@@ -175,7 +180,7 @@ async function shoot(page: Page, baseUrl: string, scene: Scene, state: { unknown
     const text = await visibleText(page);
     const id = RAW_ID.exec(text)?.[0];
     if (id) problems.push(`raw id outside Details: ${id}`);
-    const word = OLD_WORDS.exec(text)?.[0];
+    const word = OLD_WORDS.exec(text)?.[0] ?? OLD_PAGE_WORD.exec(text)?.[0];
     if (word) problems.push(`replaced word: ${word}`);
   }
   if (scene.expect) for (const t of scene.expect) if (!(await visibleText(page)).includes(t)) problems.push(`missing text: ${t}`);

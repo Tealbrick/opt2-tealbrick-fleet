@@ -10,7 +10,7 @@ import { useState } from "react";
 import type { OverviewGetOutput, ProposalSendOutput, ProposalsListOutput } from "#kit";
 import { changeError, LoadFailed, Loading, PageHead, useLoad } from "./common.tsx";
 import { day } from "./reviews.tsx";
-import { NOTHING_APPLIES, proposalError, RULES_STATUS, TEMPLATE_INFO } from "./rule-text.ts";
+import { NOTHING_APPLIES, proposalError, RULES_STATUS, TEMPLATE_INFO, withoutIds } from "./rule-text.ts";
 
 type Proposal = ProposalsListOutput["proposals"][number];
 type Team = OverviewGetOutput["teams"][number];
@@ -46,12 +46,18 @@ function ProposalRow({ p, onSend, busy }: { p: Proposal; onSend: (p: Proposal) =
         {TEMPLATE_INFO[p.template].title}
         {rules ? <Tag status={rules.tone}>{rules.tag}</Tag> : <Tag status="needs-you">{p.status === "held" ? "Held, not sent" : "Not sent"}</Tag>}
       </h3>
-      <p>{p.text}</p>
+      <p>{withoutIds(p.text)}</p>
+      {withoutIds(p.text) !== p.text ? (
+        <details className="details">
+          <summary>Details</summary>
+          <p className="mono">{p.text}</p>
+        </details>
+      ) : null}
       {p.status === "sent" ? null : <p>{proposalError(p.error)}</p>}
-      <span className="meta">{`Proposed ${day(p.createdAt)}${p.decidedAt ? ` · decided in Rules ${day(p.decidedAt)}` : ""}`}</span>
+      <span className="meta">{`Made ${day(p.createdAt)}${p.decidedAt ? ` · decided in Rules ${day(p.decidedAt)}` : ""}`}</span>
       {p.status === "sent" ? null : (
         <div className="side">
-          <Button size="sm" variant="primary" disabled={busy} aria-label={`Send again: ${p.text}`} onClick={() => onSend(p)}>
+          <Button size="sm" variant="primary" disabled={busy} aria-label={`Send again: ${withoutIds(p.text)}`} onClick={() => onSend(p)}>
             Send again
           </Button>
         </div>

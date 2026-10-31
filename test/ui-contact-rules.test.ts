@@ -165,7 +165,7 @@ describe("Contact rules page", () => {
     assert.match(r[0]?.textContent ?? "", /Rules already has too many drafts waiting\. Approve or reject some in Rules, then send it again\./);
     assert.doesNotMatch(r[0]?.textContent ?? "", /too_many_drafts|raw upstream/);
     assert.match(r[1]?.textContent ?? "", /Rules asked you to approve this call first/);
-    assert.match(r[4]?.textContent ?? "", /Proposed 14 Oct 2026 · decided in Rules 16 Oct 2026/);
+    assert.match(r[4]?.textContent ?? "", /Made 14 Oct 2026 · decided in Rules 16 Oct 2026/);
     assert.deepEqual(
       r.map((x) => [...x.querySelectorAll("button")].map((b) => b.textContent)),
       [["Send again"], ["Send again"], [], [], [], [], []],
