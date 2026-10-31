@@ -28,6 +28,7 @@
 .print-only { display: none; }
 @media print {
   .print-only { display: block; }
+  table.print-only { display: table; }
   .tb-shell { display: block; }
   .tb-shell > .tb-head, .tb-shell-nav, .no-print { display: none; }
   .tb-shell-main { max-width: none; padding: 0; }
