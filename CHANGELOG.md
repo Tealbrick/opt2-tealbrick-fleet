@@ -2,6 +2,16 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
+## 0.4.0-dev.8 - 2026-10-31
+
+C380 final polish, DEV only. Not for stable until Martin has read C380-DECISIONS.md.
+
+- Access record, Review rounds, Roles and Cannot hold both are in the navigation, and Add people is on People and agents: QA rows R1 to R7 and R9 to R14 passed. Stated gaps: R1's Closed-mode allow variant, one plan over 3 agents, the print view, R8 (unit only), and R13's 100-line cap and error lines were not run live.
+- Dark mode follows the system setting. Printing is always light.
+- Tab stays in an open dialog, and focus goes back to what opened it.
+- Access and Contact rules show no raw id on their face; ids sit under Details.
+- Summary, the entry's Access section and Differences show the age of a read. Check now reads each app on the owner's press.
+
 ## 0.4.0-dev.7 - 2026-10-30
 
 C380 Tier 2, DEV only. Not for stable until Martin has read C380-DECISIONS.md. The pages stay off the navigation until their QA rows pass; each route works by its address.
