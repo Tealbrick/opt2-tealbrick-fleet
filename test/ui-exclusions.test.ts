@@ -25,6 +25,7 @@ for (const k of ["window", "document", "navigator", "location", "history", "sess
   }
 }
 g.IS_REACT_ACT_ENVIRONMENT = true;
+g.requestAnimationFrame = (cb: () => void) => setTimeout(cb, 0);
 
 interface Stub {
   calls: { op: string; input: any }[];
@@ -280,13 +281,15 @@ describe("a refused role shows both roles in one plain sentence on the Roles pag
     const sentence = "Marco already has Approver (with no end date). A rule says no one may have both Approver and Payer. Choose dates that do not overlap, or end the other role first.";
     stub.answers.role_assign = refuse(409, "cannot_hold_both", sentence);
     const m = await mount(h(roles.RolesPage, {}));
+    stub.answers.role_get = ok({ role: { ...ROLES[1], members: 0 }, assignments: [] });
     await click(button(m.host, "Give"));
-    const dlg = m.host.querySelector("dialog") as Element;
-    await choose(dlg, 0, "Marco (person)");
-    await choose(dlg, 1, "Contract");
-    await click(button(dlg, "Save"));
-    assert.equal(dlg.querySelector('[role="alert"]')?.textContent, sentence);
-    assert.doesNotMatch(dlg.textContent ?? "", REPLACED);
+    const o = [...m.host.querySelectorAll('[role="option"]')].find((x) => x.querySelector(".tb-access-pick-name")?.textContent === "Marco");
+    assert.ok(o);
+    await click(o as Element);
+    await choose(m.host, 0, "Contract");
+    await click(button(m.host, "Give Payer"));
+    assert.equal(m.host.querySelector(".tb-access-failures li")?.textContent, `Failed: Marco. ${sentence}`);
+    assert.doesNotMatch(m.host.textContent ?? "", REPLACED);
     await m.unmount();
   });
 });

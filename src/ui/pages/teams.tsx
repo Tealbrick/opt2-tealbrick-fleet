@@ -1,16 +1,17 @@
 // Teams page (owner): create, edit, delete a team and set its members.
 import { callOp } from "@opt2-tealbrick/miniapp-sdk/client";
-import { Button, Card, EmptyState, Field, Notice, Select, Tag, TextInput } from "@opt2-tealbrick/ui";
-import { useState } from "react";
+import { type AccessChange, AccessEditor, Button, Card, EmptyState, Field, Notice, Tag, TextInput } from "@opt2-tealbrick/ui";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MembersSetInput, TeamSetInput } from "#kit";
-import { EditDialog, PageHead } from "../common.tsx";
-import { csv, DeleteButton, type Dir, type Reload, type Role, type Team } from "./shared.tsx";
+import { changeError, EditDialog, PageHead } from "../common.tsx";
+import { memberCells, memberPreview, membersAfter, subjectKey } from "./many.ts";
+import { csv, DeleteButton, type Dir, loadDirectory, type Reload, type Team } from "./shared.tsx";
 
-const ROLE_OPTIONS = [
-  { value: "", label: "Not in team" },
-  { value: "member", label: "Member" },
-  { value: "lead", label: "Lead" },
+const MEMBER_LEVELS = [
+  { id: "member", label: "Member" },
+  { id: "lead", label: "Lead" },
 ];
+const WHO = { one: "person or agent", many: "people and agents" };
 
 function TeamDialog({ team, onClose, reload }: { team: Team | "new"; onClose: () => void; reload: Reload }) {
   const t = team === "new" ? null : team;
@@ -38,48 +39,125 @@ function TeamDialog({ team, onClose, reload }: { team: Team | "new"; onClose: ()
   );
 }
 
-function MembersDialog({ team, dir, onClose, reload }: { team: Team; dir: Dir; onClose: () => void; reload: Reload }) {
-  const initial = Object.fromEntries(team.members.map((m) => [`${m.kind}:${m.id}`, m.role])) as Record<string, Role>;
-  const [roles, setRoles] = useState<Record<string, Role | "">>(initial);
-  const pick = (key: string) => <Select options={ROLE_OPTIONS} value={roles[key] ?? ""} onValueChange={(v) => setRoles({ ...roles, [key]: v as Role | "" })} />;
-  const save = async () => {
-    const chosen = (kind: string) =>
-      Object.entries(roles)
-        .filter(([k, r]) => k.startsWith(`${kind}:`) && r)
-        .map(([k, r]) => ({ id: k.slice(kind.length + 1), role: r as Role }));
-    const input: MembersSetInput = { team: team.id, people: chosen("person"), agents: chosen("agent") };
-    await callOp("members_set", input);
-    await reload();
-  };
-  const agents = dir.agents.filter((a) => a.status !== "removed");
+/** The members of one team: "Not in team" once, then only who is in it, with a one-line add and a bulk editor. Rules reads this list, so each write shows in the log of this session. */
+function MembersView({ team, dir, onBack, reload }: { team: Team; dir: Dir; onBack: () => void; reload: Reload }) {
+  const cells = useMemo(() => memberCells(team.id, team.members), [team.id, team.members]);
+  const scopes = useMemo(() => [{ id: team.id, name: team.name }], [team.id, team.name]);
+  const inTeam = useMemo(() => new Set(team.members.map((m) => subjectKey(m.kind, m.id))), [team.members]);
+  const who = useMemo(
+    () => [
+      ...dir.people.map((p) => ({
+        id: subjectKey("person", p.id),
+        name: p.name,
+        note: p.kind === "outside_agent" ? "Outside agent" : p.status === "departed" ? "Person, left" : "Person",
+      })),
+      // an agent that left Portal keeps its place in a team: it is listed only while it is a member
+      ...dir.agents.filter((a) => a.status !== "removed" || inTeam.has(subjectKey("agent", a.id))).map((a) => ({ id: subjectKey("agent", a.id), name: a.name, note: a.status === "removed" ? "Agent, not in Portal" : "Agent" })),
+    ],
+    [dir.people, dir.agents, inTeam],
+  );
+  const writeMany = useCallback(
+    async (changes: readonly AccessChange[]) => {
+      // members_set replaces the list: read it now, change only what this click changes, send it once
+      const now = (await loadDirectory()).teams.find((t) => t.id === team.id);
+      if (!now) throw Object.assign(new Error("This team is gone."), { code: "team_not_found" });
+      const input: MembersSetInput = { team: team.id, ...membersAfter(now.members, changes) };
+      await callOp("members_set", input);
+    },
+    [team.id],
+  );
+  const read = useCallback(async () => {
+    const fresh = await loadDirectory();
+    void reload();
+    return memberCells(team.id, fresh.teams.find((t) => t.id === team.id)?.members ?? []);
+  }, [team.id, reload]);
   return (
-    <EditDialog title={`Members of ${team.name}`} onClose={onClose} save={save}>
-      <h3 className="sub-head">People</h3>
-      {dir.people.length === 0 ? <p className="tb-soft">No people in the directory yet.</p> : null}
-      {dir.people.map((p) => (
-        <Field key={p.id} label={p.name}>
-          {pick(`person:${p.id}`)}
-        </Field>
-      ))}
-      <h3 className="sub-head">Agents</h3>
-      {agents.length === 0 ? <p className="tb-soft">No agents in this workspace yet.</p> : null}
-      {agents.map((a) => (
-        <Field key={a.id} label={a.name}>
-          {pick(`agent:${a.id}`)}
-        </Field>
-      ))}
-    </EditDialog>
+    <section className="app-page" aria-label={`Members of ${team.name}`}>
+      <PageHead
+        title={`Members of ${team.name}`}
+        lede="Rules & Approvals can use this list in a rule, so a change here can change what is allowed."
+        action={<Button onClick={onBack}>Back to teams</Button>}
+      />
+      <AccessEditor
+        agents={who}
+        scopes={scopes}
+        fixedScope
+        levels={MEMBER_LEVELS}
+        noneLabel="Not in team"
+        scopeWord={{ one: "team", many: "teams" }}
+        defaults={[{ what: "Everyone not listed below", level: null }]}
+        cells={cells}
+        defaultOf={() => null}
+        writeMany={writeMany}
+        reload={read}
+        explain={changeError}
+        storageKey="fleet-team-members"
+        words={{
+          agent: WHO,
+          unit: WHO,
+          set: "Set their place",
+          start: "Pick people and agents, then a place in the team.",
+          differHead: "In this team",
+          differEmpty: "No one is in this team yet.",
+          back: "Remove from team",
+          lede: (total, differ) => `${total.toLocaleString("en")} people and agents. ${differ === 0 ? "None is" : differ === 1 ? "1 is" : `${differ.toLocaleString("en")} are`} in this team.`,
+          sentence: (n) => `This changes ${n === 1 ? "this one" : `these ${n.toLocaleString("en")}`} in this team.`,
+          ask: (n, level) => `This sets ${n.toLocaleString("en")} people and agents to ${level}.`,
+          nothing: (_n, level) => `Nothing to change: already ${level}.`,
+        }}
+      />
+    </section>
+  );
+}
+
+/** The card keeps a size you can read at any team size: how many, the leads first, a few names, how many more. */
+function TeamMembers({ team }: { team: Team }) {
+  if (team.members.length === 0) return null;
+  const { tags, more, line } = memberPreview(team.members);
+  return (
+    <>
+      <p className="tb-soft">{line}</p>
+      <div className="tb-row tight">
+        {tags.map((m) => (
+          <Tag key={`${m.kind}:${m.id}`} status={m.role === "lead" ? "live" : "default"}>
+            {`${m.kind === "agent" ? "Agent " : ""}${m.name}${m.role === "lead" ? " (lead)" : ""}`}
+          </Tag>
+        ))}
+        {more > 0 ? <span className="tb-soft">{`and ${more.toLocaleString("en")} more`}</span> : null}
+      </div>
+    </>
   );
 }
 
 export function Teams({ dir, reload }: { dir: Dir; reload: Reload }) {
   const [edit, setEdit] = useState<Team | "new" | null>(null);
-  const [members, setMembers] = useState<Team | null>(null);
+  const [membersOf, setMembersOf] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  // the Members button of a card gets the keyboard back when the view closes
+  const backTo = useRef<string | null>(null);
+  useEffect(() => {
+    if (membersOf || !backTo.current) return;
+    document.querySelector<HTMLButtonElement>(`button[data-team-members="${backTo.current}"]`)?.focus();
+    backTo.current = null;
+  }, [membersOf]);
   const remove = (t: Team) => async () => {
     await callOp("team_delete", { id: t.id });
     await reload();
   };
+  const open = membersOf ? dir.teams.find((t) => t.id === membersOf) : undefined;
+  if (open) {
+    return (
+      <MembersView
+        team={open}
+        dir={dir}
+        reload={reload}
+        onBack={() => {
+          backTo.current = open.id;
+          setMembersOf(null);
+        }}
+      />
+    );
+  }
   return (
     <section className="app-page" aria-label="Teams">
       <PageHead
@@ -113,17 +191,17 @@ export function Teams({ dir, reload }: { dir: Dir; reload: Reload }) {
                 ) : null}
               </div>
               {t.description ? <p className="tb-soft">{t.description}</p> : null}
-              {t.members.length === 0 ? null : (
-                <div className="tb-row tight">
-                  {t.members.map((m) => (
-                    <Tag key={`${m.kind}:${m.id}`} status={m.role === "lead" ? "live" : "default"}>
-                      {`${m.kind === "agent" ? "Agent " : ""}${m.name}${m.role === "lead" ? " (lead)" : ""}`}
-                    </Tag>
-                  ))}
-                </div>
-              )}
+              <TeamMembers team={t} />
               <div className="tb-ctas">
-                <Button size="sm" onClick={() => setMembers(t)}>
+                <Button
+                  size="sm"
+                  data-team-members={t.id}
+                  aria-label={`Members of ${t.name}`}
+                  onClick={() => {
+                    setFailure(null);
+                    setMembersOf(t.id);
+                  }}
+                >
                   Members
                 </Button>
                 <Button size="sm" onClick={() => setEdit(t)}>
@@ -136,7 +214,6 @@ export function Teams({ dir, reload }: { dir: Dir; reload: Reload }) {
         </div>
       )}
       {edit ? <TeamDialog team={edit} onClose={() => setEdit(null)} reload={reload} /> : null}
-      {members ? <MembersDialog team={members} dir={dir} onClose={() => setMembers(null)} reload={reload} /> : null}
     </section>
   );
 }

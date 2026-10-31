@@ -3,10 +3,11 @@
 // Owner side only. Every change is a person op; a failed one shows a plain sentence. The page is reachable at /roles whenever the ops exist,
 // and is in the navigation only after the QA rows R1 to R4 passed (features.ts).
 import { callOp } from "@opt2-tealbrick/miniapp-sdk/client";
-import { Button, Card, Dialog, EmptyState, Field, Notice, Select, Tag, TextInput } from "@opt2-tealbrick/ui";
-import { useCallback, useState } from "react";
+import { AccessBulk, type AccessCell, type AccessChange, Button, Card, Dialog, EmptyState, Field, Notice, Select, Tag, TextInput } from "@opt2-tealbrick/ui";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { OverviewGetOutput, RoleAssignInput, RoleAssignOutput, RoleEndOutput, RoleGetOutput, RoleSetOutput, RolesListOutput } from "#kit";
 import { changeError, EditDialog, LoadFailed, Loading, PageHead, useLoad } from "../common.tsx";
+import { giveProblem, isoOf, subjectKey, subjectOf } from "./many.ts";
 import { NOTE_HINT, when } from "./words.ts";
 
 type Role = RolesListOutput["roles"][number];
@@ -40,12 +41,7 @@ export function stateText(a: Pick<Assignment, "state" | "validFrom" | "validUnti
   return `Ended ${when(a.endedAt)}: ${why}`;
 }
 
-/** A local date-time field value to an ISO moment: null for an empty field, undefined for a value that is not a date (the form says so, and sends nothing). */
-export const isoOf = (local: string): string | null | undefined => {
-  if (!local) return null;
-  const d = new Date(local);
-  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
-};
+export { isoOf };
 
 function RoleDialog({ role, onClose, reload }: { role: Role | "new"; onClose: () => void; reload: () => Promise<void> }) {
   const r = role === "new" ? null : role;
@@ -68,52 +64,96 @@ function RoleDialog({ role, onClose, reload }: { role: Role | "new"; onClose: ()
   );
 }
 
-function AssignDialog({ role, onClose, reload }: { role: Role; onClose: () => void; reload: () => Promise<void> }) {
+const HOLDS = "holds";
+const holderCells = (role: string, assignments: readonly Assignment[]): AccessCell[] =>
+  assignments.filter((a) => a.state !== "ended").map((a) => ({ agent: subjectKey(a.subject.kind, a.subject.id), scope: role, level: HOLDS }));
+
+/** Give one role to several people or agents. Every give carries the same reason, note and dates, one role_assign each. Ending stays one by one, on the list of holders. */
+function GiveMany({ role, onClose, reload }: { role: Role; onClose: () => void; reload: () => Promise<void> }) {
   const directory = useLoad(useCallback(() => callOp<OverviewGetOutput>("overview_get", {}), []));
-  const [who, setWho] = useState("");
+  const holders = useLoad(useCallback(() => callOp<RoleGetOutput>("role_get", { id: role.id }), [role.id]));
+  const [fresh, setFresh] = useState<AccessCell[] | null>(null);
   const [reason, setReason] = useState<Reason | "">("");
   const [note, setNote] = useState("");
   const [from, setFrom] = useState("");
   const [until, setUntil] = useState("");
-  const options = [
-    ...(directory.data?.people ?? []).filter((p) => p.kind === "person" && p.status === "active").map((p) => ({ value: `person:${p.id}`, label: `${p.name} (person)` })),
-    ...(directory.data?.agents ?? []).filter((a) => a.status !== "removed").map((a) => ({ value: `agent:${a.id}`, label: `${a.name} (agent)` })),
-  ];
-  const save = async () => {
-    const at = who.indexOf(":");
-    if (at < 0 || !reason) throw Object.assign(new Error("Choose who and a reason."), { code: "input_invalid" });
-    const input: RoleAssignInput = { role: role.id, subject: { kind: who.slice(0, at) as "person" | "agent", id: who.slice(at + 1) }, reason };
+  const people = directory.data?.people;
+  const agents = directory.data?.agents;
+  const who = useMemo(
+    () => [
+      ...(people ?? []).filter((p) => p.kind === "person" && p.status === "active").map((p) => ({ id: subjectKey("person", p.id), name: p.name, note: "Person" })),
+      ...(agents ?? []).filter((a) => a.status !== "removed").map((a) => ({ id: subjectKey("agent", a.id), name: a.name, note: "Agent" })),
+    ],
+    [people, agents],
+  );
+  const loaded = holders.data?.assignments;
+  const cells = useMemo(() => fresh ?? holderCells(role.id, loaded ?? []), [fresh, loaded, role.id]);
+  const levels = useMemo(() => [{ id: HOLDS, label: `Give ${role.name}` }], [role.name]);
+  const scope = useMemo(() => ({ id: role.id, name: role.name }), [role.id, role.name]);
+  const problem = giveProblem({ reason, from, until });
+  const write = async (change: AccessChange) => {
+    if (!reason) throw Object.assign(new Error("Choose why."), { code: "input_invalid" });
+    const input: RoleAssignInput = { role: role.id, subject: subjectOf(change.agent), reason };
     if (note.trim()) input.note = note.trim();
     const validFrom = isoOf(from);
     const validUntil = isoOf(until);
-    if (validFrom === undefined) throw Object.assign(new Error("Check the start date."), { code: "input_invalid" });
-    if (validUntil === undefined) throw Object.assign(new Error("Check the end date."), { code: "input_invalid" });
     if (validFrom) input.validFrom = validFrom;
     if (validUntil) input.validUntil = validUntil;
     await callOp<RoleAssignOutput>("role_assign", input);
-    await reload();
   };
+  const read = useCallback(async () => {
+    const next = holderCells(role.id, (await callOp<RoleGetOutput>("role_get", { id: role.id })).assignments);
+    setFresh(next);
+    void reload();
+    return next;
+  }, [role.id, reload]);
+  if (directory.error) return <LoadFailed message={directory.error} retrying={directory.loading} onRetry={() => void directory.reload()} />;
+  if (holders.error) return <LoadFailed message={holders.error} retrying={holders.loading} onRetry={() => void holders.reload()} />;
+  if (!directory.data || !holders.data) return <Loading what="people and agents" />;
   return (
-    <EditDialog title={`Give ${role.name}`} onClose={onClose} save={save}>
-      <p className="tb-soft">{RECORD_LINE}</p>
-      <Notice tone="neutral">{GRANT_LINE}</Notice>
-      {directory.error ? <LoadFailed message={directory.error} retrying={directory.loading} onRetry={() => void directory.reload()} /> : null}
-      <Field label="Who">
-        <Select options={options} value={who} onValueChange={setWho} placeholder={directory.loading ? "Loading" : "Choose a person or an agent"} />
-      </Field>
-      <Field label="Why">
-        <Select options={REASONS} value={reason} onValueChange={(v) => setReason(v as Reason)} placeholder="Choose a reason" />
-      </Field>
-      <Field label="Note" hint={NOTE_HINT}>
-        <TextInput value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} />
-      </Field>
-      <Field label="Starts" hint="Optional. In your time zone; this page shows times in UTC. Empty means now.">
-        <TextInput type="datetime-local" value={from} onChange={(e) => setFrom(e.target.value)} />
-      </Field>
-      <Field label="Ends" hint="Optional. In your time zone. After this the role ends by itself. Empty means until you end it.">
-        <TextInput type="datetime-local" value={until} onChange={(e) => setUntil(e.target.value)} />
-      </Field>
-    </EditDialog>
+    <AccessBulk
+      agents={who}
+      scope={scope}
+      levels={levels}
+      allowNone={false}
+      noneLabel=""
+      cells={cells}
+      write={write}
+      reload={read}
+      explain={changeError}
+      storageKey="fleet-role-give"
+      title={`Give ${role.name}`}
+      backLabel="Back to roles"
+      onBack={onClose}
+      blocked={problem}
+      nowText={(level) => (level ? "Has it" : "")}
+      words={{
+        agent: { one: "person or agent", many: "people and agents" },
+        unit: { one: "person or agent", many: "people and agents" },
+        set: "Why, and for how long",
+        start: "Pick people and agents, say why, then give the role.",
+        sentence: (n) => `This gives ${role.name} to ${n === 1 ? "this one" : `these ${n.toLocaleString("en")}`}, with this reason and these dates.`,
+        ask: (n) => `This gives ${role.name} to ${n.toLocaleString("en")} people and agents.`,
+        nothing: () => `Nothing to change: they already have ${role.name}.`,
+      }}
+      panel={
+        <>
+          <Notice tone="neutral">{GRANT_LINE}</Notice>
+          <Field label="Why">
+            <Select options={REASONS} value={reason} onValueChange={(v) => setReason(v as Reason)} placeholder="Choose a reason" />
+          </Field>
+          <Field label="Note" hint={NOTE_HINT}>
+            <TextInput value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} />
+          </Field>
+          <Field label="Starts" hint="Optional. In your time zone; this page shows times in UTC. Empty means now.">
+            <TextInput type="datetime-local" value={from} onChange={(e) => setFrom(e.target.value)} />
+          </Field>
+          <Field label="Ends" hint="Optional. In your time zone. After this the role ends by itself. Empty means until you end it.">
+            <TextInput type="datetime-local" value={until} onChange={(e) => setUntil(e.target.value)} />
+          </Field>
+        </>
+      }
+    />
   );
 }
 
@@ -215,15 +255,38 @@ function Holders({ role, onChanged }: { role: Role; onChanged: () => Promise<voi
 export function RolesPage() {
   const { data, error, loading, reload } = useLoad(useCallback(() => callOp<RolesListOutput>("roles_list", { includeArchived: true }), []));
   const [edit, setEdit] = useState<Role | "new" | null>(null);
-  const [give, setGive] = useState<Role | null>(null);
+  const [giving, setGiving] = useState<string | null>(null);
+  // the Give button of a card gets the keyboard back when the view closes
+  const backTo = useRef<string | null>(null);
+  useEffect(() => {
+    if (giving || !backTo.current) return;
+    document.querySelector<HTMLButtonElement>(`button[data-role-give="${backTo.current}"]`)?.focus();
+    backTo.current = null;
+  }, [giving]);
   const [archive, setArchive] = useState<Role | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   // the open list of holders is read again after any change made from a dialog
   const [version, setVersion] = useState(0);
-  const reloadAll = async () => {
+  const reloadAll = useCallback(async () => {
     await reload();
     setVersion((v) => v + 1);
-  };
+  }, [reload]);
+  const give = giving ? data?.roles.find((r) => r.id === giving) : undefined;
+  if (give) {
+    return (
+      <section className="app-page" aria-label={`Give ${give.name}`}>
+        <PageHead title="Roles" lede={RECORD_LINE} />
+        <GiveMany
+          role={give}
+          reload={reloadAll}
+          onClose={() => {
+            backTo.current = give.id;
+            setGiving(null);
+          }}
+        />
+      </section>
+    );
+  }
   return (
     <section className="app-page" aria-label="Roles">
       <PageHead
@@ -258,7 +321,7 @@ export function RolesPage() {
               {r.description ? <p className="tb-soft">{r.description}</p> : null}
               <div className="tb-ctas">
                 {r.archived ? null : (
-                  <Button size="sm" variant="primary" onClick={() => setGive(r)} aria-label={`Give ${r.name}`}>
+                  <Button size="sm" variant="primary" data-role-give={r.id} onClick={() => setGiving(r.id)} aria-label={`Give ${r.name}`}>
                     Give
                   </Button>
                 )}
@@ -278,7 +341,6 @@ export function RolesPage() {
         </div>
       )}
       {edit ? <RoleDialog role={edit} onClose={() => setEdit(null)} reload={reloadAll} /> : null}
-      {give ? <AssignDialog role={give} onClose={() => setGive(null)} reload={reloadAll} /> : null}
       {archive ? <ArchiveDialog role={archive} onClose={() => setArchive(null)} reload={reloadAll} /> : null}
     </section>
   );

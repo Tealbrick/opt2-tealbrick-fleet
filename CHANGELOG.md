@@ -2,6 +2,15 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
+## 0.4.0-dev.9 - 2026-10-31
+
+C382 batch 2, DEV only. Not for stable until Martin has read C380-DECISIONS.md. No function or CLI change; ui 0.5.0.
+
+- Teams, Members: "Not in team" once, then who is in the team, with a one-line add and a bulk editor (filter with plain text or a regex, one click per place, count, log of this session). No dropdown per person. One click is one `members_set`, on the list read just before it, so a member the page does not show stays.
+- Team cards: how many members, the leads first, six names, how many more.
+- Roles, Give: pick several people or agents. Each give carries the same reason, note and dates, one `role_assign` each. A refused row says why; the others go on. Ending stays one by one.
+- Agents: Change the owner of many. One `agent_set` per agent with only the owner in it, so role and tags stay. Each change opens a review, as one change does today.
+
 ## 0.4.0-dev.8 - 2026-10-31
 
 C380 final polish, DEV only. Not for stable until Martin has read C380-DECISIONS.md.
