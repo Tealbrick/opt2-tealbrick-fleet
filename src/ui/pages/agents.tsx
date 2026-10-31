@@ -46,7 +46,7 @@ function OwnerMany({ dir, onBack, reload }: { dir: Dir; onBack: () => void; relo
   const write = useCallback((change: AccessChange) => callOp("agent_set", { agent: change.agent, owner: change.level }), []);
   const read = useCallback(async () => {
     const fresh = await loadDirectory();
-    void reload();
+    await reload();
     return ownerCells(fresh.agents.filter((a) => a.status !== "removed"));
   }, [reload]);
   return (

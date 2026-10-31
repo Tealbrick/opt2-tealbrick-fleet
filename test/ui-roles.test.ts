@@ -243,7 +243,7 @@ describe("the Roles page", () => {
     stub.answers.role_assign = ok({ assignment: ASG() });
     const m = await mount(h(roles.RolesPage, {}));
     await openGive(m.host, ["Marco"], "Contract");
-    assert.match([...m.host.querySelectorAll('[role="option"]')].find((o) => o.textContent?.includes("Marco"))?.textContent ?? "", /Has it/);
+    assert.match([...m.host.querySelectorAll('[role="option"]')].find((o) => o.textContent?.includes("Marco"))?.textContent ?? "", /Already given/);
     await click(button(m.host, "Give Contractor"));
     assert.equal(stub.calls.filter((c) => c.op === "role_assign").length, 0, "no write");
     assert.match(m.host.textContent ?? "", /Nothing to change: they already have Contractor\./);

@@ -126,7 +126,7 @@ function GiveMany({ role, onClose, reload }: { role: Role; onClose: () => void; 
       backLabel="Back to roles"
       onBack={onClose}
       blocked={problem}
-      nowText={(level) => (level ? "Has it" : "")}
+      nowText={(level) => (level ? "Already given" : "")}
       words={{
         agent: { one: "person or agent", many: "people and agents" },
         unit: { one: "person or agent", many: "people and agents" },

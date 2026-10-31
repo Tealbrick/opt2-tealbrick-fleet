@@ -68,7 +68,7 @@ function MembersView({ team, dir, onBack, reload }: { team: Team; dir: Dir; onBa
   );
   const read = useCallback(async () => {
     const fresh = await loadDirectory();
-    void reload();
+    await reload();
     return memberCells(team.id, fresh.teams.find((t) => t.id === team.id)?.members ?? []);
   }, [team.id, reload]);
   return (
