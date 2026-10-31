@@ -113,6 +113,21 @@ describe("People and agents filter", () => {
   });
 });
 
+describe("People and agents filter, review round 1", () => {
+  it("a list the server cut: the Show choice alone with no rows says it read only the loaded rows, never 'all'", async () => {
+    fresh();
+    stub.answers.colleagues_list = ok({ items: Array.from({ length: 10 }, (_, i) => ROW(i, { kind: "agent", id: `agt_${i}`, name: `Agent ${i}` })), total: 4000, nextCursor: null });
+    const { EveryonePage } = (await loadPage("everyone")) as { EveryonePage: (p: any) => never };
+    const m = await mount(h(EveryonePage, {}));
+    await click(buttons(m.host, "People")[0] ?? ([...m.host.querySelectorAll('[role="radio"],button,label')].find((e) => e.textContent?.trim() === "People") as Element));
+    assert.equal(m.host.querySelectorAll("tbody tr").length, 0);
+    assert.match(text(m.host), /No loaded person or agent matches\./);
+    assert.match(text(m.host), /The filter searches only the 10 people and agents loaded so far\./);
+    assert.doesNotMatch(text(m.host), /The filter searched all/);
+    await m.unmount();
+  });
+});
+
 // ── Identities ─────────────────────────────────────────────────────────────
 const idRows = (n: number) => Array.from({ length: n }, (_, i) => ({ agent: { id: `agt_${i}`, name: `Agent ${String(i).padStart(2, "0")}` }, channel: i % 2 ? "buzz" : "email", identity: `${i % 2 ? "buzz" : "email"}:handle-${i}` }));
 const identities = (n: number, note = "") => ok({ connect: { status: "available", note }, people: [], agents: idRows(n) });
@@ -211,7 +226,16 @@ describe("Access filter", () => {
     const m = await mount(h(AccessView, { slice: slice(3), agents: agentList(3), identities: [] }));
     assert.equal(input(m.host).value, "zzz");
     assert.match(text(m.host), /No agent matches\. The filter searched all 3 agents\./);
+    // the selects stay where they are when Clear removes the bar
+    const before = [...m.host.querySelectorAll("select")];
+    assert.equal(before.length, 2);
+    await click(buttons(m.host, "Clear filter")[0] as Element);
+    assert.equal(m.host.querySelector("input"), null, "the bar is gone on a short list");
+    const after = [...m.host.querySelectorAll("select")];
+    assert.equal(after.length, 2);
+    assert.ok(after.every((el, i) => el === before[i]), "the same two select elements: focus is kept");
     await m.unmount();
+    remember("access", "zzz");
     const t = await mount(h(AccessView, { slice: slice(9, true), agents: agentList(9), identities: [] }));
     assert.match(text(t.host), /No loaded agent matches\./);
     assert.match(text(t.host), /The filter searches only the 9 agents loaded so far\./);

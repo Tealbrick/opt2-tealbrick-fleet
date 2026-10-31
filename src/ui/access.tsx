@@ -261,7 +261,7 @@ export function AccessView({ slice, agents, identities, portalHref, note }: Acce
       ? shown.agents.filter((a) => !agentCards.includes(a) && a.apps.some((r) => r.held.length > 0)).length
       : shown.apps.filter((a) => !appCards.includes(a) && a.agents.some((r) => r.held.length > 0)).length;
   const total = mode === "agent" ? view.agents.length : view.apps.length;
-  // The bar is for a long list or a remembered text. The selects keep their place on a short list: they show their own value, and moving them would drop the focus of a person who is choosing.
+  // The bar is for a long list or a remembered text. The selects stay in the toolbar, whether the bar shows or not: moving them would drop the focus of a person who is choosing or who clicks Clear.
   const showBar = total >= FILTER_FROM || query.trim() !== "";
   const selects = (
     <>
@@ -285,7 +285,7 @@ export function AccessView({ slice, agents, identities, portalHref, note }: Acce
           value={mode}
           onChange={setMode}
         />
-        {showBar ? null : selects}
+        {selects}
       </div>
       {showBar ? (
         <ListFilter
@@ -307,9 +307,7 @@ export function AccessView({ slice, agents, identities, portalHref, note }: Acce
             setAgent(ALL);
             setApp(ALL);
           }}
-        >
-          {selects}
-        </ListFilter>
+        />
       ) : null}
       {slice?.truncated ? (
         <Notice tone="needs-you" role="status">

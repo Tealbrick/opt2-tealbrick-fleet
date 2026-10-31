@@ -91,6 +91,7 @@ export function EveryonePage({ portalHref }: { portalHref?: string }) {
               total={items.length}
               facets={filter !== "all"}
               more={data.total > items.length}
+              loadedOnly
               onClear={() => {
                 setQuery("");
                 setFilter("all");
