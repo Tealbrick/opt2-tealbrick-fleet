@@ -31,6 +31,8 @@ export interface Scene {
   forbid?: string[];
   /** per-cell state of a fixture */
   reset?: () => void;
+  /** checks in the real browser, for what a screenshot cannot show (keyboard, focus); each problem fails the cell */
+  check?: (page: Page) => Promise<string[]>;
   /** checks on the ops the scene called */
   assertCalls?: (calls: { op: string; input: unknown }[]) => string[];
 }
@@ -725,9 +727,40 @@ export const scenes: Scene[] = [
         : undefined,
   })),
   // the real manifest's nav: Tier 2 pages in (R1 to R7, R9 to R11 passed), Join stays out (R12 to R14 not passed)
-  { name: "nav-all", path: "", strict: true, ops: { ...planOps([]) }, ready: "Ready to stop an agent?", expect: ["Check now", "Access record", "Review rounds", "Roles", "Cannot hold both", "Who owns what", "Waiting for approval", "ago)"], forbid: ["Add people"] },
+  { name: "nav-all", path: "", strict: true, ops: { ...planOps([]) }, ready: "Ready to stop an agent?", expect: ["Check now", "Access record", "Review rounds", "Roles", "Cannot hold both", "Who owns what", "Waiting for approval", "ago)"] },
+  { name: "everyone-join-on", path: "people-and-agents", strict: true, ops: { ...planOps([]) }, ready: "Marco Rossi", expect: ["Add people"] },
+  {
+    name: "dialog-keyboard",
+    path: "people-and-agents",
+    personOps: LIFECYCLE_OPS,
+    strict: true,
+    ops: pageOps,
+    ready: "Marco Rossi",
+    check: async (p) => {
+      const problems: string[] = [];
+      const inDialog = () => p.evaluate(() => document.activeElement?.closest("dialog") !== null && document.activeElement !== document.body);
+      const trigger = p.getByRole("button", { name: "Stop now" }).first();
+      await trigger.focus();
+      await p.keyboard.press("Enter");
+      await p.locator("dialog[open]").waitFor();
+      for (let i = 0; i < 14; i++) {
+        await p.keyboard.press("Tab");
+        if (!(await inDialog())) problems.push(`Tab ${i + 1} left the dialog`);
+      }
+      for (let i = 0; i < 3; i++) {
+        await p.keyboard.press("Shift+Tab");
+        if (!(await inDialog())) problems.push(`Shift+Tab ${i + 1} left the dialog`);
+      }
+      await p.keyboard.press("Escape");
+      await p.locator("dialog[open]").waitFor({ state: "detached" });
+      await p.waitForTimeout(50);
+      const back = await p.evaluate(() => document.activeElement?.textContent?.trim() ?? "");
+      if (back !== "Stop now") problems.push(`after Escape focus is on: ${back || "the page body"}`);
+      return problems;
+    },
+  },
   { name: "tier2-rounds", path: "review-rounds", strict: true, ops: { ...planOps([]), round_get: ok({ rounds: [ROUND], round: null }), overview_get: ok(overview) }, ready: "Q4 review" },
-  { name: "tier2-round", path: "review-rounds", strict: true, ops: { ...planOps([]), round_get: ok({ rounds: [ROUND], round: { ...ROUND, items: [] } }), overview_get: ok(overview) }, ready: "Q4 review", steps: async (p) => { await p.getByRole("button", { name: "Open Q4 review" }).click(); await p.getByText("A verdict makes no request in Portal by itself").waitFor(); }, expect: ["has not been proved end to end"] },
+  { name: "tier2-round", path: "review-rounds", strict: true, ops: { ...planOps([]), round_get: ok({ rounds: [ROUND], round: { ...ROUND, items: [] } }), overview_get: ok(overview) }, ready: "Q4 review", steps: async (p) => { await p.getByRole("button", { name: "Open Q4 review" }).click(); await p.getByText("A verdict with nothing ticked removes nothing").waitFor(); }, expect: ["has not been proved end to end"] },
   { name: "tier2-roles", path: "roles", strict: true, ops: { ...planOps([]), roles_list: ok({ roles: [{ id: "rol_01J00000000000000000R1", name: "Support", description: "Front line", archived: false, members: 1, scheduled: 0, createdAt: "2026-10-30T10:00:00Z" }], assignments: [] }), overview_get: ok(overview) }, ready: "Front line" },
   { name: "tier2-cannot-hold-both", path: "cannot-hold-both", strict: true, ops: { ...planOps([]), roles_list: ok({ roles: [], assignments: [] }), exclusions_list: ok({ rules: [] }), overview_get: ok(overview) }, ready: "This checks roles only" },
   { name: "tier2-record", path: "access-record", strict: true, ops: { ...planOps([]) }, ready: "Our own apps report this data" },

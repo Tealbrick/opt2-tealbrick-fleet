@@ -3,21 +3,25 @@
 import { callOp } from "@opt2-tealbrick/miniapp-sdk/client";
 import { Button, Notice } from "@opt2-tealbrick/ui";
 import { useEffect, useRef, useState } from "react";
+import { PERSON_OPS } from "#kit";
 import { changeError } from "../common.tsx";
 
 const AGAIN_MS = [3000, 8000];
 
 export function CheckNow({ onRead }: { onRead: () => void | Promise<void> }) {
+  const [hasOp] = useState(() => (PERSON_OPS as readonly string[]).includes("reconcile_now"));
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
-  useEffect(
-    () => () => {
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
       for (const t of timers.current) clearTimeout(t);
-    },
-    [],
-  );
+    };
+  }, []);
   const check = async () => {
     setBusy(true);
     setFailure(null);
@@ -25,13 +29,16 @@ export function CheckNow({ onRead }: { onRead: () => void | Promise<void> }) {
     try {
       await callOp("reconcile_now", {});
       setNote("Governance is reading each app. The times here change when it has the answers.");
-      for (const ms of AGAIN_MS) timers.current.push(setTimeout(() => void onRead(), ms));
+      if (!alive.current) return;
+      for (const t of timers.current) clearTimeout(t);
+      timers.current = AGAIN_MS.map((ms) => setTimeout(() => void onRead(), ms));
     } catch (e) {
       setFailure(changeError(e));
     } finally {
       setBusy(false);
     }
   };
+  if (!hasOp) return null;
   return (
     <div className="tb-stack">
       <span>

@@ -119,7 +119,7 @@ function AgentCard({ a }: { a: AgentAccess }) {
           <tbody>
             {a.apps.map((r) => (
               <tr key={r.ins}>
-                <td className="strong" title={`${r.product} ${r.version} · ${r.ins}`}>
+                <td className="strong" title={`${r.product} ${r.version}`}>
                   {r.app}
                 </td>
                 <td>
@@ -136,7 +136,7 @@ function AgentCard({ a }: { a: AgentAccess }) {
           </tbody>
         </Table>
       )}
-      <IdDetails rows={[["Agent", a.id], ...a.connections.map((c): [string, string] => ["Connection", c.con])]} />
+      <IdDetails rows={[["Agent", a.id], ...a.connections.map((c): [string, string] => ["Connection", c.con]), ...a.apps.map((r): [string, string] => [r.app, r.ins])]} />
     </Card>
   );
 }
@@ -198,7 +198,7 @@ function AppCard({ a }: { a: AppAccess }) {
           <tbody>
             {a.callers.map((c) => (
               <tr key={c.ins}>
-                <td className="strong" title={c.ins}>
+                <td className="strong">
                   {c.name}
                 </td>
                 <td>
@@ -210,7 +210,7 @@ function AppCard({ a }: { a: AppAccess }) {
           </tbody>
         </Table>
       )}
-      <IdDetails rows={[["App instance", a.ins], ...a.agents.map((r): [string, string] => [r.name, r.id])]} />
+      <IdDetails rows={[["App instance", a.ins], ...a.agents.map((r): [string, string] => [r.name, r.id]), ...a.callers.map((c): [string, string] => [c.name, c.ins])]} />
     </Card>
   );
 }

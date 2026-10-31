@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { NOT_CHANGED as SERVER_NOT_CHANGED } from "../src/plans/portal-link.ts";
+import { nextInLoop } from "../src/ui/dialog-focus.ts";
 import { canChoose, choiceSummary, choicesReady, decisionsOf, hasOwnStop } from "../src/ui/pages/agent-choice.ts";
 import { featuresOf } from "../src/ui/pages/features.ts";
 import { lifecycleError, stopCapOf } from "../src/ui/pages/lifecycle-errors.ts";
@@ -212,6 +213,20 @@ describe("no id on the face of Contact rules (D9)", () => {
     assert.equal(withoutIds("Hold the team Support (tm_01J00000000000000000T1) until I approve."), "Hold the team Support until I approve.");
     assert.equal(withoutIds("Hold every outward action of the agent Front desk (agt_01J0000000000000000000000A)."), "Hold every outward action of the agent Front desk.");
     assert.equal(withoutIds("Refuse for the sender slack:UBOT000001."), "Refuse for the sender slack:UBOT000001.");
+  });
+});
+
+describe("Tab stays in the dialog (D12)", () => {
+  it("wraps at both ends, comes back from outside, and leaves the middle to the browser", () => {
+    const l = ["a", "b", "c"];
+    assert.equal(nextInLoop(l, "c", false), "a");
+    assert.equal(nextInLoop(l, "a", true), "c");
+    assert.equal(nextInLoop(l, "b", false), null);
+    assert.equal(nextInLoop(l, "b", true), null);
+    assert.equal(nextInLoop(l, "outside", false), "a");
+    assert.equal(nextInLoop(l, "outside", true), "c");
+    assert.equal(nextInLoop(l, null, false), "a");
+    assert.equal(nextInLoop([], "a", false), null);
   });
 });
 

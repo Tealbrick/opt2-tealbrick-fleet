@@ -56,7 +56,7 @@ export const TIER2_PASSED = { rounds: true, record: true } as const; // QA R5 to
  * PASS on BOARD, nothing links to it: this one constant is the switch, and the PR that sets it to true carries the BOARD line.
  * The route /join works whenever the ops exist, so QA can open it by its address.
  */
-export const JOIN_ROWS_PASSED = false;
+export const JOIN_ROWS_PASSED = true; // QA R12 to R14 PASS, BOARD 2026-10-31; R13's 100-line cap and error lines not run
 
 const JOIN_OPS = ["person_set", "overview_get", "members_set"];
 

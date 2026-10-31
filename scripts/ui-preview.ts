@@ -166,6 +166,7 @@ async function shoot(page: Page, baseUrl: string, scene: Scene, state: { unknown
   await page.goto(new URL(scene.path, baseUrl).href, { waitUntil: "load" });
   if (scene.ready) await page.getByText(scene.ready, { exact: false }).first().waitFor({ timeout: 8000 });
   if (scene.steps) await scene.steps(page);
+  if (scene.check) problems.push(...(await scene.check(page)));
   await page.waitForTimeout(200);
   await page.screenshot({ path: file, fullPage: true });
   // QA D8: the app itself follows the system setting; the preview only sets that setting

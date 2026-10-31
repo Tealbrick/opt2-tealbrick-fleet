@@ -300,8 +300,8 @@ describe("Join: a pasted list", () => {
 describe("Join stays off the page until its rows pass", () => {
   it("the route needs the three ops; the Add people button needs the QA switch as well", () => {
     const ops = ["person_set", "overview_get", "members_set"];
-    assert.equal(features.JOIN_ROWS_PASSED, false, "the switch is off in this PR");
-    assert.deepEqual([features.featuresOf(ops).join, features.featuresOf(ops).joinInNav], [true, false]);
+    assert.equal(features.JOIN_ROWS_PASSED, true, "R12 to R14 PASS on BOARD");
+    assert.deepEqual([features.featuresOf(ops, false, false, undefined, false).join, features.featuresOf(ops, false, false, undefined, false).joinInNav], [true, false]);
     assert.deepEqual([features.featuresOf(ops, false, false, undefined, true).join, features.featuresOf(ops, false, false, undefined, true).joinInNav], [true, true]);
     assert.deepEqual([features.featuresOf(["person_set", "overview_get"], false, false, undefined, true).join, features.featuresOf(["person_set", "overview_get"], false, false, undefined, true).joinInNav], [false, false]);
   });

@@ -143,7 +143,7 @@ function SummaryBody({ data, onRead }: { data: SummaryGetOutput; onRead: () => v
       <section className="tb-stack" aria-label="What was read">
         <h2 className="sub-head">What was read</h2>
         <p className="tb-soft">Governance shows what each app last reported. This can be old: look at the time, and check now if it matters.</p>
-        {FEATURES.differences ? <CheckNow onRead={onRead} /> : null}
+        <CheckNow onRead={onRead} />
         <Table>
           <thead>
             <tr>
@@ -161,7 +161,7 @@ function SummaryBody({ data, onRead }: { data: SummaryGetOutput; onRead: () => v
                     {STORE_TAG[s.state].word}
                   </Tag>
                 </td>
-                <td>{s.at ? `${when(s.at)} (${age(s.at)})` : s.state === "read" ? "Now, from this workspace" : "Not read yet"}</td>
+                <td>{s.at ? `${when(s.at)} (${age(s.at)})` : s.state === "read" ? "From this workspace's copy" : "Not read yet"}</td>
               </tr>
             ))}
           </tbody>
