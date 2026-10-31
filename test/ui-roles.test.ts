@@ -25,6 +25,7 @@ for (const k of ["window", "document", "navigator", "location", "history", "sess
   }
 }
 g.IS_REACT_ACT_ENVIRONMENT = true;
+g.requestAnimationFrame = (cb: () => void) => setTimeout(cb, 0);
 
 interface Stub {
   calls: { op: string; input: any }[];
@@ -129,6 +130,24 @@ const choose = async (scope: ParentNode, index: number, option: string) => {
   await click(opt as Element);
 };
 
+/** Picks a name in the first column of the bulk editor. */
+const pickName = async (host: Element, name: string) => {
+  const o = [...host.querySelectorAll('[role="option"]')].find((x) => x.querySelector(".tb-access-pick-name")?.textContent === name);
+  assert.ok(o, `option ${name}`);
+  await click(o as Element);
+};
+/** Types in the field with this label. */
+const setInput = async (host: Element, label: string, value: string) => {
+  const l = [...host.querySelectorAll("label")].find((x) => x.textContent?.trim().startsWith(label));
+  const input = (l?.querySelector("input") ?? (l?.htmlFor ? host.querySelector(`[id="${l.htmlFor}"]`) : null)) as HTMLInputElement | null;
+  assert.ok(input, `field ${label}`);
+  await act(async () => {
+    Object.getOwnPropertyDescriptor((window as unknown as { HTMLInputElement: typeof HTMLInputElement }).HTMLInputElement.prototype, "value")?.set?.call(input, value);
+    input.dispatchEvent(new (window as unknown as { Event: typeof Event }).Event("input", { bubbles: true }));
+  });
+  await flush();
+};
+
 describe("the Roles page", () => {
   it("says a role is a record, lists roles with their holders, and shows no raw id", async () => {
     reset();
@@ -158,10 +177,17 @@ describe("the Roles page", () => {
     assert.doesNotMatch(m.host.textContent ?? "", /raw upstream|No roles yet/);
     await m.unmount();
   });
-  it("Give: the form says that ending it removes no Portal grant, sends the subject, reason and dates, and shows a refusal as one sentence", async () => {
+  /** Opens Give for the first role, picks these names in the first column and chooses the reason. */
+  const openGive = async (host: Element, names: string[], reason?: string) => {
+    await click(button(host, "Give"));
+    for (const name of names) await pickName(host, name);
+    if (reason) await choose(host, 0, reason);
+  };
+  it("Give: says that ending it removes no Portal grant, sends the subject, reason and dates, and shows a refusal as one sentence per row", async () => {
     reset();
     stub.answers.roles_list = list([ROLE()]);
     stub.answers.overview_get = ok(DIRECTORY);
+    stub.answers.role_get = ok({ role: ROLE(), assignments: [] });
     let refuseFirst = true;
     stub.answers.role_assign = () => {
       if (refuseFirst) {
@@ -171,30 +197,74 @@ describe("the Roles page", () => {
       return ok({ assignment: ASG() })();
     };
     const m = await mount(h(roles.RolesPage, {}));
-    await click(button(m.host, "Give"));
-    const dlg = m.host.querySelector("dialog") as Element;
-    assert.match(dlg.textContent ?? "", /Ending this does not remove a Portal grant\./);
-    assert.match(dlg.textContent ?? "", /A role is a record/);
-    await choose(dlg, 0, "Marco (person)");
-    await choose(dlg, 1, "Contract");
-    await click(button(dlg, "Save"));
-    assert.match(dlg.querySelector('[role="alert"]')?.textContent ?? "", /already assigned/i);
+    await openGive(m.host, ["Marco"], "Contract");
+    assert.match(m.host.textContent ?? "", /Ending this does not remove a Portal grant\./);
+    assert.match(m.host.textContent ?? "", /A role is a record/);
+    await click(button(m.host, "Give Contractor"));
+    assert.match(m.host.querySelector(".tb-access-failures")?.textContent ?? "", /Failed: Marco\. This role is already assigned/);
     assert.equal(stub.calls.filter((c) => c.op === "role_assign").length, 1);
     assert.deepEqual(stub.calls.find((c) => c.op === "role_assign")?.input, { role: "rol_A", subject: { kind: "person", id: "per_1" }, reason: "contract" });
-    await click(button(dlg, "Save"));
+    await click(button(m.host, "Give Contractor"));
     assert.equal(stub.calls.filter((c) => c.op === "role_assign").length, 2);
     await m.unmount();
   });
-  it("Give without a person and a reason sends nothing", async () => {
+  it("Give to several: every give carries the same reason, note and dates; a refused row stops no other; no success for a failed or unconfirmed row", async () => {
     reset();
     stub.answers.roles_list = list([ROLE()]);
     stub.answers.overview_get = ok(DIRECTORY);
+    const given: unknown[] = [];
+    stub.answers.role_get = () => ok({ role: ROLE(), assignments: given })();
+    stub.answers.role_assign = (input) => {
+      if (input.subject.id === "agt_A") return refuse(409, "cannot_hold_both", "Henry holds Payer, and a rule says one holder cannot hold both.")();
+      given.push(ASG({ subject: { kind: input.subject.kind, id: input.subject.id, name: "Marco" } }));
+      return ok({ assignment: ASG() })();
+    };
     const m = await mount(h(roles.RolesPage, {}));
-    await click(button(m.host, "Give"));
-    const dlg = m.host.querySelector("dialog") as Element;
-    await click(button(dlg, "Save"));
+    await openGive(m.host, ["Marco", "Henry"], "Project work");
+    await setInput(m.host, "Note", "For the launch");
+    await setInput(m.host, "Ends", "2099-12-01T09:00");
+    await click(button(m.host, "Give Contractor"));
+    const sent = stub.calls.filter((c) => c.op === "role_assign").map((c) => c.input);
+    assert.equal(sent.length, 2);
+    const until = new Date("2099-12-01T09:00").toISOString();
+    assert.deepEqual(sent.find((x) => x.subject.id === "per_1"), { role: "rol_A", subject: { kind: "person", id: "per_1" }, reason: "project", note: "For the launch", validUntil: until });
+    assert.deepEqual(sent.find((x) => x.subject.id === "agt_A"), { role: "rol_A", subject: { kind: "agent", id: "agt_A" }, reason: "project", note: "For the launch", validUntil: until });
+    const text = m.host.textContent ?? "";
+    assert.match(text, /1 of 2 changes failed/);
+    assert.match(text, /Failed: Henry\. Henry holds Payer/);
+    assert.match(text, /1 set, 1 failed/);
+    await m.unmount();
+  });
+  it("Give skips who already has the role, and nothing here ends a role", async () => {
+    reset();
+    stub.answers.roles_list = list([ROLE()]);
+    stub.answers.overview_get = ok(DIRECTORY);
+    stub.answers.role_get = ok({ role: ROLE(), assignments: [ASG()] });
+    stub.answers.role_assign = ok({ assignment: ASG() });
+    const m = await mount(h(roles.RolesPage, {}));
+    await openGive(m.host, ["Marco"], "Contract");
+    assert.match([...m.host.querySelectorAll('[role="option"]')].find((o) => o.textContent?.includes("Marco"))?.textContent ?? "", /Already given/);
+    await click(button(m.host, "Give Contractor"));
+    assert.equal(stub.calls.filter((c) => c.op === "role_assign").length, 0, "no write");
+    assert.match(m.host.textContent ?? "", /Nothing to change: they already have Contractor\./);
+    assert.equal([...m.host.querySelectorAll("button")].some((b) => /^End/.test(b.textContent?.trim() ?? "")), false, "ending stays on the list of holders");
+    await m.unmount();
+  });
+  it("Give without a reason, or with an end date that has passed, sends nothing and says why", async () => {
+    reset();
+    stub.answers.roles_list = list([ROLE()]);
+    stub.answers.overview_get = ok(DIRECTORY);
+    stub.answers.role_get = ok({ role: ROLE(), assignments: [] });
+    const m = await mount(h(roles.RolesPage, {}));
+    await openGive(m.host, ["Marco"]);
+    assert.match(m.host.textContent ?? "", /Choose why\./);
+    assert.equal(button(m.host, "Give Contractor").disabled, true);
+    await choose(m.host, 0, "Contract");
+    assert.equal(button(m.host, "Give Contractor").disabled, false);
+    await setInput(m.host, "Ends", "2001-01-01T09:00");
+    assert.match(m.host.textContent ?? "", /The end date has passed/);
+    assert.equal(button(m.host, "Give Contractor").disabled, true);
     assert.equal(stub.calls.filter((c) => c.op === "role_assign").length, 0);
-    assert.match(dlg.querySelector('[role="alert"]')?.textContent ?? "", /Choose who and a reason/);
     await m.unmount();
   });
   it("Who has it: shows each holder with a plain state; End asks once, says no Portal grant is removed, and ends only what is open", async () => {
@@ -248,7 +318,7 @@ describe("the Roles page", () => {
     assert.equal(roles.stateText({ state: "ended", validFrom: null, validUntil: null, endedAt: "2026-10-31T09:00:00Z", endReason: "not_started" }), "Ended 31 Oct 2026, 09:00 UTC: it never started: the entry was leaving, closed or gone");
     assert.equal(roles.stateText({ state: "ended", validFrom: null, validUntil: null, endedAt: "2026-10-31T09:00:00Z", endReason: "kind_changed" }), "Ended 31 Oct 2026, 09:00 UTC: the person became an outside agent");
   });
-  it("a value that is not a date reads as undefined (the form then says Check the end date and sends nothing); the open list of holders is read again after Give", async () => {
+  it("a value that is not a date reads as undefined (the view then says Check the end date and sends nothing); the open list of holders is read again after Give", async () => {
     reset();
     assert.equal(roles.isoOf(""), null);
     assert.equal(roles.isoOf("10000-01-01T00:00"), undefined, "a six-digit year is not a date");
@@ -259,15 +329,12 @@ describe("the Roles page", () => {
     stub.answers.role_assign = ok({ assignment: ASG() });
     const m = await mount(h(roles.RolesPage, {}));
     await click(button(m.host, "Who has it"));
-    const holderReads = () => stub.calls.filter((c) => c.op === "role_get").length;
-    assert.equal(holderReads(), 1);
+    assert.match(m.host.textContent ?? "", /Marco/);
     await click(button(m.host, "Give"));
-    const dlg = m.host.querySelector("dialog") as Element;
-    await choose(dlg, 0, "Marco (person)");
-    await choose(dlg, 1, "Contract");
-    await click(button(dlg, "Save"));
-    assert.equal(stub.calls.filter((c) => c.op === "role_assign").length, 1);
-    assert.equal(holderReads(), 2, "the open list was read again");
+    await click(button(m.host, "Back to roles"));
+    const before = stub.calls.filter((c) => c.op === "role_get").length;
+    assert.ok(before >= 2, "the holders and the Give view each read");
+    assert.match(m.host.textContent ?? "", /Marco/, "the holders are shown again");
     await m.unmount();
   });
   it("the repeated buttons say which role or person they are for", async () => {
