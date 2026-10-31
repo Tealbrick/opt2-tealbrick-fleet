@@ -60,3 +60,13 @@ export function giveProblem(form: GiveForm, now = Date.now()): string | null {
   if (from && until && from >= until) return "The start date must be before the end date.";
   return null;
 }
+
+/** Two people with one name must not look like one choice: "Sam" and "Sam (2)". The order of the directory decides, as on the other lists of the kit. */
+export function apartLabels<T extends { label: string }>(list: readonly T[]): T[] {
+  const seen = new Map<string, number>();
+  return list.map((item) => {
+    const n = (seen.get(item.label) ?? 0) + 1;
+    seen.set(item.label, n);
+    return n === 1 ? item : { ...item, label: `${item.label} (${n})` };
+  });
+}

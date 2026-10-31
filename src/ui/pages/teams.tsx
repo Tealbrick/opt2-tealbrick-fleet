@@ -41,6 +41,8 @@ function TeamDialog({ team, onClose, reload }: { team: Team | "new"; onClose: ()
 
 /** The members of one team: "Not in team" once, then only who is in it, with a one-line add and a bulk editor. Rules reads this list, so each write shows in the log of this session. */
 function MembersView({ team, dir, onBack, reload }: { team: Team; dir: Dir; onBack: () => void; reload: Reload }) {
+  // the view replaces the page: the keyboard goes to its first heading
+  useEffect(() => document.querySelector<HTMLElement>(".tb-access-head")?.focus(), []);
   const cells = useMemo(() => memberCells(team.id, team.members), [team.id, team.members]);
   const scopes = useMemo(() => [{ id: team.id, name: team.name }], [team.id, team.name]);
   const inTeam = useMemo(() => new Set(team.members.map((m) => subjectKey(m.kind, m.id))), [team.members]);

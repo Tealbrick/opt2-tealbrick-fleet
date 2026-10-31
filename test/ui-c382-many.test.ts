@@ -8,7 +8,7 @@ import { after, before, describe, it } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Window } from "happy-dom";
 import type { ReactElement } from "react";
-import { giveProblem, memberPreview, membersAfter } from "../src/ui/pages/many.ts";
+import { apartLabels, giveProblem, memberPreview, membersAfter } from "../src/ui/pages/many.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const outDir = join(root, "dist", "ui-test-c382");
@@ -127,6 +127,16 @@ describe("many.ts", () => {
           { id: "agt_1", role: "lead" },
         ],
       },
+    );
+  });
+  it("apartLabels: two people with one name are two choices", () => {
+    assert.deepEqual(
+      apartLabels([
+        { id: "a", label: "Sam" },
+        { id: "b", label: "Sam" },
+        { id: "c", label: "Ann" },
+      ]).map((x) => x.label),
+      ["Sam", "Sam (2)", "Ann"],
     );
   });
   it("memberPreview: leads first, a few names, how many more", () => {

@@ -2,6 +2,13 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
+## 0.4.0-dev.10 - 2026-10-31
+
+From the DEV check of dev.9 (C382 batch 2). DEV only.
+
+- Change the owner of many: two people with one name are now two choices, "Sam" and "Sam (2)".
+- Members: the keyboard goes to the first heading when the view opens.
+
 ## 0.4.0-dev.9 - 2026-10-31
 
 C382 batch 2, DEV only. Not for stable until Martin has read C380-DECISIONS.md. No function or CLI change; ui 0.5.0.
