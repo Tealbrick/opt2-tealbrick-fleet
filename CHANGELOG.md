@@ -2,6 +2,10 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
+## 0.4.0-dev.99 - 2026-10-31
+
+The same code as dev.10, DEV only. The Portal page compares pre-release words as text, so "dev.10" reads as older than "dev.9" and Portal offers no Update (portal-gui src/core/releases.ts). 99 passes on both sides until that is fixed. The next final version stays 0.4.0.
+
 ## 0.4.0-dev.10 - 2026-10-31
 
 From the DEV check of dev.9 (C382 batch 2). DEV only.
