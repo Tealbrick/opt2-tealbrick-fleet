@@ -62,14 +62,16 @@ export function findingsOf(r: FindingInput, now: number): Finding[] {
   const out: Finding[] = [];
   const agent = r.kind === "agent";
   const stoppedIntent = r.effective === "suspended" || r.effective === "leaving" || r.effective === "archived";
+  // C381: "keeps working" is said only of an agent that does: not of one with its own stop or paused.
+  const works = !stoppedIntent && r.effective !== "not_started" && r.runtime === "running";
   // A normal Close leaves a paused card. Back means it runs again, or a row the migration closed with no card has one.
   if (agent && r.lifecycle === "archived" && (r.runtime === "running" || (r.noCard && r.runtime !== "gone"))) out.push(f("card_back_after_close", "This entry is closed, but Portal lists the agent again."));
   else if (agent && stoppedIntent && r.runtime === "running") out.push(f("not_stopped", "Governance says stop, but this agent still runs in Portal."));
   if (agent && (r.lifecycle === "active" || (r.lifecycle === "proposed" && r.reason !== null)) && !stoppedIntent && r.runtime === "paused") out.push(f("paused_outside", "This agent is paused in Portal, but Governance does not say stop. Resume it in Portal if it should work."));
   if (agent && r.lifecycle === "proposed" && r.runtime === "running") out.push(f("running_unapproved", "This agent works and is not reviewed."));
   if (agent && (r.lifecycle === "active" || r.lifecycle === "proposed") && r.runtime === "gone") out.push(f("card_gone", "Portal no longer lists this agent."));
-  if (agent && r.lifecycle !== "archived" && r.runtime !== "gone" && !r.hasOwner) out.push(f("no_owner", "This agent has no owner. It keeps working. Name an owner."));
-  if (agent && r.hasOwner && r.lifecycle !== "archived" && r.ownerLifecycle !== null && r.ownerLifecycle !== "active") out.push(f("owner_inactive", r.ownerMayHoldKey ? "This agent needs an owner: its owner is not active, and may still hold its key. It keeps working. Name a new owner and make a new key." : "This agent needs an owner: its owner is not active. It keeps working. Name a new owner."));
+  if (agent && r.lifecycle !== "archived" && r.runtime !== "gone" && !r.hasOwner) out.push(f("no_owner", `This agent has no owner.${works ? " It keeps working." : ""} Name an owner.`));
+  if (agent && r.hasOwner && r.lifecycle !== "archived" && r.ownerLifecycle !== null && r.ownerLifecycle !== "active") out.push(f("owner_inactive", r.ownerMayHoldKey ? `This agent needs an owner: its owner is not active, and may still hold its key.${works ? " It keeps working." : ""} Name a new owner and make a new key.` : `This agent needs an owner: its owner is not active.${works ? " It keeps working." : ""} Name a new owner.`));
   if (r.lifecycle === "leaving" && !r.planState) out.push(f("leaving_no_plan", r.reason === "migrated" ? "This entry was marked as departed before plans existed. Open it and make a plan." : "This entry is leaving, and no plan was made. Open it and make a plan."));
   if (r.kind === "person" && r.lifecycle === "leaving" && (r.unnamedAccounts ?? 0) > 0) out.push(f("unlinked_account", `${r.unnamedAccounts} accounts in Connect have no person. Check them. If none is this person's, accept this with a reason.`));
   if (agent && r.effective === "suspended" && r.runtime === "paused" && !r.keyEnded) out.push(f("key_not_decided", KEY_STILL_EXISTS));

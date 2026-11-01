@@ -45,9 +45,12 @@ export function PlanResult({ colleague, portalHref, showLine = true, showNotChan
   return (
     <div className="tb-stack">
       {showLine ? <p>{colleague.line}</p> : null}
-      <Notice tone={floorTone(floor)} role="status">
-        {afterChangeText(floor, colleague.kind)}
-      </Notice>
+      {/* A person who is not stopped: nothing here refuses them. The steps below are for their agents' own stops. */}
+      {colleague.kind === "person" ? null : (
+        <Notice tone={floorTone(floor)} role="status">
+          {afterChangeText(floor, colleague.kind)}
+        </Notice>
+      )}
       {notices.map((n) => (
         <Notice key={n} tone="neutral">
           {n}

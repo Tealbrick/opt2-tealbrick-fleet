@@ -729,3 +729,12 @@ test("a new key on an agent is no applied stop; an owner change waits for a plan
   await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: SALES, decision: "stop" }] }, ctxOf(w));
   assert.throws(() => setAgentMoved(w.db, { agent: SALES, owner: bob.id }, { kind: "owner", id: null }, w.clock.t), refused("plan_open", 409));
 });
+
+test("keeps working is said only of an agent that runs; a person who is not stopped reads no refusal", async () => {
+  const w = laterWorld();
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  set(w.db, "agent", HENRY, "suspended", {}, w.clock.t);
+  const textOf = (id: string) => loadColleagues(w.db, w.clock.t).byId.get(`agent:${id}`)?.findings.find((f) => f.code === "owner_inactive")?.text ?? "";
+  assert.doesNotMatch(textOf(HENRY), /keeps working/);
+  assert.match(textOf(SALES), /keeps working/);
+});

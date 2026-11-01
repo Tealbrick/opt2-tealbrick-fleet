@@ -26,7 +26,7 @@ test("one version everywhere: package.json = manifest = the newest CHANGELOG ent
   const pkg = JSON.parse(read("package.json")) as { version: string };
   const manifest = JSON.parse(read("tealbrick.manifest.json")) as { version: string };
   const top = /^## (\S+)/m.exec(read("CHANGELOG.md"))?.[1];
-  assert.equal(pkg.version, "0.4.0-dev.101");
+  assert.equal(pkg.version, "0.4.0-dev.102");
   assert.equal(manifest.version, pkg.version);
   assert.equal(top, pkg.version);
 });
