@@ -407,6 +407,7 @@ test("Try again leaves `changed` alone: the owner did not see the new row, so on
   assert.equal(w.connect.data.ended.length, 0);
   // the way out: cancel, new plan, new look
   await run("plan_cancel", { plan: id }, ctxOf(w));
+  w.db.prepare("UPDATE fleet_agents SET status = 'paused' WHERE id = ?").run(HENRY); // what the slice writes after the approval
   const next = (await run("plan_send", { kind: "agent", id: HENRY, items: [{ product: "connect", id: row.id, digest: w.connect.digestOf(row) }] }, ctxOf(w))).plans[0].id;
   // C383 QA S3-6: Core removed this agent's access already, so the new plan asks Portal for nothing new.
   await w.tick(next);

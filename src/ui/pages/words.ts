@@ -80,7 +80,7 @@ export function beforeChangeText(floor: Pick<Floor, "state">, kind: "person" | "
     case "older":
       return "Rules & Approvals is too old to refuse calls for this agent, so it stops only when you approve in Portal.";
     case "not_read":
-      return "Governance could not read Rules & Approvals, so calls may go on. The agent stops for certain when you approve in Portal.";
+      return "Governance could not read Rules & Approvals, so calls may go on. The agent stops when you approve in Portal.";
     default:
       return "If the Rules hook is on, calls stop in about 2 minutes. Governance cannot see that switch: check it in Portal. The next screen says if Rules has this change.";
   }

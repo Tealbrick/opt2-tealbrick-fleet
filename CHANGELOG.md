@@ -6,17 +6,17 @@ Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`
 
 The final version of the 0.4.0-dev series: C380 lifecycle and C381, a person's change bars that person and their agents keep working. See the dev entries below for what is in it. New in this cut, from the C383 QA run and the C381 review:
 
-- After a new key is approved, the agent page says so. The owner stops being withheld about 2 minutes later when the agent has paired again; before, up to 30 minutes.
+- After a new key is approved, the agent page says so. When the agent has paired again, the owner stops being withheld as soon as Portal's picture shows only connections made after the approval; before, up to 30 minutes. A picture that lags, or no picture, waits as before.
 - The words of an agent's own stop say what happens: Rules refuses its calls in about 2 minutes if the hook is on, and Portal pauses and removes it on approval.
 - After an Undo, a person's page lists no done step as something to do in Portal.
 - A blocked person or agent reads Blocked, not "working". A blocked person is no new owner, in the lists and on the server. A person who is not active shows as "current owner, not active" on the Edit dialog of their agent.
-- "Still has access after leaving" does not count a Buzz identity on an agent Portal no longer lists.
+- "Still has access after leaving" does not count an agent's own memory area or Buzz identity once Portal no longer lists it or Core removed its access. A scheduled post still counts.
 - A later plan asks Portal nothing for an agent whose access Core already removed since its stop.
 - The preview says that an agent's read of its owner's personal memory stays until it moves to a new owner.
 - A person's page links to Access, Differences. Access opens on it from that link.
 - An agent's Stop dialog has its own Not changed list, with no words about a person.
 - person_set takes no handle off a person who is stopped, leaving, closed or blocked: Rules and the sender bar refuse by that handle. Adding one still works. Refusal: `handles_stay`.
-- A new agent that was stopped and resumed still needs an active owner, as Mark as reviewed does: a stop and a resume do not skip the review.
+- A new agent that was stopped and resumed still needs an active owner, as Mark as reviewed does. A blocked person does not count as one.
 
 Upgrade: Core's companion gate refuses this version until the apps it reads are new enough. Update, where installed: bridge 0.2.14, Connect 0.7.14, Rules 0.7.0, Knowledge 0.1.31, Task Board 0.1.17, Evolution 0.4.3, and then Governance 0.4.0. So the page Who is refused cannot be read before Rules 0.7. Read People on Governance 0.3.2 first: the rows with `departed`, and each Blocked trust tag on People and Agents. That is the whole list that starts to refuse with Rules 0.7. An older note here said to read Who is refused before Rules; that order cannot run. Rules 0.7 on Governance 0.3.2 passes the gate, and it refuses those entries at its first feed read, so read the list before you update Rules.
 

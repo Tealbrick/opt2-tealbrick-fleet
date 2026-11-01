@@ -22,7 +22,7 @@ function AgentDialog({ agent, dir, onClose, reload }: { agent: Agent; dir: Dir; 
     <EditDialog title={`Edit ${agent.name}`} onClose={onClose} save={save}>
       <Field label="Owner" hint="The agent keeps working. With a new owner, the old one may still hold its key: Governance shows this until you make a new key on the agent's page. If the old owner is not active, apps read no owner until then, so it has no owner's memory or team reads.">
         <Select
-          options={[{ value: "", label: "No owner" }, ...apartLabels(dir.people.filter((p) => canOwn(p) || p.id === agent.owner?.id).map((p) => ({ id: p.id, label: canOwn(p) ? p.name : `${p.name} (current owner, not active)` }))).map((o) => ({ value: o.id, label: o.label }))]}
+          options={[{ value: "", label: "No owner" }, ...apartLabels(dir.people.filter((p) => canOwn(p) || p.id === agent.owner?.id).map((p) => ({ id: p.id, label: canOwn(p) ? p.name : `${p.name} (current owner, ${p.trust === "blocked" ? "blocked" : "not active"})` }))).map((o) => ({ value: o.id, label: o.label }))]}
           value={owner}
           onValueChange={setOwner}
         />

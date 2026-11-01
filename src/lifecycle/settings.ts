@@ -32,7 +32,7 @@ export function getSettings(db: Db): Settings {
 export function activeDefaultOwner(db: Db): { id: string; name: string } | null {
   const id = read(db, "default_owner");
   if (!id) return null;
-  const p = db.prepare("SELECT id, name FROM fleet_people WHERE id = ? AND kind = 'person' AND lifecycle = 'active'").get(id);
+  const p = db.prepare("SELECT id, name FROM fleet_people WHERE id = ? AND kind = 'person' AND lifecycle = 'active' AND trust <> 'blocked'").get(id);
   return p ? { id: String(p.id), name: String(p.name) } : null;
 }
 

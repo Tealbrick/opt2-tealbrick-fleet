@@ -26,10 +26,10 @@ export interface FloorStatus {
 
 export const FLOOR_TEXT = {
   confirmed: "Rules has this change.",
-  not_confirmed: "Rules has not read this change yet. It may refuse calls soon. The agent stops for certain when you approve in Portal.",
+  not_confirmed: "Rules has not read this change yet. It may refuse calls soon. The agent stops when you approve in Portal.",
   not_installed: "Rules & Approvals adds an early stop. It is not installed, or it needs an update.",
   older: "Rules & Approvals is installed, but this version has no early stop. Update it.",
-  not_read: "Rules & Approvals could not be read, so calls may go on. The agent stops for certain when you approve in Portal.",
+  not_read: "Rules & Approvals could not be read, so calls may go on. The agent stops when you approve in Portal.",
 } as const;
 /** N2-4: whether the list of who is refused holds now, in words for the owner. */
 export const FLOOR_READ_TEXT = {

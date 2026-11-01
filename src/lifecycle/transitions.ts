@@ -69,6 +69,8 @@ export function loadSubject(db: Db, kind: SubjectKind, id: string): Subject | nu
 
 const personLifecycle = (db: Db, id: string | null): string | null => (id === null ? null : ((db.prepare("SELECT lifecycle FROM fleet_people WHERE id = ?").get(id)?.lifecycle as string | null | undefined) ?? null));
 
+const personBlocked = (db: Db, id: string): boolean => db.prepare("SELECT trust FROM fleet_people WHERE id = ?").get(id)?.trust === "blocked";
+
 /** Agents that still have this person as owner, not themselves leaving or closed. They keep working (C381), and a person closes only when each has a new owner or an explicit stop. */
 export function agentsStillOwned(db: Db, personId: string): string[] {
   return db
@@ -120,7 +122,7 @@ export function guardOf(db: Db, s: Subject, to: Lifecycle, opts: { waive?: strin
     // T2 records a review, and a review names who answers for the agent. C381: a resume (T4, T6) is not tied to the owner: an agent with no active owner has a finding, it is not refused.
     if (s.kind === "agent" && (s.lifecycle === "proposed" || neverReviewed(db, s.id))) {
       if (s.ownerId === null) return no("owner_required", "Name an owner first.");
-      if (personLifecycle(db, s.ownerId) !== "active") return no("owner_inactive", "The owner is not active. Name an active owner first.");
+      if (personLifecycle(db, s.ownerId) !== "active" || personBlocked(db, s.ownerId)) return no("owner_inactive", "The owner is not active. Name an active owner first.");
     }
     if (s.validUntil !== null && s.validUntil <= now) return no("date_passed", "The end date has passed. Change the end date first.");
   }

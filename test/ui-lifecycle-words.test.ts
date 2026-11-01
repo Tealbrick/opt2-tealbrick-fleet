@@ -113,7 +113,7 @@ describe("words before a change", () => {
     }
   });
   it("says the Portal step when Rules cannot help", () => {
-    for (const state of ["not_installed", "older", "not_read"] as const) assert.match(beforeChangeText({ state }), /stops? (only|for certain) when you approve in Portal/);
+    for (const state of ["not_installed", "older", "not_read"] as const) assert.match(beforeChangeText({ state }), /stops? (only )?when you approve in Portal/);
   });
   it("names what Governance cannot see when Rules is there", () => {
     for (const state of ["confirmed", "not_confirmed"] as const) assert.match(beforeChangeText({ state }), /cannot see that switch/);
