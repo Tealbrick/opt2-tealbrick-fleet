@@ -43,11 +43,11 @@ export async function refusalsGet(ctx: OpContext, now = Date.now()): Promise<Ref
   const others = items.filter((i) => i.why === "stopped" || i.why === "not_started");
   const needOwner = db
     .prepare(
-      `SELECT a.id, a.name, p.name AS owner_name, p.lifecycle AS owner_lifecycle FROM fleet_agents a LEFT JOIN fleet_people p ON p.id = a.owner_id
-       WHERE a.status <> 'removed' AND a.lifecycle <> 'archived' AND (a.owner_id IS NULL OR p.lifecycle IS NULL OR p.lifecycle <> 'active') ORDER BY a.name COLLATE NOCASE, a.id`,
+      `SELECT a.id, a.name, a.status, p.name AS owner_name FROM fleet_agents a LEFT JOIN fleet_people p ON p.id = a.owner_id
+       WHERE a.status <> 'removed' AND a.lifecycle IN ('active', 'proposed') AND a.valid_from IS NULL AND a.trust <> 'blocked' AND (a.owner_id IS NULL OR p.lifecycle IS NULL OR p.lifecycle <> 'active') ORDER BY a.name COLLATE NOCASE, a.id`,
     )
     .all()
-    .map((r) => ({ id: String(r.id), name: String(r.name), owner: r.owner_name === null || r.owner_name === undefined ? null : String(r.owner_name) }));
+    .map((r) => ({ id: String(r.id), name: String(r.name), owner: r.owner_name === null || r.owner_name === undefined ? null : String(r.owner_name), paused: r.status === "paused" }));
   const floor = await readFloorStatus({ companionTargets: () => (ctx as OpContext & Partial<Pick<SdkOpContext, "companionTargets">>).companionTargets?.() ?? [], callApp: ctx.callApp.bind(ctx) } as unknown as FloorContext);
   return {
     generatedAt: new Date(now).toISOString(),

@@ -17,7 +17,7 @@ export const recordOps = {
     async run(input, ctx) {
       assertOwner(ctx.caller);
       const now = Date.now();
-      const rows = loadColleagues(ctx.db, now).rows.map((r) => ({ kind: r.kind, id: r.id, name: r.name, at: r.at, findings: r.findings }));
+      const rows = loadColleagues(ctx.db, now, readTopology(ctx as SdkOpContext)).rows.map((r) => ({ kind: r.kind, id: r.id, name: r.name, at: r.at, findings: r.findings }));
       const findings = findingsList(ctx.db, rows, portalReadState(readTopology(ctx as SdkOpContext)), now);
       const made = await buildRecord(ctx.db, input, { findings, version: VERSION, now });
       appendEvent(ctx.db, {

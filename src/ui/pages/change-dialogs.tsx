@@ -16,7 +16,7 @@ type Action = Colleague["actions"][number];
 function explain(c: Colleague, action: Action): string {
   if (action.to === "proposed") return c.lifecycle === "archived" ? "This restores nothing. Teams and access do not come back: grant them again in Portal." : "Access that was removed does not come back: grant it again in Portal.";
   if (c.lifecycle === "proposed") return "This records that you reviewed it. It grants nothing.";
-  if (c.kind === "person" && (c.lifecycle === "suspended" || c.lifecycle === "leaving")) return "Governance marks this person as active. Their agents do not change: an agent you moved stays with its new owner, and an agent you stopped stays stopped. If a sender bar is on, remove it in Connect.";
+  if (c.kind === "person" && (c.lifecycle === "suspended" || c.lifecycle === "leaving")) return "Governance marks this person as active. Their agents do not change: an agent you moved stays with its new owner, and an agent you stopped stays stopped. What of theirs already ended stays ended. A request still in Portal is taken back. If a sender bar is on, remove it in Connect.";
   if (c.lifecycle === "suspended") return "Governance marks it as active. If it is paused, resume it in Portal.";
   if (c.lifecycle === "leaving") return "This cancels the stop. Do this only if nothing was approved in Portal. An agent already paused in Portal stays paused until you resume it.";
   return "Governance records this change.";

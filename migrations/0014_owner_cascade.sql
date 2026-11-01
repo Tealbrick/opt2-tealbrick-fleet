@@ -8,7 +8,4 @@
 -- the old floor reads the feed again at once, and the agents the cascade stopped leave its floor. A Core pause that an owner approved earlier stays: finding paused_outside shows it.
 UPDATE fleet_meta SET value = value + 1 WHERE key = 'revision';
 
--- One row for the record, only where a record exists: a new install has nothing to correct.
-INSERT INTO fleet_lifecycle_events (id, subject_kind, subject_id, subject_name, kind, actor_kind, note, at)
-SELECT 'lev_c381_owner_change_note', 'workspace', '', 'Governance', 'migrated', 'system', 'From this version an owner''s change no longer stops the owner''s agents. Agents keep working, and a finding says when an agent needs an owner.', CAST(strftime('%s', 'now') AS INTEGER) * 1000
-WHERE EXISTS (SELECT 1 FROM fleet_lifecycle_events);
+-- The note for the record is written at boot through the hash chain (noteOwnerRule, src/lifecycle/events.ts). A row written here would have no prev_hash, and the row before it could then be edited unseen.

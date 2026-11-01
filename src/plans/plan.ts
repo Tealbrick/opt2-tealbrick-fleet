@@ -8,7 +8,7 @@ import { ACCESS_TARGETS } from "../access/items.ts";
 import { appendEvent } from "../lifecycle/events.ts";
 import { effectiveAgent, type Lifecycle, type SubjectKind } from "../lifecycle/states.ts";
 import { type Actor, loadSubject, type Subject } from "../lifecycle/transitions.ts";
-import { fail } from "../meta.ts";
+import { bump, fail } from "../meta.ts";
 import { DEFAULT_EXPIRES_SEC, isOpenPlan, OPEN_PLAN_STATES, STEPS_PER_DRAFT } from "./steps.ts";
 
 export type CoreOp = "agents.pause" | "agents.offboard" | "agents.rotate";
@@ -132,7 +132,7 @@ export function createPlan(db: Db, input: PlanInput, now = Date.now()): Made {
       for (const t of input.barOnly ? (["connect"] as const) : ACCESS_TARGETS) addStep(db, id, n++, { phase: "read", target: t, op: "access_list" }, now);
       ids.push(id);
     }
-    appendEvent(db, { subject: { kind: s.kind, id: s.id, name: s.name }, kind: "changed", actor: input.actor, note: input.barOnly ? "No plan came after this person was marked as leaving. Governance made one for the sender bar only." : `A plan was made: ${steps.length} steps in Portal.`, plan: { id: groupId, draftId: null, receiptId: null }, at: now });
+    appendEvent(db, { subject: { kind: s.kind, id: s.id, name: s.name }, kind: "changed", actor: input.actor, note: input.barOnly ? "No plan came after this person was marked as leaving. Governance made one for the sender bar only." : steps.length === 0 ? "A plan was made. Nothing is needed in Portal." : `A plan was made: ${steps.length} steps in Portal.`, plan: { id: groupId, draftId: null, receiptId: null }, at: now });
     return { ids };
   });
 }
@@ -197,6 +197,9 @@ export function notePlan(db: Db, id: string, state: string, fields: Fields, now:
 /** The one writer of a step. `UPDATE ... WHERE state = ? AND attempt = ?`: false when another run moved it first. */
 export function moveStep(db: Db, step: Row, to: string, fields: Fields, now: number): boolean {
   const { sql, values } = assign({ ...fields, state: to, updated_at: now });
-  return db.prepare(`UPDATE fleet_plan_steps SET ${sql} WHERE id = ? AND state = ? AND attempt = ?`).run(...values, String(step.id), String(step.state), Number(step.attempt)).changes === 1;
+  const moved = db.prepare(`UPDATE fleet_plan_steps SET ${sql} WHERE id = ? AND state = ? AND attempt = ?`).run(...values, String(step.id), String(step.state), Number(step.attempt)).changes === 1;
+  // C381: the old key is gone, so the feed may name the new owner (`ownerWithheld`). A reader must read it again.
+  if (moved && step.op === "agents.rotate" && (to === "done" || to === "reported")) bump(db);
+  return moved;
 }
 

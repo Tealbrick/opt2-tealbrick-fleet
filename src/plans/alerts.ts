@@ -10,8 +10,8 @@ export interface AlertPort {
 }
 
 const TEXT: Record<AlertKind, { title: string; context: string }> = {
-  waiting: { title: "A stop request waits for your approval.", context: "Governance prepared a stop request. Nothing stops until you approve it in Portal. Open Governance to read it." },
-  expired: { title: "A stop request expired.", context: "A stop request ran out of time. Open Governance to see what was applied and what is still open." },
+  waiting: { title: "A request waits for your approval.", context: "Governance prepared a request for Portal. Nothing changes until you approve it. Open Governance to read it." },
+  expired: { title: "A request expired.", context: "A request for Portal ran out of time. Open Governance to see what was applied and what is still open." },
   date_passed: { title: "An end date passed.", context: "An end date passed and Governance marked the entry as stopped. Open Governance to see what is still open." },
 };
 

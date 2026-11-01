@@ -12,11 +12,15 @@ import { Window } from "happy-dom";
 import type { ReactElement } from "react";
 import { handlers, manifest } from "../src/app.ts";
 import { type DirectoryFeed, directoryFeed } from "../src/feed.ts";
-import { verifyChain } from "../src/lifecycle/events.ts";
+import { NEEDS_CONNECT } from "../src/findings.ts";
+import { leanDirectory } from "../src/lean.ts";
+import { noteOwnerRule, verifyChain } from "../src/lifecycle/events.ts";
+import { setAgentMoved } from "../src/lifecycle/moved.ts";
 import { setDates, stopReach } from "../src/lifecycle/transitions.ts";
 import { loadColleagues } from "../src/lifecycle/view.ts";
 import { requestForNewAgents } from "../src/reviews.ts";
 import * as store from "../src/store.ts";
+import { agentFacts } from "../src/store.ts";
 import { tabStops } from "../src/ui/dialog-focus.ts";
 import { AGENT_A, AGENT_B, migratedDb, migrationFiles } from "./helpers.ts";
 import { OWNER, refused, set, stateOf, T0, world } from "./lifecycle-helpers.ts";
@@ -284,7 +288,7 @@ test("h. refusals_get on a migrated seed: blocked and departed people start with
   await assert.rejects(run("refusals_get", {}, dbCtx(db, { caller: { type: "agent", id: AGENT_A.id, name: "A", mode: "free" } })), refused("no_access", 403));
 });
 
-test("i. an upgrade from dev.100 data: the revision moves, the agent of a leaving owner is no longer refused, one note is in the record, the chain holds; a fresh install has no note", () => {
+test("i. an upgrade from dev.100 data: the revision moves, the agent of a leaving owner is no longer refused, one note is in the record, through the chain; a fresh install has no note", () => {
   const db = migratedWorld(13);
   const left = "agt_01J0000000000000000000000C";
   // the person who left before the update is `leaving` since 0008: their agent is owned by them
@@ -292,7 +296,6 @@ test("i. an upgrade from dev.100 data: the revision moves, the agent of a leavin
   const was = revision(db);
   const rows = Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_lifecycle_events").get()?.n);
   assert.ok(rows > 0, "a record exists");
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM fleet_lifecycle_events WHERE id = 'lev_c381_owner_change_note'").get()?.n, 0);
   const dump = () => ({ people: db.prepare("SELECT * FROM fleet_people ORDER BY id").all(), agents: db.prepare("SELECT * FROM fleet_agents ORDER BY id").all() });
   const rowsBefore = dump();
   const m14 = migrationFiles()[13];
@@ -302,14 +305,16 @@ test("i. an upgrade from dev.100 data: the revision moves, the agent of a leavin
   assert.deepEqual(dump(), rowsBefore, "no row of a person or an agent changed");
   assert.deepEqual([agentRow(db, left)?.lifecycle, agentRow(db, left)?.floor], ["active", false], "its owner left, and it is not refused");
   assert.equal(contactRow(db, "psn_left")?.floor, true, "the person is");
-  const note = db.prepare("SELECT subject_kind, kind, actor_kind, note FROM fleet_lifecycle_events WHERE id = 'lev_c381_owner_change_note'").get();
+  noteOwnerRule(db, T0);
+  noteOwnerRule(db, T0 + 1);
+  const note = db.prepare("SELECT subject_kind, kind, actor_kind, note FROM fleet_lifecycle_events WHERE note LIKE 'From this version%'").get();
   assert.deepEqual({ ...note }, { subject_kind: "workspace", kind: "migrated", actor_kind: "system", note: "From this version an owner's change no longer stops the owner's agents. Agents keep working, and a finding says when an agent needs an owner." });
   assert.equal(Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_lifecycle_events").get()?.n), rows + 1, "one row");
   assert.deepEqual(verifyChain(db), { ok: true, rows: rows + 1 });
   assert.ok(codes({ db }, left).includes("owner_inactive"), "the finding says it needs an owner");
   // a fresh install has no record to correct
   const fresh = migratedDb();
-  assert.equal(Number(fresh.prepare("SELECT COUNT(*) AS n FROM fleet_lifecycle_events WHERE id = 'lev_c381_owner_change_note'").get()?.n), 0);
+  noteOwnerRule(fresh, T0);
   assert.equal(Number(fresh.prepare("SELECT COUNT(*) AS n FROM fleet_lifecycle_events").get()?.n), 0);
   assert.deepEqual(verifyChain(fresh), { ok: true, rows: 0 });
 });
@@ -556,4 +561,115 @@ describe("l. the leave flow", () => {
     assert.match(m.host.textContent ?? "", /Marco gains team Support\. No agent is in this team\./);
     await m.unmount();
   });
+});
+
+// ── what the adversarial pass found ─────────────────────────────────────────
+
+/** The ops here run on the real clock (ctxOf) and the runner on the world's: the world's stays later, as time runs on. */
+const laterWorld = (): World => {
+  const w = makeWorld();
+  w.clock.t = Date.now() + 60_000;
+  return w;
+};
+
+test("a leaver's key does not reach the new owner: apps read no owner until Core replaced the key, and the feed moves when it does; an agent reads the old owner while the person does not know", async () => {
+  const w = laterWorld();
+  const bob = store.setPerson(w.db, { name: "Bob" }, w.clock.t);
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  const plan = (await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: HENRY, decision: "transfer", newOwner: bob.id }] }, ctxOf(w))) as { plans: { id: string }[] };
+  const id = plan.plans[0]?.id as string;
+  assert.equal(agentRow(w.db, HENRY)?.owner, null, "no app gives the old key the new owner's area");
+  assert.equal(agentFacts(w.db, HENRY).owner, null, "nor does the context of a call");
+  assert.equal(leanDirectory(w.db).agents.find((a) => a.id === HENRY)?.owner?.id, w.ann.id, "S2-8: no agent learns of the leaver from a move");
+  assert.equal(loadColleagues(w.db, w.clock.t).byId.get(`agent:${HENRY}`)?.owner?.id, bob.id, "the owner reads the truth");
+  const rev = revision(w.db);
+  await w.tick(id);
+  approveAndDeliver(w, String(w.plan(id).draft_key));
+  await w.tick(id);
+  assert.ok(revision(w.db) > rev, "a reader reads the feed again");
+  assert.equal(agentRow(w.db, HENRY)?.owner, bob.id, "the old key is gone: the new owner shows");
+  assert.equal(agentFacts(w.db, HENRY).owner?.id, bob.id);
+});
+
+test("a key the owner kept off: the new owner stays withheld and the finding stays; a person who is not active later withholds a move made while they were active", async () => {
+  const w = laterWorld();
+  const bob = store.setPerson(w.db, { name: "Bob" }, w.clock.t);
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: HENRY, decision: "transfer", newOwner: bob.id, newKey: false }] }, ctxOf(w));
+  assert.equal(agentRow(w.db, HENRY)?.owner, null);
+  assert.ok(codes(w, HENRY).includes("key_after_transfer"));
+  const v = makeWorld();
+  const carol = store.setPerson(v.db, { name: "Carol" }, v.clock.t);
+  const later = store.setPerson(v.db, { name: "Dan" }, v.clock.t);
+  setAgentMoved(v.db, { agent: SALES, owner: carol.id }, { kind: "owner", id: null }, v.clock.t);
+  setAgentMoved(v.db, { agent: SALES, owner: later.id }, { kind: "owner", id: null }, v.clock.t + 1);
+  assert.equal(agentRow(v.db, SALES)?.owner, later.id, "Ann and Carol are active");
+  set(v.db, "person", carol.id, "leaving", {}, v.clock.t + 2);
+  assert.equal(agentRow(v.db, SALES)?.owner, null, "Carol left, and may hold the key");
+});
+
+test("a person with their agent's key: the finding names the key and the person with no handle is told nothing can bar them", async () => {
+  const w = laterWorld();
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  const text = loadColleagues(w.db, w.clock.t).byId.get(`agent:${HENRY}`)?.findings.find((f) => f.code === "owner_inactive")?.text ?? "";
+  assert.match(text, /may still hold its key/);
+  assert.match(text, /keeps working/);
+  const none = store.setPerson(w.db, { name: "No handle" }, w.clock.t);
+  set(w.db, "person", none.id, "leaving", {}, w.clock.t);
+  assert.ok(loadColleagues(w.db, w.clock.t).byId.get(`person:${none.id}`)?.findings.some((f) => f.code === "no_handle_to_bar"));
+});
+
+test("a stop made in the owner's plan: undo is refused while the draft stands, and after it is applied; the agent's own Bring back stays", async () => {
+  const w = laterWorld();
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  const plan = (await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: HENRY, decision: "stop" }] }, ctxOf(w))) as { plans: { id: string }[] };
+  const id = plan.plans[0]?.id as string;
+  await w.tick(id);
+  assert.throws(() => set(w.db, "agent", HENRY, "active", { reason: "mistake" }, w.clock.t), refused("plan_open", 409), "the draft stands in Portal");
+  approveAndDeliver(w, String(w.plan(id).draft_key));
+  await w.tick(id);
+  assert.throws(() => set(w.db, "agent", HENRY, "active", { reason: "mistake" }, w.clock.t), refused("plan_applied", 409));
+});
+
+test("lifecycle_set with stop decisions counts each agent in one cap", async () => {
+  const w = laterWorld();
+  w.db.prepare("INSERT INTO fleet_settings (key, value) VALUES ('stop_cap', '2') ON CONFLICT (key) DO UPDATE SET value = '2'").run();
+  await assert.rejects(run("lifecycle_set", { kind: "person", id: w.ann.id, to: "leaving", reason: "left", decisions: [{ agent: HENRY, decision: "stop" }, { agent: SALES, decision: "stop" }] }, ctxOf(w)), (e: TbError) => e.code === "stop_cap_reached");
+});
+
+test("after an approved new key the owner reads that the agent must be connected: with the picture until a key shows, without it for a time", async () => {
+  const w = laterWorld();
+  const bob = store.setPerson(w.db, { name: "Bob" }, w.clock.t);
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  const plan = (await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: HENRY, decision: "transfer", newOwner: bob.id }] }, ctxOf(w))) as { plans: { id: string }[] };
+  const id = plan.plans[0]?.id as string;
+  await w.tick(id);
+  approveAndDeliver(w, String(w.plan(id).draft_key));
+  await w.tick(id);
+  const at = w.clock.t;
+  const row = (t: number, topology: unknown) => loadColleagues(w.db, t, topology as never).byId.get(`agent:${HENRY}`);
+  assert.match(row(at, null)?.findings.find((f) => f.code === "connect_again")?.text ?? "", /cannot see this/);
+  assert.equal(row(at + 15 * 86_400_000, null)?.findings.some((f) => f.code === "connect_again"), false, "with no picture it does not stay for ever");
+  const pic = (connections: unknown[]) => ({ truncated: false, edges: [], instances: [], connections });
+  assert.equal(row(at, pic([]))?.findings.find((f) => f.code === "connect_again")?.text, NEEDS_CONNECT);
+  assert.equal(row(at, pic([]))?.line, "No key: connect it in Portal");
+  assert.equal(row(at, pic([{ agt: HENRY, status: "active", con: "con_1" }]))?.findings.some((f) => f.code === "connect_again"), false, "a key is there again");
+});
+
+test("who is refused: an agent listed as refused or paused is not under keeps working", async () => {
+  const w = laterWorld();
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  set(w.db, "agent", HENRY, "suspended", {}, w.clock.t);
+  const out = (await run("refusals_get", {}, ctxOf(w))) as { keepWorking: { id: string }[]; alsoRefused: { id: string }[] };
+  assert.ok(out.alsoRefused.some((a) => a.id === HENRY));
+  assert.ok(!out.keepWorking.some((a) => a.id === HENRY));
+  assert.ok(out.keepWorking.some((a) => a.id === SALES));
+});
+
+test("a move of an agent on its way out is refused: a new plan would drop its removal", async () => {
+  const w = laterWorld();
+  const bob = store.setPerson(w.db, { name: "Bob" }, w.clock.t);
+  set(w.db, "agent", HENRY, "leaving", {}, w.clock.t);
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  await assert.rejects(run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: HENRY, decision: "transfer", newOwner: bob.id }] }, ctxOf(w)), (e: TbError) => e.code === "agent_closed");
 });

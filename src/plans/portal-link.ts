@@ -31,6 +31,7 @@ export const MAX_STEPS = 400;
 /** The Confirm screen's "Not changed" block (DESIGN-C380 §9, C381). On the screen, not only in docs. */
 export const NOT_CHANGED: readonly string[] = [
   "Their agents. Agents keep working when a person leaves, unless you choose Stop this agent for one.",
+  "A key to one of their agents that this person may hold. It works until you make a new key.",
   "Their own logins, such as Slack, Google or a bank.",
   "An agent's machine and its native tools.",
   "Copies of data that were already made.",

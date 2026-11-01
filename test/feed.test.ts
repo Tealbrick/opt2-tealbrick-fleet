@@ -554,14 +554,16 @@ test("migration 0002 on a 0.1.10-shaped database: old rows become trusted/owner/
   assert.throws(() => raw.exec("UPDATE fleet_review_policy SET value = 0"));
 
   // the app code works on the migrated old data, and the feed is valid
+  // the feed reads what later migrations add (C381: who may hold an agent's key). 0002 itself moved the revision to 18.
+  assert.equal(Number(raw.prepare("SELECT value FROM fleet_meta WHERE key = 'revision'").get()?.value), 18);
+  for (const m of migrationFiles().slice(2)) raw.exec(`BEGIN;\n${m.sql}\nCOMMIT;`);
   const db = dbOver(raw);
   const feed = directoryFeed(db, {});
   assert.equal(checkFeed(feed).ok, true, JSON.stringify(checkFeed(feed).errors));
   assert.equal(feed.unchanged, false);
   assert.equal(directoryFeed(db, { sinceRevision: 17 }).unchanged, false, "a reader with the old revision gets the full feed after the migration");
-  assert.equal(directoryFeed(db, { sinceRevision: 18 }).unchanged, true, "and the unchanged answer after it has pulled");
+  assert.equal(directoryFeed(db, { sinceRevision: feed.revision }).unchanged, true, "and the unchanged answer after it has pulled");
   if (!feed.unchanged) {
-    assert.equal(feed.revision, 18);
     assert.deepEqual(feed.contacts.find((c) => c.id === "psn_old1"), { id: "psn_old1", kind: "person", status: "active", trust: "trusted", handles: ["slack:UOLD0001"] });
     assert.deepEqual(feed.agents.find((a) => a.id === "agt_01J0000000000000000000000A"), { id: "agt_01J0000000000000000000000A", status: "active", trust: "trusted", owner: "psn_old1" });
   }

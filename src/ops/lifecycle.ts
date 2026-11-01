@@ -45,7 +45,7 @@ export const lifecycleOps = {
   [OP.colleaguesList]: op<ColleaguesListInput, ColleaguesListOutput>({
     async run(input, ctx) {
       assertOwner(ctx.caller);
-      return colleaguesList(ctx.db, input);
+      return colleaguesList(ctx.db, input, Date.now(), readTopology(ctx));
     },
   }),
   [OP.colleagueGet]: op<ColleagueGetInput, ColleagueGetOutput>({
@@ -79,12 +79,14 @@ export const lifecycleOps = {
           if (input.validFrom === undefined && input.validUntil === undefined) return;
           setDates(db, { kind: input.kind, id: input.id, ...(input.validFrom !== undefined ? { validFrom: input.validFrom } : {}), ...(input.validUntil !== undefined ? { validUntil: input.validUntil } : {}), confirmPastDate: input.confirmPastDate, confirmCount: input.confirmCount, noCap: stopping, actor }, now);
         };
-        const move = () => (input.to === undefined ? null : transition(db, { kind: input.kind, id: input.id, to: input.to, reason: input.reason ?? "other", note: input.note, actor, confirmCount: input.confirmCount, waive: input.waive, grants: input.to === "leaving" ? grantsOf(db, topology, input.kind, input.id) : [] }, now));
+        const move = (noCap = false) => (input.to === undefined ? null : transition(db, { kind: input.kind, id: input.id, to: input.to, reason: input.reason ?? "other", note: input.note, actor, confirmCount: input.confirmCount, waive: input.waive, noCap, grants: input.to === "leaving" ? grantsOf(db, topology, input.kind, input.id) : [] }, now));
         // One call passes the cap once. A stop goes first and counts for its dates and decisions. Otherwise the dates and decisions go first:
         // a resume can need a new end date, and a close needs the decisions. Stop decisions with no stop of their own pass the cap here.
         const stopping = input.to === "suspended" || input.to === "leaving";
         if (stopping) {
-          const out = move();
+          // C381: a person counts as one entry, so the agents stopped in this one call count here (N2-3).
+          assertCap(db, input.confirmCount, now, [`${input.kind}:${input.id}`, ...(input.decisions ?? []).map((d) => `agent:${d.agent}`)]);
+          const out = move(true);
           dates();
           decide();
           return out;

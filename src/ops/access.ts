@@ -33,7 +33,7 @@ export const accessOps = {
     async run(_input, ctx) {
       assertPerson(ctx.caller);
       const now = Date.now();
-      return findingsList(ctx.db, subjectsOf(loadColleagues(ctx.db, now).rows), portalReadState(readTopology(ctx)), now);
+      return findingsList(ctx.db, subjectsOf(loadColleagues(ctx.db, now, readTopology(ctx)).rows), portalReadState(readTopology(ctx)), now);
     },
   }),
   [OP.exceptionSet]: op<ExceptionSetInput, ExceptionSetOutput>({

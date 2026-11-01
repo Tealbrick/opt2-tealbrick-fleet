@@ -9,6 +9,7 @@ import { normalizeHandle } from "@opt2-tealbrick/manifest";
 import { type Db, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { feedEpoch } from "./lifecycle/events.ts";
 import { type Effective, effectiveAgent, effectivePerson, floorOf, type Lifecycle } from "./lifecycle/states.ts";
+import { ownerWithheld } from "./plans/guards.ts";
 import { type FeedRole, feedRoles } from "./roles/roles.ts";
 import { revision } from "./store.ts";
 import type { ContactKind, Trust } from "./trust.ts";
@@ -194,6 +195,7 @@ export function directoryFeed(db: Db, input: FeedInput, warn?: Warn): DirectoryF
 
   const agents: FeedAgent[] = [];
   const agentIds = new Set<string>();
+  const withheld = ownerWithheld(db);
   for (const a of db
     // C380: a reader drops a floor entry when its row leaves a full feed, so a stopped or blocked agent stays listed after its card is gone
     .prepare(`SELECT id, status, trust, owner_id${lifecycle ? ", lifecycle, valid_from, migrated_note" : ""} FROM fleet_agents WHERE status <> 'removed' OR id IN (SELECT subject_id FROM fleet_members WHERE kind = 'agent')${lifecycle ? " OR trust = 'blocked' OR (lifecycle IN ('suspended', 'leaving', 'archived') AND migrated_note IS NULL)" : ""} ORDER BY id`)
@@ -205,7 +207,7 @@ export function directoryFeed(db: Db, input: FeedInput, warn?: Warn): DirectoryF
     }
     agentIds.add(id);
     const owner = a.owner_id === null ? null : String(a.owner_id);
-    const agent: FeedAgent = { id, status: a.status as FeedAgent["status"], trust: a.trust as Trust, owner: owner !== null && contactIds.has(owner) ? owner : null };
+    const agent: FeedAgent = { id, status: a.status as FeedAgent["status"], trust: a.trust as Trust, owner: owner !== null && contactIds.has(owner) && !withheld.has(id) ? owner : null };
     if (agentHandles) {
       const list: string[] = [];
       for (const h of agentHandles.get(id) ?? []) {

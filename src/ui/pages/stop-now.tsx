@@ -83,7 +83,7 @@ export function StopNow({ subject, portalHref, onClose, onChanged }: { subject: 
               {failure.message}
             </Notice>
           ) : null}
-          <p className="tb-soft">{subject.kind === "agent" ? "Governance records this now. The agent is paused only when you approve in Portal. Scheduled posts due while it is paused are cancelled, not moved." : "Governance records this now, for this person only. Rules refuses calls by, for and to this person, if its hook is on. Their agents keep working. Their employment and their own logins do not change."}</p>
+          <p className="tb-soft">{subject.kind === "agent" ? "Governance records this now. The agent is paused only when you approve in Portal. Scheduled posts due while it is paused are cancelled, not moved." : "Governance records this now, for this person only. Rules refuses calls by, for and to this person, if its hook is on. Their messages can still reach agents: to bar them, use Mark as leaving. Their agents keep working. Their employment and their own logins do not change."}</p>
           <Field label="Reason">
             <Select placeholder="Choose a reason" options={reasonOptions("suspended")} value={reason} onValueChange={(v) => {
                 setReason(v as Reason);

@@ -33,6 +33,8 @@ export function applyDecisions(db: Db, s: Subject, decisions: readonly AgentDeci
       continue;
     }
     if (a.lifecycle === "archived") fail("agent_closed", "This agent is closed. It cannot move to a new owner.", 409);
+    // A new plan replaces the old draft: a move of an agent on its way out would drop that removal with no word.
+    if (a.lifecycle === "leaving") fail("agent_closed", "This agent is being stopped and removed. Undo that first.", 409);
     if (!d.newOwner) fail("input_invalid", "Name the new owner.", 400);
     if (d.newOwner === a.owner_id) fail("input_invalid", "Name a new owner. This is the owner now.", 400);
     setAgentMoved(db, { agent: d.agent, owner: d.newOwner as string }, { kind: "owner", id: actor.id }, now);

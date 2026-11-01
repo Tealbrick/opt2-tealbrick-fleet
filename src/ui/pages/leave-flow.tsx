@@ -6,7 +6,7 @@ import { Field, type FlowStep, Notice, Select, StepFlow, Textarea } from "@opt2-
 import { useRef, useState } from "react";
 import type { ColleagueGetOutput, LifecycleSetInput, LifecycleSetOutput, PlanSendInput } from "#kit";
 import { changeError } from "../common.tsx";
-import { type Choices, canChoose, choiceSummary, choicesReady, decisionsOf, newKeyEffect, stoppingOf } from "./agent-choice.ts";
+import { type Choices, canChoose, choiceOf, choiceSummary, choicesReady, decisionsOf, newKeyEffect, stoppingOf } from "./agent-choice.ts";
 import { AgentChoices, defaultsOf, useOwners } from "./agent-choices.tsx";
 import { capButton, useCapConfirm } from "./cap-confirm.ts";
 import { FEATURES } from "./features.ts";
@@ -97,7 +97,7 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
       canNext: Boolean(reason) && choicesReady(agents, choices, defaults, canMove),
       render: () => (
         <div className="tb-stack">
-          <p className="tb-soft">{person ? `This bars ${c.name} from your agents and ends their own access in Teal Brick. ${agents.length > 0 ? "Their agents keep working: choose a new owner for each. " : ""}It does not end their employment or their own logins.` : `This marks ${c.name} to stop, and lists what to do in Portal to stop it and remove its access in Teal Brick.`}</p>
+          <p className="tb-soft">{person ? `This marks ${c.name} as leaving. Rules refuses calls by, for and to them, if its hook is on. Messages from their handles are barred in Connect. What they hold in your apps ends. ${agents.length > 0 ? "Their agents keep working: choose a new owner for each. " : ""}It does not end their employment or their own logins.` : `This marks ${c.name} to stop, and lists what to do in Portal to stop it and remove its access in Teal Brick.`}</p>
           <Field label="Reason">
             <Select placeholder="Choose a reason" disabled={Boolean(mark.current)} options={reasonOptions("leaving")} value={reason} onValueChange={(v) => { setReason(v as Reason); cap.clear(); }} />
           </Field>
@@ -145,6 +145,19 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
               </div>
             ) : null}
           </dl>
+          {agents.length > 0 && FEATURES.plans ? (
+            <ul className="ready" aria-label="What happens to each agent">
+              {agents.map((a) => {
+                const ch = choiceOf(choices, a.id, defaults, canMove);
+                return (
+                  <li key={a.id}>
+                    <span>{a.name}</span>
+                    <span className="tb-hint">{ch.choice === "stop" ? "Stops when you approve in Portal" : ch.choice === "later" ? "Keeps running, needs an owner" : `Moves to ${owners?.find((o) => o.value === ch.newOwner)?.label ?? "the new owner"}${ch.newKey ? ", with a new key" : ""}`}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
           {key ? <Notice tone="needs-you">{key}</Notice> : null}
           <Notice tone={beforeChangeTone(c.floor)}>{beforeChangeText(c.floor, c.kind)}</Notice>
           <NotChanged />

@@ -41,8 +41,8 @@ export function RefusalsPage() {
         <>
           <Notice tone={data.rules.state === "reads" ? "live" : "neutral"} role="status">{`${data.rules.text} Read ${when(data.generatedAt)}.`}</Notice>
           <section className="tb-stack" aria-label="Starts to refuse with this update">
-            <h2 className="sub-head">{`Starts to refuse with this update: ${data.startsTotal}`}</h2>
-            <p className="tb-soft">Before this version these entries were only a record. With Rules & Approvals 0.7 and its hook on, nobody can act by, for or to them. Read this list before you update Rules & Approvals. To lift an entry, open it and bring it back, or record a new review.</p>
+            <h2 className="sub-head">{`${data.rules.state === "reads" ? "Refused since this update" : "Starts to refuse with this update"}: ${data.startsTotal}`}</h2>
+            <p className="tb-soft">Before this version these entries were only a record. With Rules & Approvals 0.7 and its hook on, nobody can act by, for or to them. Read this list before you update Rules & Approvals. To lift an entry, open it: Undo for a person, a new review for a blocked entry.</p>
             {data.startsTotal === 0 ? <EmptyState title="Nothing starts to refuse.">No entry is blocked, and nobody was marked as departed before this update.</EmptyState> : <Items items={data.startsWithUpdate} total={data.startsTotal} />}
           </section>
           <section className="tb-stack" aria-label="Keep working">
@@ -55,7 +55,7 @@ export function RefusalsPage() {
                 {data.keepWorking.map((a) => (
                   <li key={a.id}>
                     <TextLink href={subjectHref("agent", a.id)}>{a.name}</TextLink>
-                    <span className="tb-hint">{a.owner ? `Owner ${a.owner} is not active.` : "No owner."}</span>
+                    <span className="tb-hint">{`${a.owner ? `Owner ${a.owner} is not active.` : "No owner."}${a.paused ? " Paused in Portal: it stays paused until you resume it." : ""}`}</span>
                   </li>
                 ))}
               </ul>

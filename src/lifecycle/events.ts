@@ -149,6 +149,15 @@ export function feedEpoch(db: Db, now = Date.now()): string {
   return String(db.prepare("SELECT value FROM fleet_settings WHERE key = 'feed_epoch'").get()?.value);
 }
 
+/** C381: once, through the chain, where a record exists: the rule of an owner's state changed. A new install has nothing to correct. */
+export function noteOwnerRule(db: Db, now: number): void {
+  if (db.prepare("SELECT 1 FROM fleet_settings WHERE key = 'owner_rule_noted'").get()) return;
+  db.transaction(() => {
+    if (db.prepare("SELECT 1 FROM fleet_lifecycle_events LIMIT 1").get()) appendEvent(db, { subject: { kind: "workspace", id: "", name: "Governance" }, kind: "migrated", actor: { kind: "system", id: null }, note: "From this version an owner's change no longer stops the owner's agents. Agents keep working, and a finding says when an agent needs an owner.", at: now });
+    db.prepare("INSERT INTO fleet_settings (key, value) VALUES ('owner_rule_noted', '1') ON CONFLICT (key) DO NOTHING").run();
+  });
+}
+
 /**
  * A restore brings back an older file and drops later rows. The SDK marks the archive in tb_meta (`restore_applied`). When that mark
  * is new, this writes one `restored` row at boot, so the record says that rows can be missing.

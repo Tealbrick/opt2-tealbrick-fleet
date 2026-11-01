@@ -987,7 +987,7 @@ test("D2 review: a transfer to the current owner is refused; a plan with no Core
   await w.tick(out.plans[0].id);
   const view = (await run("plan_get", { plan: out.plans[0].id }, ctxOf(w))).plans[0];
   assert.match(view.note, /2 agents you stopped stay paused with the key/);
-  assert.doesNotMatch(view.headline, /^Done/);
+  assert.match(view.headline, /Nothing waits for you in Portal/);
 
   // only an entry new in this window needs the confirm: the owner stopped an hour ago, two others just now, the cap is 2
   const v = makeWorld();
@@ -1368,7 +1368,7 @@ test("N2-2: after a Governance that went back, the page says what Rules still ho
   assert.equal(floorView(read, 1, 0, false).rulesHolds, null);
 });
 
-test("the owed new key: from a plan that ended too; not for a closed or removed card, which must not block the entry", async () => {
+test("the owed new key: a key the owner rejected does not come back by a later draft, the finding says it is owed; a replaced plan carries it; not for a closed or removed card", async () => {
   const w = makeWorld();
   const bob = store.setPerson(w.db, { name: "Bob" }, w.clock.t);
   set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
@@ -1379,7 +1379,9 @@ test("the owed new key: from a plan that ended too; not for a closed or removed 
   assert.equal(w.plan(first).state, "rejected");
   const next = (await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: SALES, decision: "stop" }] }, ctxOf(w))).plans[0].id;
   await w.tick(next);
-  assert.deepEqual(w.core.open()[0]?.steps.map((s) => `${s.opId} ${s.agt}`).sort(), [`agents.offboard ${SALES}`, `agents.rotate ${HENRY}`].sort());
+  assert.deepEqual(w.core.open()[0]?.steps.map((s) => `${s.opId} ${s.agt}`), [`agents.offboard ${SALES}`], "the rejected key is not in the new draft");
+  const { loadColleagues } = await import("../src/lifecycle/view.ts");
+  assert.ok(loadColleagues(w.db, w.clock.t).byId.get(`agent:${HENRY}`)?.findings.some((f) => f.code === "key_after_transfer"), "the finding stays");
   // the card is gone: the entry can still make a plan, and no step names it
   await run("plan_cancel", { plan: next }, ctxOf(w));
   w.db.prepare("UPDATE fleet_agents SET status = 'removed' WHERE id = ?").run(HENRY);

@@ -7,14 +7,29 @@ const OPEN = OPEN_PLAN_STATES.map((s) => `'${s}'`).join(", ");
 /** T7: an open plan means a step is not final. Core's steps of an agent in a person's plan count for the person. */
 export const hasOpenPlan = (db: Db, kind: string, id: string): boolean => !!db.prepare(`SELECT 1 FROM fleet_plans WHERE subject_kind = ? AND subject_id = ? AND state IN (${OPEN}) LIMIT 1`).get(kind, id);
 
-/** T6: "No plan applied". Core says it applied a draft of this subject, and that is the last thing anyone proved. */
-export const hasAppliedStop = (db: Db, kind: string, id: string): boolean =>
-  !!db
+/**
+ * T6: "No plan applied". Core says it applied a draft of this subject, and that is the last thing anyone proved. C381: a stop of an agent can sit in its owner's plan (Stop this agent),
+ * so for an agent an offboard step of any plan counts, since this stop began. A new key does not: it stops nothing.
+ */
+export function hasAppliedStop(db: Db, kind: string, id: string, since = 0): boolean {
+  const own = db
     .prepare(
       `SELECT 1 FROM fleet_plans p WHERE p.subject_kind = ? AND p.subject_id = ?
          AND (p.draft_state IN ('applying', 'applied') OR EXISTS (SELECT 1 FROM fleet_plan_steps s WHERE s.plan_id = p.id AND s.phase = 'core' AND (s.output_json IS NOT NULL OR (s.op <> 'agents.pause' AND s.state IN ('done', 'reported', 'not_provable'))))) LIMIT 1`,
     )
     .get(kind, id);
+  if (own || kind !== "agent") return !!own;
+  return !!db
+    .prepare(
+      `SELECT 1 FROM fleet_plan_steps s JOIN fleet_plans p ON p.id = s.plan_id WHERE s.agent_id = ? AND s.op = 'agents.offboard' AND s.updated_at >= ?
+         AND (p.draft_state IN ('applying', 'applied') OR s.output_json IS NOT NULL OR s.state IN ('done', 'reported', 'not_provable')) LIMIT 1`,
+    )
+    .get(id, since);
+}
+
+/** T4, T6 (C381): this agent's stop waits in an open plan of its owner. Undoing the agent here would leave that draft standing, and an approval would still remove it. */
+export const stopInOwnersPlan = (db: Db, agentId: string): boolean =>
+  !!db.prepare(`SELECT 1 FROM fleet_plan_steps s JOIN fleet_plans p ON p.id = s.plan_id WHERE s.agent_id = ? AND s.phase = 'core' AND s.op IN ('agents.pause', 'agents.offboard') AND p.subject_kind <> 'agent' AND p.state IN (${OPEN}) LIMIT 1`).get(agentId);
 
 /** T7: the last plan of this entry did not finish, and nobody said why. Close needs a new plan or a named reason. */
 export function lastPlanUnfinished(db: Db, kind: string, id: string): boolean {
@@ -85,18 +100,77 @@ export function senderBarOpen(db: Db, personId: string): boolean {
   return !!open;
 }
 
+/** C381: the agents Core has been asked for a new key, not done yet. A second request could remove the key the owner connects next. */
+export const newKeyAsked = (db: Db): Set<string> =>
+  new Set(db.prepare(`SELECT DISTINCT s.agent_id AS id FROM fleet_plan_steps s JOIN fleet_plans p ON p.id = s.plan_id WHERE s.op = 'agents.rotate' AND s.state NOT IN ('done', 'reported', 'cancelled') AND p.state IN (${OPEN})`).all().map((r) => String(r.id)));
+
+/** When Core last replaced each agent's key, for "connect it again". */
+export const keyReplacedAt = (db: Db): Map<string, number> =>
+  new Map(db.prepare("SELECT s.agent_id AS id, MAX(s.updated_at) AS at FROM fleet_plan_steps s WHERE s.phase = 'core' AND s.op = 'agents.rotate' AND s.state IN ('done', 'reported') GROUP BY s.agent_id").all().map((r) => [String(r.id), Number(r.at)]));
+
+/**
+ * C381 (security S1): owner changes away from someone who is not active now, oldest first. That person may hold the key until Core replaces it.
+ * A move does not hand them the new owner: see `ownerShownToApps`. One query for the whole directory.
+ */
+function movesFromInactive(db: Db): { agent: string; at: number; before: string; lifecycle: string | null; name: string | null }[] {
+  return db
+    .prepare(
+      `SELECT e.subject_id AS agent, e.at, json_extract(e.snapshot_json, '$.before') AS before, p.lifecycle, p.name FROM fleet_lifecycle_events e
+       LEFT JOIN fleet_people p ON p.id = json_extract(e.snapshot_json, '$.before')
+       WHERE e.kind = 'moved' AND e.subject_kind = 'agent' AND e.note LIKE 'Owner changed from %' AND json_extract(e.snapshot_json, '$.before') IS NOT NULL AND COALESCE(p.lifecycle, 'gone') <> 'active' ORDER BY e.seq`,
+    )
+    .all()
+    .map((r) => ({ agent: String(r.agent), at: Number(r.at), before: String(r.before), lifecycle: r.lifecycle === null || r.lifecycle === undefined ? null : String(r.lifecycle), name: r.name === null || r.name === undefined ? null : String(r.name) }));
+}
+
+/**
+ * The agents an old key may still run while the new owner is on record. Apps get no owner for them: Knowledge gives an agent read and write on its owner's personal area, and a leaver with the old key must not get that.
+ * Ends when Core replaced the key. The agent keeps working, with its own and company areas.
+ */
+export function ownerWithheld(db: Db): Set<string> {
+  const gone = keyEndedAt(db);
+  return new Set(movesFromInactive(db).filter((m) => (gone.get(m.agent) ?? -1) < m.at).map((m) => m.agent));
+}
+
+/** The same for one agent, for the context hook on each call: it reads only this agent's rows. */
+export function ownerWithheldFor(db: Db, agent: string): boolean {
+  // The index on the events first: most agents never moved, and they read no plan step.
+  const last = db
+    .prepare(
+      `SELECT MAX(e.at) AS at FROM fleet_lifecycle_events e LEFT JOIN fleet_people p ON p.id = json_extract(e.snapshot_json, '$.before')
+       WHERE e.subject_kind = 'agent' AND e.subject_id = ? AND e.kind = 'moved' AND e.note LIKE 'Owner changed from %' AND json_extract(e.snapshot_json, '$.before') IS NOT NULL AND COALESCE(p.lifecycle, 'gone') <> 'active'`,
+    )
+    .get(agent)?.at;
+  if (last === null || last === undefined) return false;
+  const gone = db.prepare(`SELECT MAX(s.updated_at) AS at FROM fleet_plan_steps s WHERE s.agent_id = ? AND ${KEY_STEP}`).get(agent)?.at;
+  return gone === null || gone === undefined || Number(gone) < Number(last);
+}
+
+/**
+ * S2-8: what an agent may read about an owner. While the person is only stopped or leaving, an agent reads the old owner: a default move at the mark must not tell every agent who is leaving before that person knows.
+ * From a close on, `departed` is public, and the new owner shows.
+ */
+export function ownerShownToAgents(db: Db): Map<string, { id: string; name: string }> {
+  const out = new Map<string, { id: string; name: string }>();
+  for (const m of movesFromInactive(db)) if ((m.lifecycle === "suspended" || m.lifecycle === "leaving") && m.name !== null) out.set(m.agent, { id: m.before, name: m.name });
+  return out;
+}
+
 /** The last owner change of each agent that had an owner before it. From the record: the `moved` event of `setAgentMoved`. */
 export function ownerChangedAt(db: Db): Map<string, number> {
   const rows = db.prepare("SELECT subject_id AS id, MAX(at) AS at FROM fleet_lifecycle_events WHERE kind = 'moved' AND subject_kind = 'agent' AND note LIKE 'Owner changed from %' AND json_extract(snapshot_json, '$.before') IS NOT NULL GROUP BY subject_id").all();
   return new Map(rows.map((r) => [String(r.id), Number(r.at)]));
 }
 
-/** Agents this entry's plans asked a new key for, and Core never replaced, still working cards. A closed or removed card has no key to replace, and must not block a new plan. */
+/**
+ * Agents this entry's plans asked a new key for, and Core never replaced, still working cards. A closed or removed card has no key to replace, and must not block a new plan.
+ * Only from a plan a new one takes over (open now, or `replaced`). C381: a key the owner cancelled or rejected, or a request that ran out, comes back by no draft: the finding says it is owed.
+ */
 export function owedRotations(db: Db, kind: string, id: string): string[] {
   const rows = db
     .prepare(
       `SELECT DISTINCT s.agent_id AS id FROM fleet_plan_steps s JOIN fleet_plans p ON p.id = s.plan_id JOIN fleet_agents a ON a.id = s.agent_id
-       WHERE p.subject_kind = ? AND p.subject_id = ? AND s.op = 'agents.rotate' AND a.status <> 'removed' AND a.lifecycle <> 'archived'
+       WHERE p.subject_kind = ? AND p.subject_id = ? AND s.op = 'agents.rotate' AND a.status <> 'removed' AND a.lifecycle <> 'archived' AND p.state IN (${OPEN}, 'replaced')
          AND NOT EXISTS (SELECT 1 FROM fleet_plan_steps d WHERE d.agent_id = s.agent_id AND d.op IN ('agents.rotate', 'agents.offboard') AND d.state IN ('done', 'reported'))`,
     )
     .all(kind, id);

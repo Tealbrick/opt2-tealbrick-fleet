@@ -131,8 +131,9 @@ describe("words before a change", () => {
   it("the first line says that agents keep working; an agent's own block has no such line (C381)", () => {
     assert.match(NOT_CHANGED[0] ?? "", /^Their agents\. Agents keep working when a person leaves/);
     assert.deepEqual([...notChangedOf("person")], [...NOT_CHANGED]);
-    assert.deepEqual([...notChangedOf("agent")], NOT_CHANGED.slice(1));
-    assert.ok(notChangedOf("agent").every((t) => !/^Their agents\./.test(t)));
+    assert.deepEqual([...notChangedOf("agent")], NOT_CHANGED.slice(2));
+    assert.match(NOT_CHANGED[1] ?? "", /key/);
+    assert.ok(notChangedOf("agent").every((t) => !/^Their agents\./.test(t) && !/this person may hold/.test(t)));
   });
   it("the Not changed block names the owner's limits", () => {
     assert.ok(NOT_CHANGED.some((t) => /own logins/.test(t)));
@@ -151,7 +152,7 @@ describe("words before and after a person's change (C381)", () => {
     }
   });
   it("without Rules working, the sender bar in Connect is what still holds; with Rules, the refusal is by, for and to the person", () => {
-    for (const state of ["not_installed", "older", "not_read"] as const) assert.match(beforeChangeText({ state }, "person"), /sender bar in Connect still drops their messages/);
+    for (const state of ["not_installed", "older", "not_read"] as const) assert.match(beforeChangeText({ state }, "person"), /If they have handles in the directory, the sender bar in Connect drops their messages/);
     for (const state of ["confirmed", "not_confirmed"] as const) assert.match(beforeChangeText({ state }, "person"), /calls by, for and to this person are refused/);
   });
   it("an agent's words are the old ones by default", () => {

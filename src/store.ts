@@ -7,6 +7,7 @@ import { handleChannel, normalizeHandle, ulid } from "@opt2-tealbrick/manifest";
 import type { Db, SliceAgent } from "@opt2-tealbrick/miniapp-sdk";
 import { beforePersonDelete, initPerson, kindChanged, setDates, statusRequested } from "./lifecycle/transitions.ts";
 import { bump, fail, revision } from "./meta.ts";
+import { ownerWithheldFor } from "./plans/guards.ts";
 import { endAssignmentsOf } from "./roles/roles.ts";
 import { cleanText } from "./text.ts";
 import { type ContactKind, defaultTrust, NEW_AGENT_TRUST, type Source, type Trust } from "./trust.ts";
@@ -527,7 +528,8 @@ export function syncAgents(db: Db, agents: readonly Pick<SliceAgent, "id" | "nam
 export function agentFacts(db: Db, id: string): { owner: Ref | null; teams: TeamRef[] } {
   const r = db.prepare(`${AGENT_SELECT} WHERE a.id = ? AND a.status <> 'removed'`).get(id);
   if (!r) return { owner: null, teams: [] };
-  return { owner: r.owner_id === null ? null : { id: String(r.owner_id), name: String(r.owner_name) }, teams: r.trust === "blocked" ? [] : teamsOf(db, "agent", id).slice(0, MAX_TEAMS_PER_ANSWER) };
+  // C381: an old key may run this agent, so no app reads the new owner as its owner yet.
+  return { owner: r.owner_id === null || ownerWithheldFor(db, id) ? null : { id: String(r.owner_id), name: String(r.owner_name) }, teams: r.trust === "blocked" ? [] : teamsOf(db, "agent", id).slice(0, MAX_TEAMS_PER_ANSWER) };
 }
 
 /** The trust of a workspace agent that is not removed; null for an unknown or removed agent. */

@@ -7,7 +7,7 @@
 import { canonicalize } from "@opt2-tealbrick/manifest";
 import { type Db, type Json, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { bump, fail, revision } from "../meta.ts";
-import { hasAppliedStop, hasOpenPlan, lastPlanUnfinished, senderBarOpen, unnamedAccounts } from "../plans/guards.ts";
+import { hasAppliedStop, hasOpenPlan, lastPlanUnfinished, senderBarOpen, stopInOwnersPlan, unnamedAccounts } from "../plans/guards.ts";
 import { endAssignmentsOf } from "../roles/roles.ts";
 import { cleanText } from "../text.ts";
 import type { Trust } from "../trust.ts";
@@ -106,7 +106,8 @@ export function guardOf(db: Db, s: Subject, to: Lifecycle, opts: { waive?: strin
   }
   if (!NEXT[s.lifecycle].includes(to)) return no("transition_not_allowed", `It cannot move from ${s.lifecycle} to ${to}.`);
   // T6: an applied stop of an agent is not undone by a word here. Bring it back (T6b): grants do not restore. C381: a person's plan acts on agents the owner chose; undoing the person's mark changes none of them.
-  if (to === "active" && s.lifecycle === "leaving" && s.kind === "agent" && hasAppliedStop(db, s.kind, s.id)) return no("plan_applied", "You approved this stop in Portal. Use Bring back: grants do not come back by themselves.");
+  if (to === "active" && s.lifecycle === "leaving" && s.kind === "agent" && hasAppliedStop(db, s.kind, s.id, s.at)) return no("plan_applied", "You approved this stop in Portal. Use Bring back: grants do not come back by themselves.");
+  if ((to === "active" || to === "proposed") && s.kind === "agent" && stopInOwnersPlan(db, s.id)) return no("plan_open", "A plan on its owner's page holds this stop. Cancel that plan first.");
   if (to === "active") {
     if (s.trust === "blocked") return no("trust_blocked", "It is blocked. Record a new review first.");
     // T2 records a review, and a review names who answers for the agent. C381: a resume (T4, T6) is not tied to the owner: an agent with no active owner has a finding, it is not refused.
@@ -127,7 +128,7 @@ export function guardOf(db: Db, s: Subject, to: Lifecycle, opts: { waive?: strin
       const unnamed = unnamedAccounts(db, s.id, now);
       if (unnamed > 0) return no("unlinked_accounts", `${unnamed} accounts in Connect have no person. Check them. If none is this person's, accept that with a reason.`);
       const open = agentsStillOwned(db, s.id);
-      if (open.length > 0) return no("agents_undecided", `Name a new owner for these agents first, or stop them: ${open.slice(0, 5).join(", ")}${open.length > 5 ? ` and ${open.length - 5} more` : ""}.`);
+      if (open.length > 0) return no("agents_undecided", `Name a new owner for these agents first, or stop them. Add the person to the directory first if they are not there: ${open.slice(0, 5).join(", ")}${open.length > 5 ? ` and ${open.length - 5} more` : ""}.`);
       const running = stillRunning(db, s.id);
       if (running.length > 0) return no("plan_open", `These agents still run. Pause them in Portal first: ${running.slice(0, 5).join(", ")}${running.length > 5 ? ` and ${running.length - 5} more` : ""}.`);
     }

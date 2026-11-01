@@ -29,7 +29,7 @@ test("a firing: nothing stops at the app until the owner approves; done only aft
   // asked, never named: the draft says nothing about who or why
   const d = w.core.open()[0];
   assert.ok(d);
-  assert.equal(d.title, "Governance: stop request");
+  assert.equal(d.title, "Governance: request for your approval");
   assert.deepEqual(d.steps, [{ opId: "agents.offboard", agt: HENRY }]);
   assert.equal(w.plan(id).state, "waiting");
   assert.equal(w.connect.data.handled.length, 0, "no app step before the approval");
@@ -864,7 +864,7 @@ test("system plan alert: once with an Inbox; banner with none; a restart with an
   leave(v);
   const pid = v.makePlan({ kind: "agent", id: HENRY, actor: { kind: "system", id: null } });
   await v.tick(pid);
-  assert.deepEqual(bannerAlerts(v.db).map((b) => b.text), ["A stop request waits for your approval. No message was sent."]);
+  assert.deepEqual(bannerAlerts(v.db).map((b) => b.text), ["A request waits for your approval. No message was sent."]);
 });
 
 test("Portal stopped mid-way: `applying` for 30 minutes is said; no store step runs", async () => {

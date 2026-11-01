@@ -5,9 +5,9 @@ import type { ColleagueGetOutput, ColleaguesListOutput, SummaryGetOutput } from 
 import { readStates } from "../access/client.ts";
 import { ACCESS_AFTER_LEAVE, accessAfterLeave, openDifferences } from "../access/differences.ts";
 import { type AccessTarget, TARGET_NAMES } from "../access/items.ts";
-import { type Finding, findingsOf, KEY_STILL_EXISTS } from "../findings.ts";
+import { CONNECT_UNSEEN_MS, type Finding, findingsOf, KEY_STILL_EXISTS, stampFinding } from "../findings.ts";
 import { fail, revision } from "../meta.ts";
-import { keyEndedAt, latestPlanStates, ownerChangedAt, senderBarOpen, unnamedAccounts } from "../plans/guards.ts";
+import { keyEndedAt, keyReplacedAt, latestPlanStates, newKeyAsked, ownerChangedAt, senderBarOpen, unnamedAccounts } from "../plans/guards.ts";
 import { type PlanAgent, portalPlan } from "../plans/portal-link.ts";
 import { exclusionFindings } from "../roles/exclusions.ts";
 import { cleanTopology, type DecodedTopology, decodeTopology } from "../topology-slice.ts";
@@ -26,13 +26,14 @@ const isoOf = (ms: unknown): string | null => (ms === null || ms === undefined ?
 const runtimeOf = (status: unknown): "running" | "paused" | "gone" => (status === "active" ? "running" : status === "paused" ? "paused" : "gone");
 
 /** One line, no pills: the three axes in plain words. */
-function lineOf(kind: SubjectKind, lifecycle: Lifecycle, effective: Effective, runtime: Row["runtime"], validFrom: unknown, keyEnded = false): string {
+function lineOf(kind: SubjectKind, lifecycle: Lifecycle, effective: Effective, runtime: Row["runtime"], validFrom: unknown, keyEnded = false, needsConnect = false): string {
   if (effective === "not_started") return `Starts on ${String(isoOf(validFrom)).slice(0, 10)}`;
   if (kind === "person") {
-    return { proposed: "New, not reviewed", active: "Active", suspended: "Access stopped", leaving: "Leaving", archived: "Closed" }[effective];
+    return { proposed: "New, not reviewed", active: "Active", suspended: "Stop of access asked", leaving: "Leaving", archived: "Closed" }[effective];
   }
   if (runtime === "gone") return lifecycle === "archived" ? "Closed" : "Not listed in Portal";
   if (lifecycle === "archived") return "Closed, but Portal lists it again";
+  if (runtime === "running" && needsConnect && (effective === "active" || effective === "proposed")) return "No key: connect it in Portal";
   if (effective === "proposed") return runtime === "running" ? "New: working, not reviewed" : "New, not reviewed: paused";
   if (effective === "active") return runtime === "running" ? "Working" : "Paused in Portal";
   const word = effective === "leaving" ? "Stop and remove" : "Stop";
@@ -44,13 +45,19 @@ interface Loaded {
   byId: Map<string, Row>;
 }
 
+/** Agents with a working key, from the owner's picture. Null when that picture is not there or is cut: then Governance cannot see it. */
+const keysSeen = (topology: DecodedTopology | null | undefined): ReadonlySet<string> | null => (!topology || topology.truncated ? null : new Set(topology.connections.filter((c) => c.status === "active").map((c) => c.agt)));
+
 /** Every person and workspace agent, sorted by name. Outside agents have no lifecycle and are not listed. */
-export function loadColleagues(db: Db, now: number): Loaded {
+export function loadColleagues(db: Db, now: number, topology?: DecodedTopology | null): Loaded {
   const conflicts = new Set(db.prepare("SELECT DISTINCT h.agent_id FROM fleet_agent_handles h JOIN fleet_handles p ON p.handle = h.handle").all().map((r) => String(r.agent_id)));
   const plans = latestPlanStates(db);
   const keysGone = keyEndedAt(db);
   const moved = ownerChangedAt(db);
-  const owners = new Map<string, { name: string; lifecycle: string | null }>();
+  const replaced = keyReplacedAt(db);
+  const seen = keysSeen(topology);
+  const handled = new Set(db.prepare("SELECT DISTINCT person_id FROM fleet_handles").all().map((r) => String(r.person_id)));
+  const owners = new Map<string, { name: string; lifecycle: string | null; at: number }>();
   const rows: Row[] = [];
   const person = (p: Db_): Row => {
     const lifecycle = p.lifecycle as Lifecycle;
@@ -65,14 +72,14 @@ export function loadColleagues(db: Db, now: number): Loaded {
       trust: p.trust as Trust,
       owner: null,
       line: lineOf("person", lifecycle, effective, null, p.valid_from),
-      findings: findingsOf({ kind: "person", lifecycle, effective, runtime: null, hasOwner: false, ownerLifecycle: null, reason: p.lifecycle_reason === null ? null : String(p.lifecycle_reason), at: Number(p.lifecycle_at), validUntil: p.valid_until === null ? null : Number(p.valid_until), noCard: false, handleConflict: false, senderBarOpen: lifecycle === "leaving" && senderBarOpen(db, String(p.id)), planState: plans.get(`person:${String(p.id)}`) ?? null, unnamedAccounts: lifecycle === "leaving" ? unnamedAccounts(db, String(p.id), now) : 0 }, now),
+      findings: findingsOf({ kind: "person", lifecycle, effective, runtime: null, hasOwner: false, ownerLifecycle: null, reason: p.lifecycle_reason === null ? null : String(p.lifecycle_reason), at: Number(p.lifecycle_at), validUntil: p.valid_until === null ? null : Number(p.valid_until), noCard: false, handleConflict: false, noHandleToBar: lifecycle === "leaving" && !handled.has(String(p.id)), senderBarOpen: lifecycle === "leaving" && senderBarOpen(db, String(p.id)), planState: plans.get(`person:${String(p.id)}`) ?? null, unnamedAccounts: lifecycle === "leaving" ? unnamedAccounts(db, String(p.id), now) : 0 }, now),
       validFrom: isoOf(p.valid_from),
       validUntil: isoOf(p.valid_until),
       at: isoOf(p.lifecycle_at),
     };
   };
   for (const p of db.prepare("SELECT id, name, kind, lifecycle, lifecycle_reason, lifecycle_at, valid_from, valid_until, trust FROM fleet_people").all()) {
-    owners.set(String(p.id), { name: String(p.name), lifecycle: p.lifecycle === null ? null : String(p.lifecycle) });
+    owners.set(String(p.id), { name: String(p.name), lifecycle: p.lifecycle === null ? null : String(p.lifecycle), at: Number(p.lifecycle_at) });
     if (p.kind === "person" && p.lifecycle !== null) rows.push(person(p));
   }
   for (const a of db.prepare("SELECT id, name, status, trust, owner_id, lifecycle, lifecycle_reason, lifecycle_at, valid_from, valid_until, migrated_note FROM fleet_agents").all()) {
@@ -82,10 +89,15 @@ export function loadColleagues(db: Db, now: number): Loaded {
     const runtime = runtimeOf(a.status);
     // Only after this stop began: an agent brought back has a new key.
     const keyEnded = (keysGone.get(String(a.id)) ?? -1) >= Number(a.lifecycle_at);
+    const rotated = replaced.get(String(a.id));
+    const needsConnect = rotated === undefined || runtime === "gone" || lifecycle === "archived" || lifecycle === "leaving" ? null : seen ? (seen.has(String(a.id)) ? null : "yes") : rotated + CONNECT_UNSEEN_MS > now ? "not_seen" : null;
     const findings = findingsOf(
-      { kind: "agent", lifecycle, effective, runtime, hasOwner: owner !== undefined, ownerLifecycle: owner?.lifecycle ?? null, reason: a.lifecycle_reason === null ? null : String(a.lifecycle_reason), at: Number(a.lifecycle_at), validUntil: a.valid_until === null ? null : Number(a.valid_until), noCard: a.migrated_note === "no_card", handleConflict: conflicts.has(String(a.id)), planState: plans.get(`agent:${String(a.id)}`) ?? null, keyEnded, keyAfterTransfer: moved.has(String(a.id)) && (keysGone.get(String(a.id)) ?? -1) < (moved.get(String(a.id)) as number) },
+      { kind: "agent", lifecycle, effective, runtime, hasOwner: owner !== undefined, ownerLifecycle: owner?.lifecycle ?? null, reason: a.lifecycle_reason === null ? null : String(a.lifecycle_reason), at: Number(a.lifecycle_at), validUntil: a.valid_until === null ? null : Number(a.valid_until), noCard: a.migrated_note === "no_card", handleConflict: conflicts.has(String(a.id)), planState: plans.get(`agent:${String(a.id)}`) ?? null, keyEnded, keyAfterTransfer: moved.has(String(a.id)) && (keysGone.get(String(a.id)) ?? -1) < (moved.get(String(a.id)) as number), ownerMayHoldKey: owner !== undefined && (keysGone.get(String(a.id)) ?? -1) < owner.at, needsConnect },
       now,
     );
+    // An acceptance covers the owner change the owner saw, not the next one.
+    const keyFinding = findings.find((f) => f.code === "key_after_transfer");
+    if (keyFinding) stampFinding(keyFinding, moved.get(String(a.id)) as number);
     rows.push({
       kind: "agent",
       id: String(a.id),
@@ -95,7 +107,7 @@ export function loadColleagues(db: Db, now: number): Loaded {
       runtime,
       trust: a.trust as Trust,
       owner: owner ? { id: String(a.owner_id), name: owner.name } : null,
-      line: lineOf("agent", lifecycle, effective, runtime, a.valid_from, keyEnded),
+      line: lineOf("agent", lifecycle, effective, runtime, a.valid_from, keyEnded, needsConnect !== null),
       findings,
       validFrom: isoOf(a.valid_from),
       validUntil: isoOf(a.valid_until),
@@ -114,8 +126,8 @@ export function loadColleagues(db: Db, now: number): Loaded {
   return { rows, byId: new Map(rows.map((r) => [`${r.kind}:${r.id}`, r])) };
 }
 
-export function colleaguesList(db: Db, q: { kind?: SubjectKind | undefined; lifecycle?: Effective | undefined; finding?: string | undefined; cursor?: string | undefined; limit?: number | undefined }, now = Date.now()): ColleaguesListOutput {
-  const all = loadColleagues(db, now).rows.filter((r) => (q.kind === undefined || r.kind === q.kind) && (q.lifecycle === undefined || r.effective === q.lifecycle) && (q.finding === undefined || r.findings.some((f) => f.code === q.finding)));
+export function colleaguesList(db: Db, q: { kind?: SubjectKind | undefined; lifecycle?: Effective | undefined; finding?: string | undefined; cursor?: string | undefined; limit?: number | undefined }, now = Date.now(), topology?: DecodedTopology | null): ColleaguesListOutput {
+  const all = loadColleagues(db, now, topology).rows.filter((r) => (q.kind === undefined || r.kind === q.kind) && (q.lifecycle === undefined || r.effective === q.lifecycle) && (q.finding === undefined || r.findings.some((f) => f.code === q.finding)));
   const limit = q.limit ?? 100;
   const start = q.cursor === undefined ? 0 : Number(q.cursor);
   const items = all.slice(start, start + limit);
@@ -178,7 +190,7 @@ const PERSON_LABELS: Labels = {
 
 export async function colleagueDetail(ctx: OpContext, kind: SubjectKind, id: string, now = Date.now()): Promise<Detail> {
   const db = ctx.db;
-  const loaded = loadColleagues(db, now);
+  const loaded = loadColleagues(db, now, readTopology(ctx));
   const row = loaded.byId.get(`${kind}:${id}`);
   const s = loadSubject(db, kind, id);
   if (!row || !s) return fail(kind === "agent" ? "agent_not_found" : "person_not_found", "No such entry.", 404);
@@ -216,6 +228,7 @@ export async function colleagueDetail(ctx: OpContext, kind: SubjectKind, id: str
     rev: s.rev,
     reason: extra.lifecycle_reason === null ? null : String(extra.lifecycle_reason),
     note: extra.lifecycle_note === null ? null : String(extra.lifecycle_note),
+    newKeyAsked: kind === "agent" && newKeyAsked(db).has(id),
     defaultOwner: kind === "person" ? ((d) => (d && d.id !== id ? d : null))(activeDefaultOwner(db)) : null,
     reach: kind === "person" ? reachOf(db, id) : [],
     teams,
@@ -238,7 +251,7 @@ const alertsReadiness = (inbox: boolean) =>
 
 export async function summaryGet(ctx: OpContext, now = Date.now()): Promise<SummaryGetOutput> {
   const db = ctx.db;
-  const { rows } = loadColleagues(db, now);
+  const { rows } = loadColleagues(db, now, readTopology(ctx));
   const agents = rows.filter((r) => r.kind === "agent" && r.runtime !== "gone");
   const people = rows.filter((r) => r.kind === "person");
   const running = agents.filter((r) => r.runtime === "running").length;

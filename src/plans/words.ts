@@ -106,7 +106,7 @@ export function headlineOf(p: Row, counts: { proved: number; said: number; manua
       return p.code === "core_failed" ? "Portal stopped on a step. Open Portal and apply it again." : "Part of this did not work. Look at the open steps.";
     case "done":
       if (counts.manual > 0) return `Governance did its part. ${counts.manual} are for someone to do by hand.`;
-      return counts.proved > 0 ? "Done. Each step is proved by the app or Portal that owns it." : "Nothing was left to end.";
+      return counts.proved > 0 ? "Done. Each step is proved by the app or Portal that owns it." : "Done. Nothing waits for you in Portal.";
     case "reported":
       return link ? `Governance could not see ${counts.said} of the steps. Check them in Portal.` : `Portal says this is done. Governance could not see ${counts.said} of the steps.`;
     case "expired":

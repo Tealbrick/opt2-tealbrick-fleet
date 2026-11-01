@@ -30,6 +30,7 @@ export const NOTE_HINT = "Optional. Do not write health, pay or disciplinary det
 /** What a stop does not change (§9 "Not true"). It goes on each Confirm, not only in docs. */
 export const NOT_CHANGED: readonly string[] = [
   "Their agents. Agents keep working when a person leaves, unless you choose Stop this agent for one.",
+  "A key to one of their agents that this person may hold. It works until you make a new key.",
   "Their own logins, such as Slack, Google or a bank.",
   "An agent's machine and its native tools.",
   "Copies of data that were already made.",
@@ -45,7 +46,7 @@ export const NOT_CHANGED: readonly string[] = [
 ];
 
 /** The block for one entry: the line about a person's agents is for a person. */
-export const notChangedOf = (kind: "person" | "agent"): readonly string[] => (kind === "person" ? NOT_CHANGED : NOT_CHANGED.slice(1));
+export const notChangedOf = (kind: "person" | "agent"): readonly string[] => (kind === "person" ? NOT_CHANGED : NOT_CHANGED.slice(2));
 
 /**
  * What may be said BEFORE a change, from what Governance can read. Rules can have confirmed only a change already made,
@@ -56,11 +57,11 @@ export function beforeChangeText(floor: Pick<Floor, "state">, kind: "person" | "
   if (kind === "person") {
     switch (floor.state) {
       case "not_installed":
-        return "Rules & Approvals is not installed, so it does not refuse calls for this person. The sender bar in Connect still drops their messages.";
+        return "Rules & Approvals is not installed, so it does not refuse calls for this person. If they have handles in the directory, the sender bar in Connect drops their messages.";
       case "older":
-        return "Rules & Approvals is too old to refuse calls for this person. Update it. The sender bar in Connect still drops their messages.";
+        return "Rules & Approvals is too old to refuse calls for this person. Update it. If they have handles in the directory, the sender bar in Connect drops their messages.";
       case "not_read":
-        return "Governance could not read Rules & Approvals, so calls for this person may go on. The sender bar in Connect still drops their messages.";
+        return "Governance could not read Rules & Approvals, so calls for this person may go on. If they have handles in the directory, the sender bar in Connect drops their messages.";
       default:
         return "If the Rules hook is on, calls by, for and to this person are refused in about 2 minutes. Governance cannot see that switch: check it in Portal. The next screen says if Rules has this change.";
     }
@@ -82,7 +83,9 @@ export const beforeChangeTone = (floor: Pick<Floor, "state">): "needs-you" | "ne
 
 /** After a change: what the server says Rules has, plus what Governance cannot see. The gate note gets a readable time. */
 export function afterChangeText(floor: Floor, kind: "person" | "agent" = "agent"): string {
-  const parts = [floor.text];
+  // C381: no approval in Portal stops a person. The server's sentence about Portal is for an agent.
+  const first = kind === "person" && floor.state === "not_confirmed" ? "Rules has not read this change yet." : kind === "person" && floor.state === "not_read" ? "Rules & Approvals could not be read, so calls for this person may go on." : floor.text;
+  const parts = [first];
   if (floor.state === "confirmed") parts.push(kind === "person" ? "If its hook is on, calls by, for and to this person are refused in about 2 minutes. Governance cannot see that switch: check it in Portal." : "If its hook is on, calls stop in about 2 minutes. Governance cannot see that switch: check it in Portal.");
   if (floor.rulesHolds) parts.push(floor.rulesHolds);
   if (floor.gateNote && floor.lastGateAt) parts.push(`Rules has not checked a call since ${when(floor.lastGateAt)}.`);

@@ -84,7 +84,7 @@ function Subject({ kind, id, portalHref }: { kind: SubjectKind; id: string; port
             </section>
           ) : null}
           {FEATURES.preview ? <AccessByStore kind={c.kind} id={c.id} name={c.name} /> : null}
-          {c.kind === "person" && c.reach.length ? <Reach reach={c.reach} /> : null}
+          {c.kind === "person" && c.reach.length && (c.lifecycle === "active" || c.lifecycle === "proposed") ? <Reach reach={c.reach} /> : null}
           {c.kind === "person" && c.agents.length ? <OwnedAgents agents={c.agents} /> : null}
           {c.grantsBefore?.length ? <GrantsBefore c={c} grants={c.grantsBefore} /> : null}
           <History items={c.history} />
@@ -154,12 +154,15 @@ function KeyChoice({ c, onChoose, onNewKey }: { c: Colleague; onChoose: () => vo
     );
   }
   const needsOwner = c.findings.some((f) => f.code === "owner_inactive") && c.owner;
-  const needsKey = c.findings.some((f) => f.code === "key_after_transfer");
-  if (!needsOwner && !needsKey) return null;
+  const noOwner = c.findings.some((f) => f.code === "no_owner");
+  const needsKey = c.findings.some((f) => f.code === "key_after_transfer" || (f.code === "owner_inactive" && /key/.test(f.text)));
+  if (!needsOwner && !needsKey && !noOwner) return null;
   const owner = c.owner;
   return (
     <div className="tb-row">
-      {needsKey ? <Button onClick={onNewKey}>Make a new key</Button> : null}
+      {needsKey && !c.newKeyAsked ? <Button onClick={onNewKey}>Make a new key</Button> : null}
+      {needsKey && c.newKeyAsked ? <span className="tb-hint">A new key waits for your approval in Portal.</span> : null}
+      {noOwner ? <ButtonLink href="./agents">Name an owner</ButtonLink> : null}
       {needsOwner && owner ? (
         <p className="tb-soft">
           {"Name a new owner on the page of "}
@@ -274,7 +277,7 @@ function Reach({ reach }: { reach: Colleague["reach"] }) {
   return (
     <section className="tb-stack" aria-label="What this person can reach">
       <h2 className="sub-head">What this person can reach</h2>
-      <p className="tb-soft">Rules & Approvals can use these teams and roles, and an agent that works with many people can treat this person by them. A change here changes which agents they may talk to. History shows what they gained and lost.</p>
+      <p className="tb-soft">Rules & Approvals can use these teams and roles, and an agent that works with many people can treat this person by them. A change here can change which agents they may talk to. History shows what they gained and lost.</p>
       <ul className="ready">
         {reach.map((r) => (
           <li key={`${r.kind}:${r.name}`}>

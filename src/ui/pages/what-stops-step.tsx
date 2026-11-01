@@ -27,7 +27,10 @@ export function WhatStopsStep({ kind, id, name, stopping = [], onChange }: { kin
   const [on, setOn] = useState<Map<string, Tick> | null>(null);
   // The owner went back and changed a choice: the list is new, so the ticks start again from it. Until it is read no tick is sent: a plan with none ends the server's defaults, so an agent just chosen to stop does not keep what it holds.
   const readFor = useRef<PlanPreviewOutput | null>(null);
+  const askedFor = useRef(asked);
   useEffect(() => {
+    if (askedFor.current === asked) return;
+    askedFor.current = asked;
     setOn(null);
     onChange(null);
   }, [asked, onChange]);

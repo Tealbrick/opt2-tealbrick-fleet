@@ -291,6 +291,6 @@ test("the chain starts after the migration rows", () => {
   db.exec("UPDATE fleet_people SET status = 'departed' WHERE id = 'psn_ann'");
   for (const m of migrationFiles().slice(7)) db.exec(`BEGIN;\n${m.sql}\nCOMMIT;`);
   appendEvent(db, { subject: { kind: "agent", id: AGENT_A.id, name: "A" }, kind: "changed", actor: OWNER, at: T0 });
-  // 0008's own row, then 0014's one `migrated` row (C381: the events table already held a row, so the note is written), then this one
-  assert.deepEqual(verifyChain(db), { ok: true, rows: 3 });
+  // 0008's own row, then this one. C381's note goes through the chain at boot, not by the migration.
+  assert.deepEqual(verifyChain(db), { ok: true, rows: 2 });
 });
