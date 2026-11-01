@@ -5,6 +5,7 @@
 // tenants, roles-per-tenant or license; people are directory entries, never sign-ins (C84).
 import { handleChannel, normalizeHandle, ulid } from "@opt2-tealbrick/manifest";
 import type { Db, SliceAgent } from "@opt2-tealbrick/miniapp-sdk";
+import { appendEvent } from "./lifecycle/events.ts";
 import { beforePersonDelete, initPerson, kindChanged, setDates, statusRequested } from "./lifecycle/transitions.ts";
 import { bump, fail, revision } from "./meta.ts";
 import { ownerWithheldFor } from "./plans/guards.ts";
@@ -438,6 +439,10 @@ export function deletePerson(db: Db, id: string, now = Date.now()): boolean {
     endAssignmentsOf(db, "person", id, "deleted", OWNER, now);
     db.prepare("DELETE FROM fleet_members WHERE kind = 'person' AND subject_id = ?").run(id);
     db.prepare("DELETE FROM fleet_handles WHERE person_id = ?").run(id);
+    // C381: a delete is an owner change. The record says it, so the key this person may hold shows as a finding, and apps read no later owner until Core replaced the key.
+    for (const a of db.prepare("SELECT a.id, a.name, p.name AS owner_name FROM fleet_agents a JOIN fleet_people p ON p.id = a.owner_id WHERE a.owner_id = ? AND a.status <> 'removed'").all(id)) {
+      appendEvent(db, { subject: { kind: "agent", id: String(a.id), name: String(a.name) }, kind: "moved", actor: OWNER, note: `Owner changed from ${String(a.owner_name)} to nobody.`.slice(0, 500), snapshot: { before: id, after: null }, at: now });
+    }
     db.prepare("UPDATE fleet_agents SET owner_id = NULL WHERE owner_id = ?").run(id);
     const gone = db.prepare("DELETE FROM fleet_people WHERE id = ?").run(id).changes > 0;
     if (gone) bump(db);

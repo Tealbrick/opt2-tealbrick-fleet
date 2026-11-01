@@ -16,10 +16,11 @@ export type Owner = { value: string; label: string };
 
 const MOVE_SENTENCE = "It keeps running. It has its new owner at once. It loses this person's personal memory.";
 const MOVE_STOPPED = "It stays stopped, as you chose. It has its new owner at once.";
-const STOP_SENTENCE = "It stops when you approve in Portal. Its access and key go. To undo this you must pair it again and grant its access again.";
+const STOP_SENTENCE = "It stops when you approve in Portal. Its access and key go. To undo this you must connect it again and grant its access again.";
 const LATER_SENTENCE = "It keeps running with this owner. Governance shows that it needs an owner, and this person may still hold its key.";
+const LATER_STOPPED = "It stays stopped, with this owner. Governance shows that it needs an owner.";
 const KEY_ON = "When you approve in Portal, the old key stops and this agent must be connected again. It cannot work until then. After that it gains the new owner's personal memory.";
-const KEY_OFF = "The old key keeps working, and this person may hold it. So this agent does not get the new owner's personal memory. Governance shows this until a new key exists.";
+const KEY_OFF = "The old key keeps working, and this person may hold it. So apps read no owner for this agent: it does not get the new owner's personal memory or team reads. Governance shows this until a new key exists.";
 const NO_ONE = "No other active person is in the directory. Add one, then name them here. These agents keep working until then.";
 
 /** The active people who can take an agent, without this person. */
@@ -51,7 +52,7 @@ export function AgentChoices({ agents, choices, onChange, owners, defaults }: { 
               onChange={(v) => set(a.id, { choice: v })}
               options={[
                 ...(canMove ? [{ value: "move" as const, title: "Move to a new owner", body: a.lifecycle === "suspended" ? MOVE_STOPPED : MOVE_SENTENCE }] : []),
-                { value: "later", title: "Name a new owner later", body: LATER_SENTENCE },
+                { value: "later", title: "Name a new owner later", body: a.lifecycle === "suspended" ? LATER_STOPPED : LATER_SENTENCE },
                 { value: "stop", title: "Stop this agent", body: STOP_SENTENCE },
               ]}
             />

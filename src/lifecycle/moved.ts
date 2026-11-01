@@ -2,6 +2,7 @@
 // one system review. It grants and removes nothing else.
 import type { Db, Json } from "@opt2-tealbrick/miniapp-sdk";
 import { fail } from "../meta.ts";
+import { stopInOwnersPlan } from "../plans/guards.ts";
 import { requestSystemReview } from "../reviews.ts";
 import { heldRoleNames } from "../roles/roles.ts";
 import * as store from "../store.ts";
@@ -77,6 +78,11 @@ export function setAgentMoved(db: Db, input: Parameters<typeof store.setAgent>[1
     if (changing && input.owner) {
       const who = db.prepare("SELECT kind, lifecycle FROM fleet_people WHERE id = ?").get(input.owner);
       if (who && who.kind === "person" && who.lifecycle !== "active") fail("owner_inactive", "The new owner must be an active person.", 409);
+    }
+    // A new plan of the old owner would replace the draft and drop this agent's removal with no word. Same for a new owner: the stop stands in that plan.
+    if (changing) {
+      const planOf = stopInOwnersPlan(db, input.agent);
+      if (planOf !== null) fail("plan_open", `A plan on the page of ${planOf} holds this agent's stop. Cancel that plan first.`, 409);
     }
     const agent = store.setAgent(db, input, now);
     if (changing) {

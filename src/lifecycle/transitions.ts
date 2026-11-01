@@ -107,7 +107,8 @@ export function guardOf(db: Db, s: Subject, to: Lifecycle, opts: { waive?: strin
   if (!NEXT[s.lifecycle].includes(to)) return no("transition_not_allowed", `It cannot move from ${s.lifecycle} to ${to}.`);
   // T6: an applied stop of an agent is not undone by a word here. Bring it back (T6b): grants do not restore. C381: a person's plan acts on agents the owner chose; undoing the person's mark changes none of them.
   if (to === "active" && s.lifecycle === "leaving" && s.kind === "agent" && hasAppliedStop(db, s.kind, s.id, s.at)) return no("plan_applied", "You approved this stop in Portal. Use Bring back: grants do not come back by themselves.");
-  if ((to === "active" || to === "proposed") && s.kind === "agent" && stopInOwnersPlan(db, s.id)) return no("plan_open", "A plan on its owner's page holds this stop. Cancel that plan first.");
+  const planOf = (to === "active" || to === "proposed") && s.kind === "agent" ? stopInOwnersPlan(db, s.id) : null;
+  if (planOf !== null) return no("plan_open", `A plan on the page of ${planOf} holds this stop. Cancel that plan first. A cancel takes back all of that plan's requests in Portal.`);
   if (to === "active") {
     if (s.trust === "blocked") return no("trust_blocked", "It is blocked. Record a new review first.");
     // T2 records a review, and a review names who answers for the agent. C381: a resume (T4, T6) is not tied to the owner: an agent with no active owner has a finding, it is not refused.

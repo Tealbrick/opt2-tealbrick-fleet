@@ -14,10 +14,11 @@ export const hasOpenPlan = (db: Db, kind: string, id: string): boolean => !!db.p
 export function hasAppliedStop(db: Db, kind: string, id: string, since = 0): boolean {
   const own = db
     .prepare(
-      `SELECT 1 FROM fleet_plans p WHERE p.subject_kind = ? AND p.subject_id = ?
+      `SELECT 1 FROM fleet_plans p WHERE p.subject_kind = ? AND p.subject_id = ? AND p.opened_at >= ?
+         AND NOT (p.subject_kind = 'agent' AND NOT EXISTS (SELECT 1 FROM fleet_plan_steps r WHERE r.plan_id = p.id AND r.phase = 'core' AND r.op <> 'agents.rotate'))
          AND (p.draft_state IN ('applying', 'applied') OR EXISTS (SELECT 1 FROM fleet_plan_steps s WHERE s.plan_id = p.id AND s.phase = 'core' AND (s.output_json IS NOT NULL OR (s.op <> 'agents.pause' AND s.state IN ('done', 'reported', 'not_provable'))))) LIMIT 1`,
     )
-    .get(kind, id);
+    .get(kind, id, since);
   if (own || kind !== "agent") return !!own;
   return !!db
     .prepare(
@@ -27,9 +28,11 @@ export function hasAppliedStop(db: Db, kind: string, id: string, since = 0): boo
     .get(id, since);
 }
 
-/** T4, T6 (C381): this agent's stop waits in an open plan of its owner. Undoing the agent here would leave that draft standing, and an approval would still remove it. */
-export const stopInOwnersPlan = (db: Db, agentId: string): boolean =>
-  !!db.prepare(`SELECT 1 FROM fleet_plan_steps s JOIN fleet_plans p ON p.id = s.plan_id WHERE s.agent_id = ? AND s.phase = 'core' AND s.op IN ('agents.pause', 'agents.offboard') AND p.subject_kind <> 'agent' AND p.state IN (${OPEN}) LIMIT 1`).get(agentId);
+/** T4, T6 (C381): this agent's stop waits in an open plan of a person: the name of that person, or null. Undoing the agent here would leave that draft standing, and an approval would still remove it. */
+export function stopInOwnersPlan(db: Db, agentId: string): string | null {
+  const r = db.prepare(`SELECT p.subject_name AS name FROM fleet_plan_steps s JOIN fleet_plans p ON p.id = s.plan_id WHERE s.agent_id = ? AND s.phase = 'core' AND s.op IN ('agents.pause', 'agents.offboard') AND p.subject_kind <> 'agent' AND p.state IN (${OPEN}) LIMIT 1`).get(agentId);
+  return r ? String(r.name) : null;
+}
 
 /** T7: the last plan of this entry did not finish, and nobody said why. Close needs a new plan or a named reason. */
 export function lastPlanUnfinished(db: Db, kind: string, id: string): boolean {
@@ -112,15 +115,15 @@ export const keyReplacedAt = (db: Db): Map<string, number> =>
  * C381 (security S1): owner changes away from someone who is not active now, oldest first. That person may hold the key until Core replaces it.
  * A move does not hand them the new owner: see `ownerShownToApps`. One query for the whole directory.
  */
-function movesFromInactive(db: Db): { agent: string; at: number; before: string; lifecycle: string | null; name: string | null }[] {
+function movesFromInactive(db: Db): { agent: string; at: number; before: string; lifecycle: string | null; lifecycleAt: number; name: string | null }[] {
   return db
     .prepare(
-      `SELECT e.subject_id AS agent, e.at, json_extract(e.snapshot_json, '$.before') AS before, p.lifecycle, p.name FROM fleet_lifecycle_events e
+      `SELECT e.subject_id AS agent, e.at, json_extract(e.snapshot_json, '$.before') AS before, p.lifecycle, p.lifecycle_at, p.name FROM fleet_lifecycle_events e
        LEFT JOIN fleet_people p ON p.id = json_extract(e.snapshot_json, '$.before')
        WHERE e.kind = 'moved' AND e.subject_kind = 'agent' AND e.note LIKE 'Owner changed from %' AND json_extract(e.snapshot_json, '$.before') IS NOT NULL AND COALESCE(p.lifecycle, 'gone') <> 'active' ORDER BY e.seq`,
     )
     .all()
-    .map((r) => ({ agent: String(r.agent), at: Number(r.at), before: String(r.before), lifecycle: r.lifecycle === null || r.lifecycle === undefined ? null : String(r.lifecycle), name: r.name === null || r.name === undefined ? null : String(r.name) }));
+    .map((r) => ({ agent: String(r.agent), at: Number(r.at), before: String(r.before), lifecycle: r.lifecycle === null || r.lifecycle === undefined ? null : String(r.lifecycle), lifecycleAt: Number(r.lifecycle_at ?? 0), name: r.name === null || r.name === undefined ? null : String(r.name) }));
 }
 
 /**
@@ -147,12 +150,13 @@ export function ownerWithheldFor(db: Db, agent: string): boolean {
 }
 
 /**
- * S2-8: what an agent may read about an owner. While the person is only stopped or leaving, an agent reads the old owner: a default move at the mark must not tell every agent who is leaving before that person knows.
- * From a close on, `departed` is public, and the new owner shows.
+ * S2-8: what an agent may read about an owner. A move made at or after the person's mark must not tell every agent who is leaving before that person knows, so an agent reads the old owner while the person is only stopped or leaving.
+ * Only for the agent's latest owner change, and only one made since the mark: an older move away was already readable, and a flip back would itself say that the person was marked. From a close on, `departed` is public, and the new owner shows.
  */
 export function ownerShownToAgents(db: Db): Map<string, { id: string; name: string }> {
   const out = new Map<string, { id: string; name: string }>();
-  for (const m of movesFromInactive(db)) if ((m.lifecycle === "suspended" || m.lifecycle === "leaving") && m.name !== null) out.set(m.agent, { id: m.before, name: m.name });
+  const last = ownerChangedAt(db);
+  for (const m of movesFromInactive(db)) if ((m.lifecycle === "suspended" || m.lifecycle === "leaving") && m.name !== null && m.at >= m.lifecycleAt && last.get(m.agent) === m.at) out.set(m.agent, { id: m.before, name: m.name });
   return out;
 }
 
@@ -164,15 +168,17 @@ export function ownerChangedAt(db: Db): Map<string, number> {
 
 /**
  * Agents this entry's plans asked a new key for, and Core never replaced, still working cards. A closed or removed card has no key to replace, and must not block a new plan.
- * Only from a plan a new one takes over (open now, or `replaced`). C381: a key the owner cancelled or rejected, or a request that ran out, comes back by no draft: the finding says it is owed.
+ * Only from this entry's latest plan, when a new one takes it over (open now, or `replaced`). C381: a key the owner cancelled or rejected, or a request that ran out, comes back by no draft, also not through an older replaced plan: the finding says it is owed.
  */
 export function owedRotations(db: Db, kind: string, id: string): string[] {
+  const last = db.prepare("SELECT group_id FROM fleet_plans WHERE subject_kind = ? AND subject_id = ? AND purpose <> 'bar' ORDER BY opened_at DESC, id DESC LIMIT 1").get(kind, id);
+  if (!last) return [];
   const rows = db
     .prepare(
       `SELECT DISTINCT s.agent_id AS id FROM fleet_plan_steps s JOIN fleet_plans p ON p.id = s.plan_id JOIN fleet_agents a ON a.id = s.agent_id
-       WHERE p.subject_kind = ? AND p.subject_id = ? AND s.op = 'agents.rotate' AND a.status <> 'removed' AND a.lifecycle <> 'archived' AND p.state IN (${OPEN}, 'replaced')
+       WHERE p.group_id = ? AND s.op = 'agents.rotate' AND a.status <> 'removed' AND a.lifecycle <> 'archived' AND p.state IN (${OPEN}, 'replaced')
          AND NOT EXISTS (SELECT 1 FROM fleet_plan_steps d WHERE d.agent_id = s.agent_id AND d.op IN ('agents.rotate', 'agents.offboard') AND d.state IN ('done', 'reported'))`,
     )
-    .all(kind, id);
+    .all(String(last.group_id));
   return rows.map((r) => String(r.id));
 }

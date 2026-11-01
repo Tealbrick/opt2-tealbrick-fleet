@@ -34,6 +34,8 @@ export interface FindingInput {
   keyEnded?: boolean | undefined;
   /** the owner changed, from someone, and Core has not replaced the key since */
   keyAfterTransfer?: boolean | undefined;
+  /** apps read no owner for this agent until Core replaced the key */
+  ownerWithheld?: boolean | undefined;
   /** the owner is not active, and Core has not replaced the key since that */
   ownerMayHoldKey?: boolean | undefined;
   /** Core replaced the key: "yes" Portal shows no key yet, "not_seen" Governance cannot see */
@@ -73,7 +75,7 @@ export function findingsOf(r: FindingInput, now: number): Finding[] {
   if (agent && r.effective === "suspended" && r.runtime === "paused" && !r.keyEnded) out.push(f("key_not_decided", KEY_STILL_EXISTS));
   if (r.noHandleToBar) out.push(f("no_handle_to_bar", "This person has no channel handle in the directory, so Governance cannot bar their messages. Add their handles."));
   if (r.senderBarOpen) out.push(f("sender_bar_open", "Messages from this person can still reach agents. Connect has not shown the bar yet."));
-  if (agent && r.keyAfterTransfer && r.lifecycle !== "archived" && r.runtime !== "gone") out.push(f("key_after_transfer", "The owner changed, and the old owner may still hold this agent's key. Make a new key. The agent must then be connected again."));
+  if (agent && r.keyAfterTransfer && r.lifecycle !== "archived" && r.runtime !== "gone") out.push(f("key_after_transfer", r.ownerWithheld ? "The owner changed, and an old owner who is not active may still hold this agent's key. Until a new key exists, apps read no owner for this agent: it does not have the owner's memory or team reads. Make a new key. The agent must then be connected again." : "The owner changed, and the old owner may still hold this agent's key. Make a new key. The agent must then be connected again."));
   if (agent && r.needsConnect === "yes") out.push(f("connect_again", NEEDS_CONNECT));
   if (agent && r.needsConnect === "not_seen") out.push(f("connect_again", "The old key is gone. If you did not connect this agent again, do it in Portal. Governance cannot see this. Turn on 'See who has access'."));
   if (r.planState === "expired" && (r.lifecycle === "suspended" || r.lifecycle === "leaving")) out.push(f("plan_expired", "A request ran out of time before you approved it. Nothing in it was applied. Ask again."));

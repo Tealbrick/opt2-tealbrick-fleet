@@ -17,7 +17,7 @@ function AgentDialog({ agent, dir, onClose, reload }: { agent: Agent; dir: Dir; 
   };
   return (
     <EditDialog title={`Edit ${agent.name}`} onClose={onClose} save={save}>
-      <Field label="Owner" hint="The agent keeps working. With a new owner, the old one may still hold its key: Governance shows this until you make a new key on the agent's page.">
+      <Field label="Owner" hint="The agent keeps working. With a new owner, the old one may still hold its key: Governance shows this until you make a new key on the agent's page. If the old owner is not active, apps read no owner until then, so it has no owner's memory or team reads.">
         <Select
           options={[{ value: "", label: "No owner" }, ...apartLabels(dir.people.filter((p) => (p.kind === "person" && p.lifecycle === "active") || p.id === agent.owner?.id).map((p) => ({ id: p.id, label: p.name }))).map((o) => ({ value: o.id, label: o.label }))]}
           value={owner}

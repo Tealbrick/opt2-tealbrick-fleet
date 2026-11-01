@@ -575,7 +575,7 @@ const laterWorld = (): World => {
 test("a leaver's key does not reach the new owner: apps read no owner until Core replaced the key, and the feed moves when it does; an agent reads the old owner while the person does not know", async () => {
   const w = laterWorld();
   const bob = store.setPerson(w.db, { name: "Bob" }, w.clock.t);
-  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  set(w.db, "person", w.ann.id, "leaving", {}, Date.now() - 1000);
   const plan = (await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: HENRY, decision: "transfer", newOwner: bob.id }] }, ctxOf(w))) as { plans: { id: string }[] };
   const id = plan.plans[0]?.id as string;
   assert.equal(agentRow(w.db, HENRY)?.owner, null, "no app gives the old key the new owner's area");
@@ -672,4 +672,60 @@ test("a move of an agent on its way out is refused: a new plan would drop its re
   set(w.db, "agent", HENRY, "leaving", {}, w.clock.t);
   set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
   await assert.rejects(run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: HENRY, decision: "transfer", newOwner: bob.id }] }, ctxOf(w)), (e: TbError) => e.code === "agent_closed");
+});
+
+// ── round 2 ─────────────────────────────────────────────────────────────────
+
+test("a delete is an owner change: the key shows, and a later owner stays withheld", () => {
+  const w = laterWorld();
+  const bob = store.setPerson(w.db, { name: "Bob" }, w.clock.t);
+  store.deletePerson(w.db, w.ann.id, w.clock.t);
+  assert.ok(codes(w, HENRY).includes("key_after_transfer"));
+  setAgentMoved(w.db, { agent: HENRY, owner: bob.id }, { kind: "owner", id: null }, w.clock.t + 1);
+  assert.equal(agentRow(w.db, HENRY)?.owner, null, "the person who was deleted may hold the key");
+  assert.ok(codes(w, HENRY).includes("key_after_transfer"));
+});
+
+test("an agent reads no flip back: a move before the mark stays as it was; only the latest move since the mark shows the old owner", () => {
+  const w = laterWorld();
+  const t = w.clock.t;
+  const bob = store.setPerson(w.db, { name: "Bob" }, t);
+  const carol = store.setPerson(w.db, { name: "Carol" }, t);
+  const shown = () => leanDirectory(w.db).agents.find((a) => a.id === HENRY)?.owner?.id;
+  setAgentMoved(w.db, { agent: HENRY, owner: bob.id }, { kind: "owner", id: null }, t);
+  set(w.db, "person", w.ann.id, "suspended", {}, t + 10);
+  assert.equal(shown(), bob.id, "Ann moved it away before her mark: nothing flips");
+  setAgentMoved(w.db, { agent: SALES, owner: bob.id }, { kind: "owner", id: null }, t + 20);
+  assert.equal(leanDirectory(w.db).agents.find((a) => a.id === SALES)?.owner?.id, w.ann.id, "since her mark: the old owner");
+  setAgentMoved(w.db, { agent: SALES, owner: carol.id }, { kind: "owner", id: null }, t + 30);
+  assert.equal(leanDirectory(w.db).agents.find((a) => a.id === SALES)?.owner?.id, carol.id, "the latest move is from Bob, who is active");
+});
+
+test("a key the owner cancelled does not come back through an older replaced plan", async () => {
+  const w = laterWorld();
+  const bob = store.setPerson(w.db, { name: "Bob" }, w.clock.t);
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: HENRY, decision: "transfer", newOwner: bob.id }] }, ctxOf(w));
+  const second = (await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: SALES, decision: "stop" }] }, ctxOf(w))) as { plans: { id: string }[] };
+  const id = second.plans[0]?.id as string;
+  assert.ok(w.steps(id).some((s) => s.op === "agents.rotate" && s.agent_id === HENRY), "a replaced plan carries its key");
+  await run("plan_cancel", { plan: id }, ctxOf(w));
+  const third = (await run("plan_send", { kind: "person", id: w.ann.id }, ctxOf(w))) as { plans: { id: string }[] };
+  assert.ok(!w.steps(third.plans[0]?.id as string).some((s) => s.op === "agents.rotate"), "the owner cancelled it");
+});
+
+test("a new key on an agent is no applied stop; an owner change waits for a plan that holds the agent's stop", async () => {
+  const w = laterWorld();
+  const bob = store.setPerson(w.db, { name: "Bob" }, w.clock.t);
+  const made = (await run("plan_send", { kind: "agent", id: HENRY, transfers: [HENRY] }, ctxOf(w))) as { plans: { id: string }[] };
+  const id = made.plans[0]?.id as string;
+  await w.tick(id);
+  approveAndDeliver(w, String(w.plan(id).draft_key));
+  await w.tick(id);
+  set(w.db, "agent", HENRY, "leaving", {}, w.clock.t + 1);
+  set(w.db, "agent", HENRY, "active", { reason: "mistake" }, w.clock.t + 2);
+  assert.equal(stateOf(w.db, "agent", HENRY), "active", "a mistaken stop can be undone");
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: SALES, decision: "stop" }] }, ctxOf(w));
+  assert.throws(() => setAgentMoved(w.db, { agent: SALES, owner: bob.id }, { kind: "owner", id: null }, w.clock.t), refused("plan_open", 409));
 });

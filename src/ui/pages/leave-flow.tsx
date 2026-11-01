@@ -13,7 +13,7 @@ import { FEATURES } from "./features.ts";
 import { lifecycleError } from "./lifecycle-errors.ts";
 import { NotChanged, PlanResult } from "./plan-result.tsx";
 import { type Tick, WhatStopsStep } from "./what-stops-step.tsx";
-import { beforeChangeText, beforeChangeTone, NOTE_HINT, type Reason, reasonLabel, reasonOptions } from "./words.ts";
+import { beforeChangeText, beforeChangeTone, NOTE_HINT, notChangedOf, type Reason, reasonLabel, reasonOptions } from "./words.ts";
 
 type Colleague = ColleagueGetOutput["colleague"];
 
@@ -152,7 +152,7 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
                 return (
                   <li key={a.id}>
                     <span>{a.name}</span>
-                    <span className="tb-hint">{ch.choice === "stop" ? "Stops when you approve in Portal" : ch.choice === "later" ? "Keeps running, needs an owner" : `Moves to ${owners?.find((o) => o.value === ch.newOwner)?.label ?? "the new owner"}${ch.newKey ? ", with a new key" : ""}`}</span>
+                    <span className="tb-hint">{ch.choice === "stop" ? "Stops when you approve in Portal" : ch.choice === "later" ? (a.lifecycle === "suspended" ? "Stays stopped, needs an owner" : "Keeps running, needs an owner") : `Moves to ${owners?.find((o) => o.value === ch.newOwner)?.label ?? "the new owner"}${ch.newKey ? ", with a new key" : ""}`}</span>
                   </li>
                 );
               })}
@@ -160,7 +160,7 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
           ) : null}
           {key ? <Notice tone="needs-you">{key}</Notice> : null}
           <Notice tone={beforeChangeTone(c.floor)}>{beforeChangeText(c.floor, c.kind)}</Notice>
-          <NotChanged />
+          <NotChanged items={notChangedOf(c.kind)} />
         </div>
       ),
     },

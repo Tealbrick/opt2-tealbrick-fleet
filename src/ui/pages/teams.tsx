@@ -51,7 +51,7 @@ function MembersView({ team, dir, onBack, reload }: { team: Team; dir: Dir; onBa
       ...dir.people.map((p) => ({
         id: subjectKey("person", p.id),
         name: p.name,
-        note: p.kind === "outside_agent" ? "Outside agent" : p.lifecycle === "active" ? "Person" : p.lifecycle === "suspended" ? "Person, access stopped" : "Person, left",
+        note: p.kind === "outside_agent" ? "Outside agent" : p.lifecycle === "active" ? "Person" : p.lifecycle === "suspended" ? "Person, access stop asked" : "Person, left",
       })),
       // an agent that left Portal keeps its place in a team: it is listed only while it is a member
       ...dir.agents.filter((a) => a.status !== "removed" || inTeam.has(subjectKey("agent", a.id))).map((a) => ({ id: subjectKey("agent", a.id), name: a.name, note: a.status === "removed" ? "Agent, not in Portal" : "Agent" })),

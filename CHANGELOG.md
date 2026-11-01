@@ -16,6 +16,7 @@ Behaviour:
 - A plain owner change is no longer refused when the old owner is stopped: it lifts nothing now. The same finding shows the key.
 - Resuming an agent is no longer tied to its owner. Mark as reviewed still needs an active owner: a review names who answers for the agent. Close of a person still needs each agent moved or stopped.
 - Members: a person's change says what they gain and lose, in the page and in History. A person's page lists what their teams and roles reach. Give says the same for a role.
+- A person_delete is an owner change on the record: the key shows, and a later owner stays withheld.
 - A stop made in an owner's plan: Undo is refused while its draft stands and after it applied. A new key the owner cancelled or rejected does not come back in a later draft; the finding stays.
 - Finding no_handle_to_bar when a leaving person has no handle. Finding owner_inactive names the key the old owner may hold.
 - Words: the leave page, See what would change, Stop their access for now, the Not changed block.

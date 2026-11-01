@@ -8996,7 +8996,7 @@
     },
     {
       "id": "plan_get",
-      "title": "Read stop plans",
+      "title": "Read plans",
       "description": "The plans of one entry, one plan, or every open plan, with each step in words: what is proved, what someone only said, what is still open. Also the alerts that reached nobody. Only you can do this.",
       "input": {
         "type": "object",
@@ -9320,7 +9320,7 @@
     },
     {
       "id": "plan_retry",
-      "title": "Try a stop plan again",
+      "title": "Try a plan again",
       "description": "Ask again after a refusal, a failed step, an expiry or a rejection. A new attempt goes out only after Governance read the store again, with what is still open. Only you can do this.",
       "input": {
         "type": "object",
@@ -9612,7 +9612,7 @@
     },
     {
       "id": "plan_cancel",
-      "title": "Cancel a stop plan",
+      "title": "Cancel a plan",
       "description": "Take the request back from Portal and stop what has not run. What was already applied stays. Each part of a split plan answers with its own state; `left` counts the parts that still stand in Portal. Only you can do this.",
       "input": {
         "type": "object",
@@ -11474,7 +11474,7 @@
     {
       "id": "round_verdict",
       "title": "Decide one entry of a round",
-      "description": "Record the review of one entry of a round, and if you tick access to remove, make a stop plan for it by the same path as any plan. Nothing is removed until the plan runs and the app confirms. Owner only. No agent can call it.",
+      "description": "Record the review of one entry of a round, and if you tick access to remove, make a plan for it by the same path as any plan. Nothing is removed until the plan runs and the app confirms. Owner only. No agent can call it.",
       "crud": [
         "update"
       ],
@@ -12597,7 +12597,7 @@
         "read",
         "update"
       ],
-      "purpose": "Reads agent identities, first contacts and access for the owner's pages; ends an item only in a stop plan you confirmed. Never shown to agents."
+      "purpose": "Reads agent identities, first contacts and access for the owner's pages; ends an item only in a plan you confirmed. Never shown to agents."
     },
     {
       "product": "rules",
@@ -12622,7 +12622,7 @@
         "read",
         "update"
       ],
-      "purpose": "Reads what Knowledge reports for the owner's Access pages, and ends an item only in a stop plan you confirmed. Never shown to agents."
+      "purpose": "Reads what Knowledge reports for the owner's Access pages, and ends an item only in a plan you confirmed. Never shown to agents."
     },
     {
       "product": "kanban",
@@ -12644,7 +12644,7 @@
         "read",
         "update"
       ],
-      "purpose": "Reads each agent's routines and steps for the owner's Access pages, and pauses a routine only in a stop plan you confirmed. Never shown to agents."
+      "purpose": "Reads each agent's routines and steps for the owner's Access pages, and pauses a routine only in a plan you confirmed. Never shown to agents."
     },
     {
       "product": "inbox",

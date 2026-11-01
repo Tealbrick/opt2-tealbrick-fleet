@@ -7,7 +7,7 @@ import { ACCESS_AFTER_LEAVE, accessAfterLeave, openDifferences } from "../access
 import { type AccessTarget, TARGET_NAMES } from "../access/items.ts";
 import { CONNECT_UNSEEN_MS, type Finding, findingsOf, KEY_STILL_EXISTS, stampFinding } from "../findings.ts";
 import { fail, revision } from "../meta.ts";
-import { keyEndedAt, keyReplacedAt, latestPlanStates, newKeyAsked, ownerChangedAt, senderBarOpen, unnamedAccounts } from "../plans/guards.ts";
+import { keyEndedAt, keyReplacedAt, latestPlanStates, newKeyAsked, ownerChangedAt, ownerWithheld, senderBarOpen, unnamedAccounts } from "../plans/guards.ts";
 import { type PlanAgent, portalPlan } from "../plans/portal-link.ts";
 import { exclusionFindings } from "../roles/exclusions.ts";
 import { cleanTopology, type DecodedTopology, decodeTopology } from "../topology-slice.ts";
@@ -26,14 +26,14 @@ const isoOf = (ms: unknown): string | null => (ms === null || ms === undefined ?
 const runtimeOf = (status: unknown): "running" | "paused" | "gone" => (status === "active" ? "running" : status === "paused" ? "paused" : "gone");
 
 /** One line, no pills: the three axes in plain words. */
-function lineOf(kind: SubjectKind, lifecycle: Lifecycle, effective: Effective, runtime: Row["runtime"], validFrom: unknown, keyEnded = false, needsConnect = false): string {
+function lineOf(kind: SubjectKind, lifecycle: Lifecycle, effective: Effective, runtime: Row["runtime"], validFrom: unknown, keyEnded = false, needsConnect: "yes" | "not_seen" | null = null): string {
   if (effective === "not_started") return `Starts on ${String(isoOf(validFrom)).slice(0, 10)}`;
   if (kind === "person") {
-    return { proposed: "New, not reviewed", active: "Active", suspended: "Stop of access asked", leaving: "Leaving", archived: "Closed" }[effective];
+    return { proposed: "New, not reviewed", active: "Active", suspended: "Access stop asked", leaving: "Leaving", archived: "Closed" }[effective];
   }
   if (runtime === "gone") return lifecycle === "archived" ? "Closed" : "Not listed in Portal";
   if (lifecycle === "archived") return "Closed, but Portal lists it again";
-  if (runtime === "running" && needsConnect && (effective === "active" || effective === "proposed")) return "No key: connect it in Portal";
+  if (runtime === "running" && needsConnect && (effective === "active" || effective === "proposed")) return needsConnect === "yes" ? "No key: connect it in Portal" : "Old key gone: connect it in Portal if you did not";
   if (effective === "proposed") return runtime === "running" ? "New: working, not reviewed" : "New, not reviewed: paused";
   if (effective === "active") return runtime === "running" ? "Working" : "Paused in Portal";
   const word = effective === "leaving" ? "Stop and remove" : "Stop";
@@ -55,6 +55,7 @@ export function loadColleagues(db: Db, now: number, topology?: DecodedTopology |
   const keysGone = keyEndedAt(db);
   const moved = ownerChangedAt(db);
   const replaced = keyReplacedAt(db);
+  const withheld = ownerWithheld(db);
   const seen = keysSeen(topology);
   const handled = new Set(db.prepare("SELECT DISTINCT person_id FROM fleet_handles").all().map((r) => String(r.person_id)));
   const owners = new Map<string, { name: string; lifecycle: string | null; at: number }>();
@@ -92,7 +93,7 @@ export function loadColleagues(db: Db, now: number, topology?: DecodedTopology |
     const rotated = replaced.get(String(a.id));
     const needsConnect = rotated === undefined || runtime === "gone" || lifecycle === "archived" || lifecycle === "leaving" ? null : seen ? (seen.has(String(a.id)) ? null : "yes") : rotated + CONNECT_UNSEEN_MS > now ? "not_seen" : null;
     const findings = findingsOf(
-      { kind: "agent", lifecycle, effective, runtime, hasOwner: owner !== undefined, ownerLifecycle: owner?.lifecycle ?? null, reason: a.lifecycle_reason === null ? null : String(a.lifecycle_reason), at: Number(a.lifecycle_at), validUntil: a.valid_until === null ? null : Number(a.valid_until), noCard: a.migrated_note === "no_card", handleConflict: conflicts.has(String(a.id)), planState: plans.get(`agent:${String(a.id)}`) ?? null, keyEnded, keyAfterTransfer: moved.has(String(a.id)) && (keysGone.get(String(a.id)) ?? -1) < (moved.get(String(a.id)) as number), ownerMayHoldKey: owner !== undefined && (keysGone.get(String(a.id)) ?? -1) < owner.at, needsConnect },
+      { kind: "agent", lifecycle, effective, runtime, hasOwner: owner !== undefined, ownerLifecycle: owner?.lifecycle ?? null, reason: a.lifecycle_reason === null ? null : String(a.lifecycle_reason), at: Number(a.lifecycle_at), validUntil: a.valid_until === null ? null : Number(a.valid_until), noCard: a.migrated_note === "no_card", handleConflict: conflicts.has(String(a.id)), planState: plans.get(`agent:${String(a.id)}`) ?? null, keyEnded, keyAfterTransfer: moved.has(String(a.id)) && (keysGone.get(String(a.id)) ?? -1) < (moved.get(String(a.id)) as number), ownerWithheld: withheld.has(String(a.id)), ownerMayHoldKey: owner !== undefined && (keysGone.get(String(a.id)) ?? -1) < owner.at, needsConnect },
       now,
     );
     // An acceptance covers the owner change the owner saw, not the next one.
@@ -107,7 +108,7 @@ export function loadColleagues(db: Db, now: number, topology?: DecodedTopology |
       runtime,
       trust: a.trust as Trust,
       owner: owner ? { id: String(a.owner_id), name: owner.name } : null,
-      line: lineOf("agent", lifecycle, effective, runtime, a.valid_from, keyEnded, needsConnect !== null),
+      line: lineOf("agent", lifecycle, effective, runtime, a.valid_from, keyEnded, needsConnect),
       findings,
       validFrom: isoOf(a.valid_from),
       validUntil: isoOf(a.valid_until),
