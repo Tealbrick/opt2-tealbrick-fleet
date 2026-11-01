@@ -124,7 +124,7 @@ test("S3-1: a connection's time comes from its id; a cut list, no list, no conne
   assert.equal(connectionMadeAt(conAt(made)), made);
   assert.equal(connectionMadeAt("con_agt_x_0"), null);
   const con = conAt(made);
-  const of = (connections: { con: string; agt: string; method: "key"; status: "active" | "revoked" }[], truncated = false) => ({ topology: () => ({ instances: [], edges: [], companions: [], connections, truncated }) });
+  const of = (connections: { con: string; agt: string; method: "key"; status: "active" | "revoked" }[], truncated = false) => ({ topology: () => ({ instances: [], edges: [], companions: [], connections, truncated }) }) as never;
   assert.equal(onlyNewKeys("a", of([{ con, agt: "a", method: "key", status: "active" }]), T0), true);
   assert.equal(onlyNewKeys("a", of([{ con, agt: "a", method: "key", status: "active" }]), made), false, "made before");
   assert.equal(onlyNewKeys("a", of([{ con, agt: "a", method: "key", status: "active" }, { con: conAt(T0 - 1), agt: "a", method: "key", status: "active" }]), T0), false, "the old one is still there");
