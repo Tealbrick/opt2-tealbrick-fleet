@@ -2,6 +2,12 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
+## 0.4.0-dev.103 - 2026-11-01
+
+From the C383 QA run. DEV only.
+
+- An agent whose stop Portal applied, from its own plan or its owner's, reads "Stopped. Portal removed its access and key." It used to say that removal waits, and it offered to prepare a request again.
+
 ## 0.4.0-dev.102 - 2026-11-01
 
 From the DEV proof of dev.101 (C381). DEV only.

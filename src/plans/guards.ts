@@ -70,6 +70,10 @@ export function latestPlanStates(db: Db): Map<string, string> {
 
 const KEY_STEP = "s.phase = 'core' AND s.op IN ('agents.offboard', 'agents.rotate') AND s.state IN ('done', 'reported')";
 
+/** C383: when Core last removed each agent's access and key. A new key alone does not count. */
+export const accessRemovedAt = (db: Db): Map<string, number> =>
+  new Map(db.prepare("SELECT s.agent_id AS id, MAX(s.updated_at) AS at FROM fleet_plan_steps s WHERE s.phase = 'core' AND s.op = 'agents.offboard' AND s.state IN ('done', 'reported') GROUP BY s.agent_id").all().map((r) => [String(r.id), Number(r.at)]));
+
 /** When Core last said each agent's key is gone. It counts only if that came after the agent's current stop: an agent brought back has a new key. One query for the whole list. */
 export function keyEndedAt(db: Db): Map<string, number> {
   return new Map(db.prepare(`SELECT s.agent_id AS id, MAX(s.updated_at) AS at FROM fleet_plan_steps s WHERE ${KEY_STEP} GROUP BY s.agent_id`).all().map((r) => [String(r.id), Number(r.at)]));

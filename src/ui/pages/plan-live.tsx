@@ -111,7 +111,7 @@ export async function sendPlan(input: PlanSendInput): Promise<string | null> {
   }
 }
 
-export function PlanLive({ kind, id, since, portalHref, sendFailure, onEnded }: { kind: "person" | "agent"; id: string; since?: string | null; portalHref?: string; sendFailure?: string | null; onEnded?: () => void }) {
+export function PlanLive({ kind, id, since, portalHref, sendFailure, onEnded, removed = false }: { kind: "person" | "agent"; id: string; since?: string | null; portalHref?: string; sendFailure?: string | null; onEnded?: () => void; removed?: boolean }) {
   const [plans, setPlans] = useState<Plan[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -194,7 +194,7 @@ export function PlanLive({ kind, id, since, portalHref, sendFailure, onEnded }: 
         error ? null : (
           <Loading what="the plan" />
         )
-      ) : latest.length === 0 ? (
+      ) : latest.length === 0 && removed ? null : latest.length === 0 ? (
         <div className="tb-row">
           <span className="tb-soft">No request has been prepared for this entry.</span>
           <Button disabled={busy} onClick={() => void prepare()}>
