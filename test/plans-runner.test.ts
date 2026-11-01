@@ -29,7 +29,7 @@ test("a firing: nothing stops at the app until the owner approves; done only aft
   // asked, never named: the draft says nothing about who or why
   const d = w.core.open()[0];
   assert.ok(d);
-  assert.equal(d.title, "Governance: stop request");
+  assert.equal(d.title, "Governance: request for your approval");
   assert.deepEqual(d.steps, [{ opId: "agents.offboard", agt: HENRY }]);
   assert.equal(w.plan(id).state, "waiting");
   assert.equal(w.connect.data.handled.length, 0, "no app step before the approval");
@@ -648,13 +648,33 @@ test("A34: a person with agents: the sender bar runs at once, before the owner a
   w.connect.add({ id: "channel_sender:slack:UANN", kind: "channel_sender", subject: { kind: "person", id: w.ann.id }, resource: "slack:UANN", level: "use", label: "Slack sender" });
   account(w);
   set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  // C381: the person leaving has no Core step. Both agents have their own stop, so the person's plan holds their pause
+  set(w.db, "agent", HENRY, "suspended", {}, w.clock.t);
+  set(w.db, "agent", SALES, "suspended", {}, w.clock.t);
   const id = w.makePlan({ kind: "person", id: w.ann.id });
   await w.tick(id);
   assert.deepEqual(w.connect.data.ended, ["channel_sender:slack:UANN"]);
   assert.equal(w.plan(id).state, "waiting");
   assert.equal(w.item(id, "account_as_itself:acc1").state, "pending", "it waits for Core");
   assert.deepEqual(w.core.open()[0]?.steps.map((s) => s.agt).sort(), [HENRY, SALES].sort());
-  assert.deepEqual(w.core.open()[0]?.steps.map((s) => s.opId), ["agents.pause", "agents.pause"], "undecided agents are effectively suspended: pause, not offboard");
+  assert.deepEqual(w.core.open()[0]?.steps.map((s) => s.opId), ["agents.pause", "agents.pause"], "agents with a suspended stop of their own: pause, not offboard");
+});
+
+test("C381: a person marked leaving whose agents have no stop of their own: the plan has no Core step, only the sender bar runs, and the agents are untouched", async () => {
+  const w = makeWorld();
+  w.db.prepare("INSERT INTO fleet_handles (handle, person_id, created_at) VALUES ('slack:UANN', ?, 1)").run(w.ann.id);
+  w.connect.add({ id: "channel_sender:slack:UANN", kind: "channel_sender", subject: { kind: "person", id: w.ann.id }, resource: "slack:UANN", level: "use", label: "Slack sender" });
+  account(w);
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  const id = w.makePlan({ kind: "person", id: w.ann.id });
+  assert.equal(w.plan(id).rail, "none");
+  assert.deepEqual(w.steps(id).filter((s) => s.phase === "core"), []);
+  await w.tick(id);
+  assert.equal(w.core.data.drafts.length, 0, "nothing in Portal");
+  assert.deepEqual(w.connect.data.ended, ["channel_sender:slack:UANN"], "the bar of the person ends");
+  assert.equal(w.steps(id).some((s) => s.item_id === "account_as_itself:acc1"), false, "the agent's account is not in the person's plan: the agent runs, and nothing of it is ended");
+  assert.equal(w.plan(id).state, "done");
+  assert.equal(w.core.data.agents[HENRY]?.status, "active", "the agent works on");
 });
 
 test("A34: a review plan: a Knowledge item ends on the owner's confirm; on a running agent a bound item becomes manual, not a wait for ever", async () => {
@@ -690,13 +710,18 @@ test("guard: a stale expectedRev is refused, and quiet with the right one", () =
   assert.ok(w.makePlan({ kind: "agent", id: HENRY, expectedRev: rev }));
 });
 
-test("a keep-running agent gets no Core step; a transfer gets a pause and a new key", () => {
+test("an agent with no stop of its own gets no Core step; a transfer gets a new key and no pause (C381)", () => {
   const w = makeWorld();
-  w.db.prepare("UPDATE fleet_agents SET keep_running = 1, keep_reason = 'x' WHERE id = ?").run(SALES);
   set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
   const id = w.makePlan({ kind: "person", id: w.ann.id, transfers: [SALES] });
   const core = w.steps(id).filter((s) => s.phase === "core").map((s) => `${String(s.op)} ${String(s.agent_id)}`);
-  assert.deepEqual(core, [`agents.pause ${HENRY}`, `agents.pause ${SALES}`, `agents.rotate ${SALES}`]);
+  assert.deepEqual(core, [`agents.rotate ${SALES}`]);
+  // an own stop of Henry in the same plan: its pause comes with it, and the transfer still has no pause
+  const v = makeWorld();
+  set(v.db, "agent", HENRY, "suspended", {}, v.clock.t);
+  set(v.db, "person", v.ann.id, "leaving", {}, v.clock.t);
+  const vid = v.makePlan({ kind: "person", id: v.ann.id, transfers: [SALES] });
+  assert.deepEqual(v.steps(vid).filter((s) => s.phase === "core").map((s) => `${String(s.op)} ${String(s.agent_id)}`), [`agents.pause ${HENRY}`, `agents.rotate ${SALES}`]);
 });
 
 test("split: above 100 Core steps, numbered plans, each under the limit, an agent's steps together; a plan's items wait for its own part", async () => {
@@ -709,6 +734,8 @@ test("split: above 100 Core steps, numbered plans, each under the limit, an agen
     w.core.addAgent(id, 0, 0);
   }
   set(w.db, "person", w.ann.id, "leaving", { noCap: true }, w.clock.t);
+  // C381: the person leaving has no Core step; each of the 103 agents has its own stop
+  for (const id of [HENRY, SALES, ...ids]) set(w.db, "agent", id, "suspended", { noCap: true }, w.clock.t);
   const made = w.makePlan({ kind: "person", id: w.ann.id });
   const parts = w.db.prepare("SELECT id, part, parts FROM fleet_plans WHERE group_id = ? ORDER BY part").all(made);
   assert.equal(parts.length, 2);
@@ -837,7 +864,7 @@ test("system plan alert: once with an Inbox; banner with none; a restart with an
   leave(v);
   const pid = v.makePlan({ kind: "agent", id: HENRY, actor: { kind: "system", id: null } });
   await v.tick(pid);
-  assert.deepEqual(bannerAlerts(v.db).map((b) => b.text), ["A stop request waits for your approval. No message was sent."]);
+  assert.deepEqual(bannerAlerts(v.db).map((b) => b.text), ["A request waits for your approval. No message was sent."]);
 });
 
 test("Portal stopped mid-way: `applying` for 30 minutes is said; no store step runs", async () => {

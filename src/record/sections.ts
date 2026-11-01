@@ -122,7 +122,8 @@ export function timeToStop(db: Db, from: number, to: number, names: Names) {
     const proved = real.filter((s) => s.state === "done");
     const said = real.filter((s) => s.state === "reported" || s.state === "not_provable");
     const manual = real.filter((s) => s.state === "manual");
-    const kept = all.filter((s) => s.state === "listed").length;
+    // C381: what a moved agent keeps is not this person's: the agent works on.
+    const kept = all.filter((s) => s.state === "listed" && !(m.subject_kind === "person" && s.subject_kind === "agent")).length;
     const unread = all.filter((s) => s.phase === "read" && s.state !== "done" && s.state !== "not_installed").length;
     const open = real.length - proved.length - said.length - manual.length - real.filter((s) => ["excepted", "not_installed", "cancelled"].includes(String(s.state))).length;
     const planned = plans.length > 0 && plans.every((p) => p.state === "done");

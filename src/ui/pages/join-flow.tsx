@@ -240,7 +240,7 @@ export function JoinFlow({ mode, portalHref, onClose, onChanged }: { mode: JoinM
         <Notice tone="neutral">This adds directory entries. It gives no access in any app and changes nothing in Portal.</Notice>
         {until ? (
           <Notice tone="neutral">
-            {`At the end of ${day} (UTC), Governance marks ${list ? "each of these people" : "this person"} as stopped. Their agents are then treated as stopped, and the steps to stop them in Portal wait for you. This needs Governance to be running then. Governance stops only a few people in 10 minutes on its own: if more end on one day, the others follow a little later. It does not end their own logins.`}
+            {`At the end of ${day} (UTC), Governance stops the access of ${list ? "each of these people" : "this person"}. Their agents keep working, and Governance shows that each needs an owner. This needs Governance to be running then. Governance stops only a few people in 10 minutes on its own: if more end on one day, the others follow a little later. It does not end their own logins.`}
           </Notice>
         ) : null}
       </div>

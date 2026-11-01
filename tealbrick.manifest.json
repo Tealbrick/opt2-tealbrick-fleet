@@ -4,8 +4,8 @@
   "id": "fleet",
   "name": "Governance",
   "summary": "Governance: who is who in your workspace, who owns which agent, and how far each person, outside agent and agent is trusted.",
-  "description": "Governance is the workspace's record of who should have access: one state per person and agent, with reasons and dates, and what no longer matches. It holds no grant and no credential, and it decides no call: Portal and Rules & Approvals do that.\n\n- **Summary:** how many agents you have, which have no owner, which can write or send, what no longer matches, and if you are ready to stop an agent.\n- **People and agents:** one line per person and agent: working, not reviewed, stop asked, paused. Each change has a reason and stays in the history.\n- **Stop an agent, or a person's agents:** one dialog for one agent, or a short flow for a person. Governance records the stop and lists what to do in Portal. Each screen says what does not change: their own logins, the agent's machine, copies already made.\n- **See what would stop:** a preview per app that changes nothing. Each app says what it reports; what could not be read says so, and is never shown as nothing.\n- **Differences:** what no longer matches. You can accept one with a reason until a date.\n- **Add people:** one person or a pasted list. Adding someone gives no access.\n- **Roles and Cannot hold both:** roles with dates, and pairs of roles one holder cannot hold. A role allows and stops nothing by itself. This checks roles only: Portal grants are not checked.\n- **Review rounds and Access record:** one review of each person and agent, and one file of what your apps reported for a period. The record is not proof of compliance.\n- **Reviews:** an agent can ask for a review and say why; only you decide. Each verdict is kept with a copy of what the subject could do at that time.\n- **Who owns what:** who owns which agent and who is in which team, as a table you can print for a security review.\n- **Contact rules:** you can propose a rule from a fixed template. It is sent to Rules & Approvals as a draft; you approve it there.\n- **Feed for apps:** Rules & Approvals and Knowledge read a small, versioned directory feed. It has no email addresses and no job titles.\n\nGovernance finds no agent you do not know about. People are directory entries, not sign-ins. This is a record for your own review, not proof of compliance.",
-  "version": "0.4.0-dev.100",
+  "description": "Governance is the workspace's record of who should have access: one state per person and agent, with reasons and dates, and what no longer matches. It holds no grant and no credential, and it decides no call: Portal and Rules & Approvals do that.\n\n- **Summary:** how many agents you have, which have no owner, which can write or send, what no longer matches, and if you are ready to stop an agent.\n- **People and agents:** one line per person and agent: working, not reviewed, needs an owner, paused. Each change has a reason and stays in the history.\n- **When a person leaves:** a short flow. The person is barred and loses what they hold. Their agents keep working: move each to a new owner, with a new key if the person may hold the old one. Each screen says what does not change: their own logins, the agent's machine, copies already made.\n- **Stop an agent:** one dialog for one agent. Governance records the stop and lists what to do in Portal.\n- **Who is refused:** who Rules & Approvals refuses before any rule, and why. Read it before you update Rules & Approvals.\n- **See what would change:** a preview per app that changes nothing. Each app says what it reports; what could not be read says so, and is never shown as nothing.\n- **Differences:** what no longer matches. You can accept one with a reason until a date.\n- **Add people:** one person or a pasted list. Adding someone gives no access.\n- **Roles and Cannot hold both:** roles with dates, and pairs of roles one holder cannot hold. A role allows and stops nothing by itself. This checks roles only: Portal grants are not checked.\n- **Review rounds and Access record:** one review of each person and agent, and one file of what your apps reported for a period. The record is not proof of compliance.\n- **Reviews:** an agent can ask for a review and say why; only you decide. Each verdict is kept with a copy of what the subject could do at that time.\n- **Who owns what:** who owns which agent and who is in which team, as a table you can print for a security review.\n- **Contact rules:** you can propose a rule from a fixed template. It is sent to Rules & Approvals as a draft; you approve it there.\n- **Feed for apps:** Rules & Approvals and Knowledge read a small, versioned directory feed. It has no email addresses and no job titles.\n\nGovernance finds no agent you do not know about. People are directory entries, not sign-ins. This is a record for your own review, not proof of compliance.",
+  "version": "0.4.0-dev.101",
   "sdkMajor": 1,
   "requires": {
     "bridge": "0.2.14"
@@ -1416,6 +1416,22 @@
                 },
                 "relationship": {
                   "type": "string"
+                },
+                "lifecycle": {
+                  "anyOf": [
+                    {
+                      "enum": [
+                        "proposed",
+                        "active",
+                        "suspended",
+                        "leaving",
+                        "archived"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               }
             }
@@ -1754,6 +1770,9 @@
                 "type": "null"
               }
             ]
+          },
+          "sameName": {
+            "type": "boolean"
           }
         }
       },
@@ -1868,6 +1887,22 @@
               },
               "relationship": {
                 "type": "string"
+              },
+              "lifecycle": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "proposed",
+                      "active",
+                      "suspended",
+                      "leaving",
+                      "archived"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             }
           }
@@ -1995,7 +2030,8 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "team"
+          "team",
+          "movers"
         ],
         "properties": {
           "team": {
@@ -2073,6 +2109,43 @@
                       }
                     }
                   }
+                }
+              }
+            }
+          },
+          "movers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "gains",
+                "loses"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "gains": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "loses": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               }
             }
@@ -5895,7 +5968,6 @@
                 "findings",
                 "validFrom",
                 "validUntil",
-                "keepRunning",
                 "at"
               ],
               "properties": {
@@ -6018,9 +6090,6 @@
                     }
                   ]
                 },
-                "keepRunning": {
-                  "type": "boolean"
-                },
                 "at": {
                   "anyOf": [
                     {
@@ -6107,13 +6176,11 @@
               "findings",
               "validFrom",
               "validUntil",
-              "keepRunning",
               "at",
               "title",
               "rev",
               "reason",
               "note",
-              "keepReason",
               "teams",
               "agents",
               "actions",
@@ -6122,7 +6189,10 @@
               "floor",
               "grantsBefore",
               "notices",
-              "history"
+              "history",
+              "defaultOwner",
+              "reach",
+              "newKeyAsked"
             ],
             "properties": {
               "kind": {
@@ -6244,9 +6314,6 @@
                   }
                 ]
               },
-              "keepRunning": {
-                "type": "boolean"
-              },
               "at": {
                 "anyOf": [
                   {
@@ -6275,16 +6342,6 @@
                 ]
               },
               "note": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "keepReason": {
                 "anyOf": [
                   {
                     "type": "string"
@@ -6339,7 +6396,6 @@
                     "findings",
                     "validFrom",
                     "validUntil",
-                    "keepRunning",
                     "at"
                   ],
                   "properties": {
@@ -6461,9 +6517,6 @@
                           "type": "null"
                         }
                       ]
-                    },
-                    "keepRunning": {
-                      "type": "boolean"
                     },
                     "at": {
                       "anyOf": [
@@ -6889,6 +6942,67 @@
                   }
                 },
                 "maxItems": 100
+              },
+              "defaultOwner": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "name"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "reach": {
+                "type": "array",
+                "maxItems": 100,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "name",
+                    "agents",
+                    "more"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "team",
+                        "role"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "agents": {
+                      "type": "array",
+                      "maxItems": 20,
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "more": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              },
+              "newKeyAsked": {
+                "type": "boolean"
               }
             }
           }
@@ -7006,13 +7120,8 @@
                 },
                 "decision": {
                   "enum": [
-                    "stop",
-                    "keep"
+                    "stop"
                   ]
-                },
-                "reason": {
-                  "type": "string",
-                  "maxLength": 200
                 }
               }
             },
@@ -7044,13 +7153,11 @@
               "findings",
               "validFrom",
               "validUntil",
-              "keepRunning",
               "at",
               "title",
               "rev",
               "reason",
               "note",
-              "keepReason",
               "teams",
               "agents",
               "actions",
@@ -7059,7 +7166,10 @@
               "floor",
               "grantsBefore",
               "notices",
-              "history"
+              "history",
+              "defaultOwner",
+              "reach",
+              "newKeyAsked"
             ],
             "properties": {
               "kind": {
@@ -7181,9 +7291,6 @@
                   }
                 ]
               },
-              "keepRunning": {
-                "type": "boolean"
-              },
               "at": {
                 "anyOf": [
                   {
@@ -7212,16 +7319,6 @@
                 ]
               },
               "note": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "keepReason": {
                 "anyOf": [
                   {
                     "type": "string"
@@ -7276,7 +7373,6 @@
                     "findings",
                     "validFrom",
                     "validUntil",
-                    "keepRunning",
                     "at"
                   ],
                   "properties": {
@@ -7398,9 +7494,6 @@
                           "type": "null"
                         }
                       ]
-                    },
-                    "keepRunning": {
-                      "type": "boolean"
                     },
                     "at": {
                       "anyOf": [
@@ -7826,6 +7919,67 @@
                   }
                 },
                 "maxItems": 100
+              },
+              "defaultOwner": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "name"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "reach": {
+                "type": "array",
+                "maxItems": 100,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "name",
+                    "agents",
+                    "more"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "team",
+                        "role"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "agents": {
+                      "type": "array",
+                      "maxItems": 20,
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "more": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              },
+              "newKeyAsked": {
+                "type": "boolean"
               }
             }
           },
@@ -8003,8 +8157,8 @@
     },
     {
       "id": "plan_preview",
-      "title": "See what would stop",
-      "description": "What each app reports now for one person or agent, and what a stop would do to each item. It changes nothing. A store that was not read says so; it is never shown as empty. Owner only.",
+      "title": "See what would change",
+      "description": "What each app reports now for one person or agent, and what a change would do to each item. A person's agents keep working, so what they hold stays unless `stopping` names them. It changes nothing. A store that was not read says so; it is never shown as empty. Owner only.",
       "crud": [
         "read"
       ],
@@ -8030,6 +8184,15 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 64
+          },
+          "stopping": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^agt_[0-9A-HJKMNP-TV-Z]{26}$"
+            },
+            "maxItems": 400,
+            "uniqueItems": true
           }
         }
       },
@@ -8447,8 +8610,8 @@
     },
     {
       "id": "plan_send",
-      "title": "Make a stop plan",
-      "description": "Prepare the plan for a person or agent you stopped: what your confirm ends at once, and what waits for your approval in Portal. With no choice an agent is only paused, and its key stays until you choose. Choose per agent in `decisions` to finish in this one approval: stop and remove, move to `newOwner` with a new key, or keep running with a `reason`. Governance applies nothing in Portal; you approve there. Answers at once; read the progress with plan_get. Only you can do this. No agent can call it.",
+      "title": "Make a plan",
+      "description": "Prepare the plan for a person or agent you marked: what your confirm ends at once, and what waits for your approval in Portal. A person's agents keep working. Choose per agent in `decisions`: move to `newOwner`, with a new key unless `newKey` is false, or stop and remove. An agent with no choice keeps running, and a finding says it needs an owner. A new key means the agent must be connected again after you approve. Governance applies nothing in Portal; you approve there. Answers at once; read the progress with plan_get. Only you can do this. No agent can call it.",
       "input": {
         "type": "object",
         "additionalProperties": false,
@@ -8500,18 +8663,16 @@
                 "decision": {
                   "enum": [
                     "stop",
-                    "transfer",
-                    "keep"
+                    "transfer"
                   ]
-                },
-                "reason": {
-                  "type": "string",
-                  "maxLength": 200
                 },
                 "newOwner": {
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 64
+                },
+                "newKey": {
+                  "type": "boolean"
                 }
               }
             }
@@ -8835,7 +8996,7 @@
     },
     {
       "id": "plan_get",
-      "title": "Read stop plans",
+      "title": "Read plans",
       "description": "The plans of one entry, one plan, or every open plan, with each step in words: what is proved, what someone only said, what is still open. Also the alerts that reached nobody. Only you can do this.",
       "input": {
         "type": "object",
@@ -9159,7 +9320,7 @@
     },
     {
       "id": "plan_retry",
-      "title": "Try a stop plan again",
+      "title": "Try a plan again",
       "description": "Ask again after a refusal, a failed step, an expiry or a rejection. A new attempt goes out only after Governance read the store again, with what is still open. Only you can do this.",
       "input": {
         "type": "object",
@@ -9451,7 +9612,7 @@
     },
     {
       "id": "plan_cancel",
-      "title": "Cancel a stop plan",
+      "title": "Cancel a plan",
       "description": "Take the request back from Portal and stop what has not run. What was already applied stays. Each part of a split plan answers with its own state; `left` counts the parts that still stand in Portal. Only you can do this.",
       "input": {
         "type": "object",
@@ -11313,7 +11474,7 @@
     {
       "id": "round_verdict",
       "title": "Decide one entry of a round",
-      "description": "Record the review of one entry of a round, and if you tick access to remove, make a stop plan for it by the same path as any plan. Nothing is removed until the plan runs and the app confirms. Owner only. No agent can call it.",
+      "description": "Record the review of one entry of a round, and if you tick access to remove, make a plan for it by the same path as any plan. Nothing is removed until the plan runs and the app confirms. Owner only. No agent can call it.",
       "crud": [
         "update"
       ],
@@ -12224,6 +12385,189 @@
       "idempotency": "required",
       "receipt": false,
       "audience": "person"
+    },
+    {
+      "id": "refusals_get",
+      "title": "See who is refused",
+      "description": "Who Rules refuses before any rule, and why: what starts to refuse with this update, what else is refused, and the agents that keep working and need an owner. It changes nothing. Owner only.",
+      "crud": [
+        "read"
+      ],
+      "effect": "read",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "person",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "generatedAt",
+          "rules",
+          "startsWithUpdate",
+          "startsTotal",
+          "alsoRefused",
+          "alsoTotal",
+          "keepWorking",
+          "keepTotal"
+        ],
+        "properties": {
+          "generatedAt": {
+            "type": "string"
+          },
+          "rules": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "state",
+              "text"
+            ],
+            "properties": {
+              "state": {
+                "enum": [
+                  "reads",
+                  "not_installed",
+                  "older",
+                  "not_read"
+                ]
+              },
+              "text": {
+                "type": "string"
+              }
+            }
+          },
+          "startsWithUpdate": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "id",
+                "name",
+                "why",
+                "text"
+              ],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "person",
+                    "outside_agent",
+                    "agent"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "why": {
+                  "enum": [
+                    "blocked",
+                    "left_before_update",
+                    "stopped",
+                    "not_started"
+                  ]
+                },
+                "text": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "startsTotal": {
+            "type": "integer"
+          },
+          "alsoRefused": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "id",
+                "name",
+                "why",
+                "text"
+              ],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "person",
+                    "outside_agent",
+                    "agent"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "why": {
+                  "enum": [
+                    "blocked",
+                    "left_before_update",
+                    "stopped",
+                    "not_started"
+                  ]
+                },
+                "text": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "alsoTotal": {
+            "type": "integer"
+          },
+          "keepWorking": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "name",
+                "owner",
+                "paused"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "owner": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "paused": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "keepTotal": {
+            "type": "integer"
+          }
+        }
+      }
     }
   ],
   "hooks": [
@@ -12253,7 +12597,7 @@
         "read",
         "update"
       ],
-      "purpose": "Reads agent identities, first contacts and access for the owner's pages; ends an item only in a stop plan you confirmed. Never shown to agents."
+      "purpose": "Reads agent identities, first contacts and access for the owner's pages; ends an item only in a plan you confirmed. Never shown to agents."
     },
     {
       "product": "rules",
@@ -12278,7 +12622,7 @@
         "read",
         "update"
       ],
-      "purpose": "Reads what Knowledge reports for the owner's Access pages, and ends an item only in a stop plan you confirmed. Never shown to agents."
+      "purpose": "Reads what Knowledge reports for the owner's Access pages, and ends an item only in a plan you confirmed. Never shown to agents."
     },
     {
       "product": "kanban",
@@ -12300,7 +12644,7 @@
         "read",
         "update"
       ],
-      "purpose": "Reads each agent's routines and steps for the owner's Access pages, and pauses a routine only in a stop plan you confirmed. Never shown to agents."
+      "purpose": "Reads each agent's routines and steps for the owner's Access pages, and pauses a routine only in a plan you confirmed. Never shown to agents."
     },
     {
       "product": "inbox",

@@ -2,7 +2,7 @@
 import { callOp } from "@opt2-tealbrick/miniapp-sdk/client";
 import { type AccessChange, AccessEditor, Button, Card, EmptyState, Field, Notice, Tag, TextInput } from "@opt2-tealbrick/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { MembersSetInput, TeamSetInput } from "#kit";
+import type { MembersSetInput, MembersSetOutput, TeamSetInput } from "#kit";
 import { changeError, EditDialog, PageHead } from "../common.tsx";
 import { memberCells, memberPreview, membersAfter, subjectKey } from "./many.ts";
 import { csv, DeleteButton, type Dir, loadDirectory, type Reload, type Team } from "./shared.tsx";
@@ -51,20 +51,28 @@ function MembersView({ team, dir, onBack, reload }: { team: Team; dir: Dir; onBa
       ...dir.people.map((p) => ({
         id: subjectKey("person", p.id),
         name: p.name,
-        note: p.kind === "outside_agent" ? "Outside agent" : p.status === "departed" ? "Person, left" : "Person",
+        note: p.kind === "outside_agent" ? "Outside agent" : p.lifecycle === "active" ? "Person" : p.lifecycle === "suspended" ? "Person, access stop asked" : "Person, left",
       })),
       // an agent that left Portal keeps its place in a team: it is listed only while it is a member
       ...dir.agents.filter((a) => a.status !== "removed" || inTeam.has(subjectKey("agent", a.id))).map((a) => ({ id: subjectKey("agent", a.id), name: a.name, note: a.status === "removed" ? "Agent, not in Portal" : "Agent" })),
     ],
     [dir.people, dir.agents, inTeam],
   );
+  // A write in flight has no way to answer a page that left: Back waits for it, so the log and the list stay true.
+  const [writing, setWriting] = useState(0);
+  const [moved, setMoved] = useState<MembersSetOutput["movers"]>([]);
   const writeMany = useCallback(
     async (changes: readonly AccessChange[]) => {
-      // members_set replaces the list: read it now, change only what this click changes, send it once
-      const now = (await loadDirectory()).teams.find((t) => t.id === team.id);
-      if (!now) throw Object.assign(new Error("This team is gone."), { code: "team_not_found" });
-      const input: MembersSetInput = { team: team.id, ...membersAfter(now.members, changes) };
-      await callOp("members_set", input);
+      setWriting((n) => n + 1);
+      try {
+        // members_set replaces the list: read it now, change only what this click changes, send it once
+        const now = (await loadDirectory()).teams.find((t) => t.id === team.id);
+        if (!now) throw Object.assign(new Error("This team is gone."), { code: "team_not_found" });
+        const input: MembersSetInput = { team: team.id, ...membersAfter(now.members, changes) };
+        setMoved((await callOp<MembersSetOutput>("members_set", input)).movers ?? []);
+      } finally {
+        setWriting((n) => n - 1);
+      }
     },
     [team.id],
   );
@@ -78,8 +86,17 @@ function MembersView({ team, dir, onBack, reload }: { team: Team; dir: Dir; onBa
       <PageHead
         title={`Members of ${team.name}`}
         lede="Rules & Approvals can use this list in a rule, so a change here can change what is allowed."
-        action={<Button onClick={onBack}>Back to teams</Button>}
+        action={
+          <Button onClick={onBack} disabled={writing > 0}>
+            Back to teams
+          </Button>
+        }
       />
+      {moved.length > 0 ? (
+        <Notice tone="neutral" role="status">
+          {moved.map((m) => (m.gains ? `${m.name} gains ${m.gains}` : `${m.name} loses ${m.loses}`)).join(" ")}
+        </Notice>
+      ) : null}
       <AccessEditor
         agents={who}
         scopes={scopes}

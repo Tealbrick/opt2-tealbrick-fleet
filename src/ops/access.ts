@@ -26,14 +26,14 @@ export const accessOps = {
     // No state: it reads what each app reports and keeps none of it. It runs no plan and moves no feed revision.
     async run(input, ctx) {
       assertPerson(ctx.caller);
-      return planPreview(opEnv(ctx as SdkOpContext), ctx.db, input.kind, input.id, readTopology(ctx));
+      return planPreview(opEnv(ctx as SdkOpContext), ctx.db, input.kind, input.id, readTopology(ctx), Date.now(), undefined, input.stopping ?? []);
     },
   }),
   [OP.findingsList]: op<FindingsListInput, FindingsListOutput>({
     async run(_input, ctx) {
       assertPerson(ctx.caller);
       const now = Date.now();
-      return findingsList(ctx.db, subjectsOf(loadColleagues(ctx.db, now).rows), portalReadState(readTopology(ctx)), now);
+      return findingsList(ctx.db, subjectsOf(loadColleagues(ctx.db, now, readTopology(ctx)).rows), portalReadState(readTopology(ctx)), now);
     },
   }),
   [OP.exceptionSet]: op<ExceptionSetInput, ExceptionSetOutput>({

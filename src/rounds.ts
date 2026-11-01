@@ -261,7 +261,7 @@ export function decide(db: Db, reviewer: string, input: DecideInput, now = Date.
       seen.add(key);
     }
     // The plan guards run first, so a refused plan does not leave a verdict without its removal.
-    if (ticks.length > 0 && checkPlan(db, { kind: input.subject.kind, id: input.subject.id, items: ticks, actor: { kind: "owner", id: reviewer } }).steps.length > 0) fail("plan_needs_portal", "This entry is stopped, or its owner is leaving. Make its stop plan on its own page. A review does not ask Portal for anything.", 409);
+    if (ticks.length > 0 && checkPlan(db, { kind: input.subject.kind, id: input.subject.id, items: ticks, actor: { kind: "owner", id: reviewer } }).steps.length > 0) fail("plan_needs_portal", "This entry, or an agent of this person, has a stop. Make its plan on its own page. A review does not ask Portal for anything.", 409);
     recordReview(db, reviewer, { subject: { kind: input.subject.kind, id: input.subject.id }, verdict: input.verdict, reason: input.reason, snapshotDigest: input.snapshotDigest, request: String(c.review_id) }, now);
     db.prepare("UPDATE fleet_campaign_items SET seen_count = ?, seen_digest = ? WHERE round_id = ? AND review_id = ?").run(rows.length, input.accessDigest, input.round, String(c.review_id));
     const placed = ticks.length > 0 ? schedule(db, c, ticks, reviewer, now) : null;

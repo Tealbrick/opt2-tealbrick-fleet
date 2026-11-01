@@ -17,6 +17,20 @@ export function nextInLoop<T>(list: readonly T[], active: T | null, back: boolea
 
 const visible = (el: Element) => el.getClientRects().length > 0 && el.getAttribute("tabindex") !== "-1";
 
+/**
+ * QA D12: Tab reaches one radio per group, the checked one (or the first when none is). The others in the list are not stops: with one of them last, focus never equalled
+ * "last", and Tab ran out of the dialog to the browser.
+ */
+export function tabStops<T extends { type?: string; name?: string; checked?: boolean }>(list: readonly T[]): T[] {
+  const groups = new Map<string, T[]>();
+  for (const el of list) if (el.type === "radio" && el.name) groups.set(el.name, [...(groups.get(el.name) ?? []), el]);
+  return list.filter((el) => {
+    if (el.type !== "radio" || !el.name) return true;
+    const group = groups.get(el.name) ?? [];
+    return (group.find((r) => r.checked) ?? group[0]) === el;
+  });
+}
+
 export function keepDialogFocus(doc: Document): void {
   let opener: HTMLElement | null = null;
   const openDialog = () => [...doc.querySelectorAll("dialog[open]")].at(-1) ?? null;
@@ -36,7 +50,7 @@ export function keepDialogFocus(doc: Document): void {
       if (e.key !== "Tab") return;
       const dialog = openDialog();
       if (!dialog) return;
-      const list = [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(visible);
+      const list = tabStops([...dialog.querySelectorAll<HTMLInputElement>(FOCUSABLE)].filter(visible));
       const to = nextInLoop(list, doc.activeElement as HTMLElement | null, e.shiftKey);
       if (to) {
         e.preventDefault();

@@ -26,7 +26,8 @@ const validIn = (id: string, input: unknown) => validateAgainstSchema(specOf(id)
 test("the two ops are person ops, appended last, with the roles-only line in their words; the agent surface did not change", () => {
   assert.equal(validateManifest(manifest).ok, true);
   const ids = manifest.operations.map((o) => o.id as string);
-  assert.deepEqual(ids.slice(-EXCLUSION_OPS.length), EXCLUSION_OPS, "appended after every op of the lanes before");
+  assert.deepEqual(ids.slice(-EXCLUSION_OPS.length - 1, -1), EXCLUSION_OPS, "appended after every op of the lanes before; C381 refusals_get is the one op after them");
+  assert.equal(ids.at(-1), "refusals_get");
   for (const id of EXCLUSION_OPS) {
     assert.equal(specOf(id).audience, "person", id);
     assert.match(specOf(id).description, /This checks roles only\. Portal grants are not checked\./, id);

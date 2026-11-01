@@ -10,7 +10,7 @@ export const storeName = (t: string): string => NAMES[t] ?? t;
 export function coreLabel(op: string, name: string): string {
   if (op === "agents.pause") return `Pause ${name}`;
   if (op === "agents.offboard") return `Stop ${name} and remove its access`;
-  return `Remove the old key of ${name}`;
+  return `Make a new key for ${name}: it must be connected again`;
 }
 
 /** `undecided`: this agent is paused now, and no choice was made for it. */
@@ -23,7 +23,7 @@ export function coreStepText(s: Row, mode: string, undecided = false): string {
     case "pending_bridge":
       return "Portal says this is done. The bridge has not shown it yet.";
     case "done":
-      return pause ? (undecided ? KEY_STILL_EXISTS : "Stopped at the bridge.") : s.op === "agents.offboard" ? "Stopped at the bridge. Portal shows no access left." : "Portal shows no old key left.";
+      return pause ? (undecided ? KEY_STILL_EXISTS : "Stopped at the bridge.") : s.op === "agents.offboard" ? "Stopped at the bridge. Portal shows no access left." : "Portal shows no old key left. Connect this agent again in Portal.";
     case "reported":
       return String(s.detail ?? "Portal says this is done. Governance cannot see it.");
     case "not_provable":
@@ -106,7 +106,7 @@ export function headlineOf(p: Row, counts: { proved: number; said: number; manua
       return p.code === "core_failed" ? "Portal stopped on a step. Open Portal and apply it again." : "Part of this did not work. Look at the open steps.";
     case "done":
       if (counts.manual > 0) return `Governance did its part. ${counts.manual} are for someone to do by hand.`;
-      return counts.proved > 0 ? "Done. Each step is proved by the app or Portal that owns it." : "Nothing was left to end.";
+      return counts.proved > 0 ? "Done. Each step is proved by the app or Portal that owns it." : "Done. Nothing waits for you in Portal.";
     case "reported":
       return link ? `Governance could not see ${counts.said} of the steps. Check them in Portal.` : `Portal says this is done. Governance could not see ${counts.said} of the steps.`;
     case "expired":
@@ -128,7 +128,7 @@ export function headlineOf(p: Row, counts: { proved: number; said: number; manua
   }
 }
 
-export const noteKeys = (n: number): string => `${n === 1 ? "1 agent stays" : `${n} agents stay`} paused with the key. Choose for each: stop and remove, move to a new owner, or keep running.`;
+export const noteKeys = (n: number): string => `${n === 1 ? "1 agent you stopped stays" : `${n} agents you stopped stay`} paused with the key. Resume each, or use Stop and remove access.`;
 export const NOTE_NOT_REACHED = "Portal did not answer when you asked to take this back, so it could still be applied. Try that again.";
 export const NOTE_APPROVED_FIRST = "You approved this part in Portal first. It cannot be taken back here.";
 export const NOTE_MIXED = "The parts of this plan do not all have the same state. Read each part.";

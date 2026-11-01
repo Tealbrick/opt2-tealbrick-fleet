@@ -28,14 +28,15 @@ export const NOT_APPLIED = "Not applied: do these in Portal";
 /** The manifest's maxItems of `plan.steps`. */
 export const MAX_STEPS = 400;
 
-/** The Confirm screen's "Not changed" block (DESIGN-C380 §9). On the screen, not only in docs. */
+/** The Confirm screen's "Not changed" block (DESIGN-C380 §9, C381). On the screen, not only in docs. */
 export const NOT_CHANGED: readonly string[] = [
+  "Their agents. Agents keep working when a person leaves, unless you choose Stop this agent for one.",
+  "A key to one of their agents that this person may hold. It works until you make a new key.",
   "Their own logins, such as Slack, Google or a bank.",
-  "The agent's machine and its native tools.",
+  "An agent's machine and its native tools.",
   "Copies of data that were already made.",
   "Other people with the shared Portal login. Change the Portal login if they had it.",
-  "Engine steps after an agent step.",
-  "Scheduled posts before you approve.",
+  "For an agent you stop: engine steps after an agent step, and scheduled posts before you approve.",
   "An agent can still send to a Slack direct message id it already knows. Governance bars what comes in from that person, not this.",
   "Channels or groups the person is still in. The sender bar does not cover them.",
   "Messages read through tool accounts.",

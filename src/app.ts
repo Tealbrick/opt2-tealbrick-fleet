@@ -10,7 +10,7 @@ import { accessJobs } from "./access/env.ts";
 import { lastSweepAt, SWEEP_CRON, SWEEP_CRON_JOB } from "./access/sweep.ts";
 import { startAgentHandlesTimer } from "./agent-handles.ts";
 import { factsAnswer } from "./facts.ts";
-import { noteRestore } from "./lifecycle/events.ts";
+import { noteOwnerRule, noteRestore } from "./lifecycle/events.ts";
 import { assignDefaultOwner } from "./lifecycle/settings.ts";
 import { startDatesTimer } from "./lifecycle/validity.ts";
 import { accessOps } from "./ops/access.ts";
@@ -76,6 +76,7 @@ export const definition: SdkAppDefinition = {
   // Each minute (C380 §5): the plans job. A plan's state lives in its tables, so a restart goes on by itself.
   async onStart(ctx) {
     noteRestore(ctx.db, Date.now());
+    noteOwnerRule(ctx.db, Date.now());
     stopDatesTimer = startDatesTimer(ctx.db, ctx.log);
     stopRolesTimer = startRolesTimer(ctx.db, ctx.log);
     releaseTicks(ctx.db);

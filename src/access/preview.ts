@@ -20,7 +20,8 @@ interface Agent {
   id: string;
   name: string;
   status: string;
-  keepRunning: boolean;
+  /** C381: stays, unless the subject is this agent or the owner chose to stop it */
+  keeps: boolean;
 }
 
 const iso = (ms: number): string => new Date(ms).toISOString();
@@ -38,7 +39,7 @@ const ofAgent = (a: Agent | undefined, subjectId: string, label: string): string
 
 function toRow(i: AccessItem, subjectId: string, agents: ReadonlyMap<string, Agent>): Row {
   const owned = i.subject.kind === "agent" ? agents.get(i.subject.id) : undefined;
-  return { id: i.id, kind: i.kind, label: ofAgent(owned, subjectId, i.label), level: i.level, direction: i.direction, state: i.state, effect: effectOf(i, owned?.keepRunning === true), who: null };
+  return { id: i.id, kind: i.kind, label: ofAgent(owned, subjectId, i.label), level: i.level, direction: i.direction, state: i.state, effect: effectOf(i, owned?.keeps === true), who: null };
 }
 
 /** 32 subjects per call. */
@@ -108,7 +109,7 @@ function portalStore(topology: DecodedTopology | null, agents: readonly Agent[],
     const running = a.status === "active";
     const gone = a.status === "removed";
     // Only a running agent has anything to stop here: a paused one stays paused, and its grants already do nothing.
-    const effect = running && !a.keepRunning ? "stops" : "stays";
+    const effect = running && !a.keeps ? "stops" : "stays";
     const row = (r: Pick<Row, "id" | "kind" | "label" | "level" | "state">): Row => ({ ...r, label: ofAgent(a, subjectId, r.label), direction: "held_by", effect, who: null });
     items.push(row({ id: `runtime:${a.id}`, kind: "agent_runtime", label: gone ? "Not listed in Portal" : running ? "Runs now" : "Paused in Portal", level: "use", state: gone ? "dormant" : running ? "active" : "paused" }));
     for (const e of topology?.edges.filter((x) => x.agent === a.id) ?? []) {
@@ -126,12 +127,13 @@ function portalStore(topology: DecodedTopology | null, agents: readonly Agent[],
   return { product: "core", name: "Portal", state: "read", text: null, at: iso(now), notShown, items };
 }
 
-export async function planPreview(env: AccessEnv, db: Db, kind: "person" | "agent", id: string, topology: DecodedTopology | null, now = Date.now(), budgetMs = STORE_BUDGET_MS): Promise<PlanPreviewOutput> {
-  const toAgent = (r: Record<string, unknown>): Agent => ({ id: String(r.id), name: String(r.name), status: String(r.status), keepRunning: Number(r.keep_running) === 1 });
-  const row = db.prepare(kind === "agent" ? "SELECT id, name, status, keep_running FROM fleet_agents WHERE id = ?" : "SELECT id, name FROM fleet_people WHERE id = ? AND kind = 'person'").get(id);
+export async function planPreview(env: AccessEnv, db: Db, kind: "person" | "agent", id: string, topology: DecodedTopology | null, now = Date.now(), budgetMs = STORE_BUDGET_MS, stopping: readonly string[] = []): Promise<PlanPreviewOutput> {
+  // C381: a person's change leaves their agents as they are. Only an agent itself, or one the owner chose to stop, has anything that would stop.
+  const toAgent = (r: Record<string, unknown>): Agent => ({ id: String(r.id), name: String(r.name), status: String(r.status), keeps: kind === "person" && !stopping.includes(String(r.id)) });
+  const row = db.prepare(kind === "agent" ? "SELECT id, name, status FROM fleet_agents WHERE id = ?" : "SELECT id, name FROM fleet_people WHERE id = ? AND kind = 'person'").get(id);
   if (!row) return fail(kind === "agent" ? "agent_not_found" : "person_not_found", "No such entry.", 404);
-  // A person's stop reaches the agents the person owns (§2). A card that is gone stays in the read: an app may still list what it held.
-  const agents = kind === "agent" ? [toAgent(row)] : db.prepare("SELECT id, name, status, keep_running FROM fleet_agents WHERE owner_id = ? ORDER BY name COLLATE NOCASE, id").all(id).map(toAgent);
+  // A card that is gone stays in the read: an app may still list what it held.
+  const agents = kind === "agent" ? [toAgent(row)] : db.prepare("SELECT id, name, status FROM fleet_agents WHERE owner_id = ? ORDER BY name COLLATE NOCASE, id").all(id).map(toAgent);
   const subjects: ListSubject[] = kind === "agent" ? [{ kind: "agent", id }] : [personSubject(db, id), { kind: "unlinked" }, ...agents.map((a): ListSubject => ({ kind: "agent", id: a.id }))];
   const byId = new Map(agents.map((a) => [a.id, a]));
   const reads = await Promise.all(ACCESS_TARGETS.map((t) => readStore(env, db, t, subjects, { id, agents: byId }, now, budgetMs)));

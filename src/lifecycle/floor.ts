@@ -31,6 +31,14 @@ export const FLOOR_TEXT = {
   older: "Rules & Approvals is installed, but this version has no early stop. Update it.",
   not_read: "Rules & Approvals could not be read. Nothing may stop until you approve in Portal.",
 } as const;
+/** N2-4: whether the list of who is refused holds now, in words for the owner. */
+export const FLOOR_READ_TEXT = {
+  reads: "Rules & Approvals reads this list, so these entries are refused now if its hook is on.",
+  not_installed: "Rules & Approvals is not installed, so nothing here is refused yet.",
+  older: "This version of Rules & Approvals does not read this list, so nothing here is refused yet. Update Rules & Approvals when you have read it.",
+  not_read: "Rules & Approvals could not be read, so Governance cannot say if these entries are refused now.",
+} as const;
+
 /** A gate this old, while agents run, is worth a line. */
 export const GATE_STALE_MS = 15 * 60_000;
 const READ_TIMEOUT_MS = 3_000;

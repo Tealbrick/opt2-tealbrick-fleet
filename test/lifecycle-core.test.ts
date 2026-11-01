@@ -4,11 +4,10 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { Db } from "@opt2-tealbrick/miniapp-sdk";
 import { appendEvent, noteRestore, verifyChain } from "../src/lifecycle/events.ts";
 import { setSettings } from "../src/lifecycle/settings.ts";
 import { leanPersonStatus, personStatusOf } from "../src/lifecycle/states.ts";
-import { CAP_WINDOW_MS, capState, DAY_MS, setDates, setKeepRunning, statusRequested } from "../src/lifecycle/transitions.ts";
+import { CAP_WINDOW_MS, capState, DAY_MS, setDates, statusRequested } from "../src/lifecycle/transitions.ts";
 import { requestForNewAgents, requestReview } from "../src/reviews.ts";
 import * as store from "../src/store.ts";
 import { AGENT_A, AGENT_B, migratedDb, migrationFiles } from "./helpers.ts";
@@ -22,7 +21,7 @@ function sources(dir: string): string[] {
   });
 }
 
-test("one setter: only src/lifecycle/transitions.ts writes a lifecycle, a date or a keep-running tick", () => {
+test("one setter: only src/lifecycle/transitions.ts writes a lifecycle or a date; nothing writes keep_running any more (C381)", () => {
   const root = new URL("../src/", import.meta.url).pathname;
   // line by line: a statement that writes names one of the columns on its line, whatever quotes or interpolation stand between
   const writer = /\b(UPDATE\s+\S+\s+SET|INSERT\s+INTO\s+fleet_(people|agents))\b.*\b(lifecycle|lifecycle_rev|lifecycle_reason|valid_from|valid_until|keep_running|migrated_note)\b/;
@@ -73,8 +72,15 @@ test("T2: mark as reviewed needs an active owner and no block", () => {
   assert.equal(set(db, "agent", AGENT_B.id, "active").to, "active");
 });
 
-test("T4: resume is the owner's act, needs an active owner and no passed end date; a date never resumes", () => {
-  const { db } = world();
+test("T4: resume is the owner's act, needs no passed end date and no active owner (C381); a date never resumes", () => {
+  const { db, ann } = world();
+  set(db, "agent", AGENT_A.id, "suspended");
+  // C381: the owner's state is not an input of a resume: an agent whose owner is stopped can come back, and a finding says it needs an owner
+  set(db, "person", ann.id, "suspended");
+  assert.equal(set(db, "agent", AGENT_A.id, "active").to, "active", "owner stopped: not refused");
+  set(db, "agent", AGENT_A.id, "suspended");
+  db.prepare("UPDATE fleet_agents SET owner_id = NULL WHERE id = ?").run(AGENT_A.id);
+  assert.equal(set(db, "agent", AGENT_A.id, "active").to, "active", "no owner: not refused");
   set(db, "agent", AGENT_A.id, "suspended");
   setDates(db, { kind: "agent", id: AGENT_A.id, validUntil: new Date(T0 - 1000).toISOString(), confirmPastDate: true, actor: OWNER }, T0);
   assert.throws(() => set(db, "agent", AGENT_A.id, "active"), refused("date_passed", 409));
@@ -82,13 +88,10 @@ test("T4: resume is the owner's act, needs an active owner and no passed end dat
   assert.equal(set(db, "agent", AGENT_A.id, "active").to, "active");
 });
 
-test("T6: undo keeps the guards of a move to active: no way around T4 through leaving", () => {
-  const { db, ann } = world();
+test("T6: undo keeps the guards of a move to active (block, passed date); an owner is not one of them (C381)", () => {
+  const { db } = world();
   set(db, "agent", AGENT_B.id, "suspended");
-  assert.throws(() => set(db, "agent", AGENT_B.id, "active"), refused("owner_required", 409));
   set(db, "agent", AGENT_B.id, "leaving");
-  assert.throws(() => set(db, "agent", AGENT_B.id, "active"), refused("owner_required", 409));
-  store.setAgent(db, { agent: AGENT_B.id, owner: ann.id }, T0);
   db.prepare("UPDATE fleet_agents SET trust = 'blocked' WHERE id = ?").run(AGENT_B.id);
   assert.throws(() => set(db, "agent", AGENT_B.id, "active"), refused("trust_blocked", 409));
   db.prepare("UPDATE fleet_agents SET trust = 'trusted' WHERE id = ?").run(AGENT_B.id);
@@ -141,12 +144,15 @@ test("A41: Close is never automatic: before cooling refused, waived with a named
   assert.equal(set(c.db, "agent", AGENT_A.id, "archived", {}, T0 + 3 * DAY_MS).to, "archived");
 });
 
-test("T7 guards: an agent must be paused; a person's agents each need a decision", () => {
+test("T7 guards: an agent must be paused; a person closes only when each agent has a new owner or its own stop (C381)", () => {
   const { db, ann } = world();
   set(db, "person", ann.id, "leaving");
   assert.throws(() => set(db, "person", ann.id, "archived", { waive: WAIVE }), refused("agents_undecided", 409));
-  setKeepRunning(db, AGENT_A.id, "Runs payroll until Friday", OWNER, T0);
+  // an agent that keeps working under the leaver is not a decision: it must have a new owner
+  const bea = store.setPerson(db, { name: "Bea" }, T0);
+  store.setAgent(db, { agent: AGENT_A.id, owner: bea.id }, T0);
   assert.equal(set(db, "person", ann.id, "archived", { waive: WAIVE }).to, "archived");
+  assert.equal(stateOf(db, "agent", AGENT_A.id), "active", "the agent kept working through the person's close");
   const b = world();
   set(b.db, "agent", AGENT_A.id, "leaving");
   assert.throws(() => set(b.db, "agent", AGENT_A.id, "archived", { waive: WAIVE }), refused("plan_open", 409));
@@ -216,7 +222,7 @@ test("person_delete: refused while stopped, leaving or closed, so the floor on t
   assert.throws(() => store.deletePerson(db, ann.id, T0), refused("lifecycle_open", 409));
   set(db, "person", ann.id, "leaving");
   assert.throws(() => store.deletePerson(db, ann.id, T0), refused("lifecycle_open", 409));
-  setKeepRunning(db, AGENT_A.id, "x", OWNER, T0);
+  store.setAgent(db, { agent: AGENT_A.id, owner: store.setPerson(db, { name: "Bea" }, T0).id }, T0);
   set(db, "person", ann.id, "archived", { waive: WAIVE });
   assert.throws(() => store.deletePerson(db, ann.id, T0), refused("lifecycle_open", 409));
   assert.deepEqual(store.getPerson(db, ann.id).status, "departed");
@@ -285,5 +291,6 @@ test("the chain starts after the migration rows", () => {
   db.exec("UPDATE fleet_people SET status = 'departed' WHERE id = 'psn_ann'");
   for (const m of migrationFiles().slice(7)) db.exec(`BEGIN;\n${m.sql}\nCOMMIT;`);
   appendEvent(db, { subject: { kind: "agent", id: AGENT_A.id, name: "A" }, kind: "changed", actor: OWNER, at: T0 });
+  // 0008's own row, then this one. C381's note goes through the chain at boot, not by the migration.
   assert.deepEqual(verifyChain(db), { ok: true, rows: 2 });
 });

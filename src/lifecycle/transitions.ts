@@ -7,7 +7,7 @@
 import { canonicalize } from "@opt2-tealbrick/manifest";
 import { type Db, type Json, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { bump, fail, revision } from "../meta.ts";
-import { hasAppliedStop, hasOpenPlan, lastPlanUnfinished, senderBarOpen, unnamedAccounts } from "../plans/guards.ts";
+import { hasAppliedStop, hasOpenPlan, lastPlanUnfinished, senderBarOpen, stopInOwnersPlan, unnamedAccounts } from "../plans/guards.ts";
 import { endAssignmentsOf } from "../roles/roles.ts";
 import { cleanText } from "../text.ts";
 import type { Trust } from "../trust.ts";
@@ -37,7 +37,6 @@ export interface Subject {
   ownerId: string | null;
   runtime: "active" | "paused" | "removed" | null;
   noCard: boolean;
-  keepRunning: boolean;
 }
 
 const num = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
@@ -45,7 +44,7 @@ const num = (v: unknown): number | null => (v === null || v === undefined ? null
 /** The subject, or null when unknown. A contact with no lifecycle (an outside agent) throws `no_lifecycle`. */
 export function loadSubject(db: Db, kind: SubjectKind, id: string): Subject | null {
   if (kind === "agent") {
-    const r = db.prepare("SELECT id, name, lifecycle, lifecycle_rev, lifecycle_at, valid_from, valid_until, trust, owner_id, status, migrated_note, keep_running FROM fleet_agents WHERE id = ?").get(id);
+    const r = db.prepare("SELECT id, name, lifecycle, lifecycle_rev, lifecycle_at, valid_from, valid_until, trust, owner_id, status, migrated_note FROM fleet_agents WHERE id = ?").get(id);
     if (!r) return null;
     return {
       kind,
@@ -60,21 +59,20 @@ export function loadSubject(db: Db, kind: SubjectKind, id: string): Subject | nu
       ownerId: r.owner_id === null ? null : String(r.owner_id),
       runtime: r.status as Subject["runtime"],
       noCard: r.migrated_note === "no_card",
-      keepRunning: Number(r.keep_running) === 1,
     };
   }
   const r = db.prepare("SELECT id, name, kind, lifecycle, lifecycle_rev, lifecycle_at, valid_from, valid_until, trust FROM fleet_people WHERE id = ?").get(id);
   if (!r) return null;
   if (r.lifecycle === null) fail("no_lifecycle", "An outside agent has no lifecycle. Use its trust state.", 409);
-  return { kind, id, name: String(r.name), lifecycle: r.lifecycle as Lifecycle, rev: Number(r.lifecycle_rev), at: Number(r.lifecycle_at), validFrom: num(r.valid_from), validUntil: num(r.valid_until), trust: r.trust as Trust, ownerId: null, runtime: null, noCard: false, keepRunning: false };
+  return { kind, id, name: String(r.name), lifecycle: r.lifecycle as Lifecycle, rev: Number(r.lifecycle_rev), at: Number(r.lifecycle_at), validFrom: num(r.valid_from), validUntil: num(r.valid_until), trust: r.trust as Trust, ownerId: null, runtime: null, noCard: false };
 }
 
 const personLifecycle = (db: Db, id: string | null): string | null => (id === null ? null : ((db.prepare("SELECT lifecycle FROM fleet_people WHERE id = ?").get(id)?.lifecycle as string | null | undefined) ?? null));
 
-/** Agents of this person whose stop is not decided: no keep-running tick, not themselves leaving or closed. */
-export function undecidedAgents(db: Db, personId: string): string[] {
+/** Agents that still have this person as owner, not themselves leaving or closed. They keep working (C381), and a person closes only when each has a new owner or an explicit stop. */
+export function agentsStillOwned(db: Db, personId: string): string[] {
   return db
-    .prepare("SELECT name FROM fleet_agents WHERE owner_id = ? AND status <> 'removed' AND lifecycle NOT IN ('leaving', 'archived') AND keep_running = 0 ORDER BY name COLLATE NOCASE")
+    .prepare("SELECT name FROM fleet_agents WHERE owner_id = ? AND status <> 'removed' AND lifecycle NOT IN ('leaving', 'archived') ORDER BY name COLLATE NOCASE")
     .all(personId)
     .map((r) => String(r.name));
 }
@@ -107,11 +105,14 @@ export function guardOf(db: Db, s: Subject, to: Lifecycle, opts: { waive?: strin
     return no("archived_terminal", "A closed agent stays closed. Reinstate it in Portal within 30 days, or add a new agent.");
   }
   if (!NEXT[s.lifecycle].includes(to)) return no("transition_not_allowed", `It cannot move from ${s.lifecycle} to ${to}.`);
-  // T6: an applied stop is not undone by a word here. Bring it back (T6b): grants do not restore.
-  if (to === "active" && s.lifecycle === "leaving" && hasAppliedStop(db, s.kind, s.id)) return no("plan_applied", "You approved this stop in Portal. Use Bring back: grants do not come back by themselves.");
+  // T6: an applied stop of an agent is not undone by a word here. Bring it back (T6b): grants do not restore. C381: a person's plan acts on agents the owner chose; undoing the person's mark changes none of them.
+  if (to === "active" && s.lifecycle === "leaving" && s.kind === "agent" && hasAppliedStop(db, s.kind, s.id, s.at)) return no("plan_applied", "You approved this stop in Portal. Use Bring back: grants do not come back by themselves.");
+  const planOf = (to === "active" || to === "proposed") && s.kind === "agent" ? stopInOwnersPlan(db, s.id) : null;
+  if (planOf !== null) return no("plan_open", `A plan on the page of ${planOf} holds this stop. Cancel that plan first. A cancel takes back all of that plan's requests in Portal.`);
   if (to === "active") {
     if (s.trust === "blocked") return no("trust_blocked", "It is blocked. Record a new review first.");
-    if (s.kind === "agent") {
+    // T2 records a review, and a review names who answers for the agent. C381: a resume (T4, T6) is not tied to the owner: an agent with no active owner has a finding, it is not refused.
+    if (s.kind === "agent" && s.lifecycle === "proposed") {
       if (s.ownerId === null) return no("owner_required", "Name an owner first.");
       if (personLifecycle(db, s.ownerId) !== "active") return no("owner_inactive", "The owner is not active. Name an active owner first.");
     }
@@ -127,8 +128,8 @@ export function guardOf(db: Db, s: Subject, to: Lifecycle, opts: { waive?: strin
       if (senderBarOpen(db, s.id) && !cleanText(opts.waive ?? "")) return no("sender_bar_open", "Messages from this person can still reach agents. Wait for Connect to show the bar, or give a reason to close it now.");
       const unnamed = unnamedAccounts(db, s.id, now);
       if (unnamed > 0) return no("unlinked_accounts", `${unnamed} accounts in Connect have no person. Check them. If none is this person's, accept that with a reason.`);
-      const open = undecidedAgents(db, s.id);
-      if (open.length > 0) return no("agents_undecided", `Decide for these agents first: ${open.slice(0, 5).join(", ")}${open.length > 5 ? ` and ${open.length - 5} more` : ""}.`);
+      const open = agentsStillOwned(db, s.id);
+      if (open.length > 0) return no("agents_undecided", `Name a new owner for these agents first, or stop them. Add the person to the directory first if they are not there: ${open.slice(0, 5).join(", ")}${open.length > 5 ? ` and ${open.length - 5} more` : ""}.`);
       const running = stillRunning(db, s.id);
       if (running.length > 0) return no("plan_open", `These agents still run. Pause them in Portal first: ${running.slice(0, 5).join(", ")}${running.length > 5 ? ` and ${running.length - 5} more` : ""}.`);
     }
@@ -141,11 +142,8 @@ export function capState(db: Db, now: number): { used: number; limit: number } {
   return { used: stopsSince(db, now - CAP_WINDOW_MS), limit: stopCap(db) };
 }
 
-/** The entries one stop reaches: a person and the agents that stop with them. */
-export function stopReach(db: Db, kind: string, id: string): string[] {
-  const own = kind === "person" ? db.prepare("SELECT id FROM fleet_agents WHERE owner_id = ? AND status <> 'removed' AND keep_running = 0 AND lifecycle <> 'archived'").all(id).map((r) => `agent:${String(r.id)}`) : [];
-  return [`${kind}:${id}`, ...own];
-}
+/** The entries one stop reaches. C381: only itself: a person's agents do not stop with them. An explicit stop of an agent counts on its own (decisions.ts). */
+export const stopReach = (kind: string, id: string): string[] => [`${kind}:${id}`];
 
 /** N2-3: counted in entries, and only what is new in this window needs the confirm. `details.count` stays: any page that can call this can read the count, so hiding it would stop no script. */
 export function assertCap(db: Db, confirmCount: number | undefined, now: number, adding: readonly string[]): void {
@@ -153,7 +151,7 @@ export function assertCap(db: Db, confirmCount: number | undefined, now: number,
   const before = seen.size;
   for (const k of adding) seen.add(k);
   const limit = stopCap(db);
-  if (seen.size > before && seen.size > limit && confirmCount !== seen.size) throw new TbError("stop_cap_reached", `This makes ${seen.size} stopped in the last 10 minutes. Confirm ${seen.size}.`, 409, { count: seen.size });
+  if (seen.size > before && seen.size > limit && confirmCount !== seen.size) throw new TbError("stop_cap_reached", `This makes ${seen.size} stopped in the last 10 minutes. Check that this is you, then confirm ${seen.size}. This limit catches mistakes. It does not stop a program that runs in this browser.`, 409, { count: seen.size });
 }
 
 export interface Grant {
@@ -217,7 +215,7 @@ export function transition(db: Db, input: TransitionInput, now = Date.now()): { 
     if (input.reason === "reviewed" && s.lifecycle !== "proposed") fail("not_new", "This entry is not new any more. Nothing was changed. Open its own page to see why.", 409);
     const problem = guardOf(db, s, input.to, { waive: input.waive }, now);
     if (problem) throw new TbError(problem.code, problem.message, problem.status);
-    if (STOP_STATES.includes(input.to) && !input.noCap) assertCap(db, input.confirmCount, now, stopReach(db, s.kind, s.id));
+    if (STOP_STATES.includes(input.to) && !input.noCap) assertCap(db, input.confirmCount, now, stopReach(s.kind, s.id));
     const note = cleanText(input.note ?? "").slice(0, 500) || null;
     const waive = cleanText(input.waive ?? "").slice(0, 200);
     const from = s.lifecycle;
@@ -225,8 +223,6 @@ export function transition(db: Db, input: TransitionInput, now = Date.now()): { 
     // T5 keeps a picture of what to grant again, T2 what was reviewed. T7 keeps the picture after the close: see below.
     const before = input.to === "leaving" || (from === "proposed" && input.to === "active") ? snapshotOf(db, s, input.grants ?? []) : undefined;
     const rev = writeState(db, s, input.to, input.reason, note, now);
-    const backToWork = input.to === "active" && s.kind === "person";
-    if (backToWork) clearKeepRunning(db, s.id);
     if (closing) endMemberships(db, s, input.actor, now);
     const after = closing ? snapshotOf(db, { ...s, lifecycle: "archived" }, []) : undefined;
     const event = appendEvent(db, {
@@ -254,15 +250,6 @@ function endMemberships(db: Db, s: Subject, actor: Actor, now: number): void {
     db.prepare("UPDATE fleet_teams SET updated_at = ? WHERE id = ?").run(now, t.team_id);
     appendEvent(db, { subject: { kind: s.kind, id: s.id, name: s.name }, kind: "moved", actor, note: `Left team ${String(t.name)}: the entry was closed.`.slice(0, 500), at: now });
   }
-}
-
-function clearKeepRunning(db: Db, personId: string): void {
-  db.prepare("UPDATE fleet_agents SET keep_running = 0, keep_reason = NULL WHERE owner_id = ?").run(personId);
-}
-
-/** The tick ends with an owner change: it was about the old owner's key. */
-export function clearAgentKeep(db: Db, agentId: string): void {
-  db.prepare("UPDATE fleet_agents SET keep_running = 0, keep_reason = NULL WHERE id = ?").run(agentId);
 }
 
 /** T1 for an agent: the row exists with the default state; this writes its date and event in the same transaction. */
@@ -304,13 +291,13 @@ export function statusRequested(db: Db, id: string, want: "active" | "departed",
   const cur = personStatusOf(s.lifecycle);
   if (cur === want) return;
   if (want === "active") fail("use_bring_back", "This person left. Use Bring back on the person's page.", 409);
-  // This form has no confirm to send. It stops when the window has room, however many agents the person has; past that it names the page that can confirm.
+  // This form has no confirm to send. It stops when the window has room; past that it names the page that can confirm.
   const { used, limit } = capState(db, now);
   if (used >= limit) throw new TbError("stop_cap_reached", `${used} were stopped in the last 10 minutes. Open this person's page to confirm this stop.`, 409);
   transition(db, { kind: "person", id, to: "leaving", reason: "other", note: "Marked as departed on the People page.", actor, noCap: true }, now);
 }
 
-/** person_delete: a stop must end first, by the owner's named step, because the delete would remove the floor on this person's handles and lift the owned agents' stop. Handles stay on a closed row (T7). */
+/** person_delete: a stop must end first, by the owner's named step, because the delete would remove the floor on this person's handles. Handles stay on a closed row (T7). */
 export function beforePersonDelete(db: Db, id: string, actor: Actor, now: number): void {
   const r = db.prepare("SELECT name, kind, lifecycle FROM fleet_people WHERE id = ?").get(id);
   if (!r) return;
@@ -337,24 +324,12 @@ export function setDates(db: Db, input: { kind: SubjectKind; id: string; validFr
     if (input.validUntil !== undefined && until !== null && until <= now && !input.confirmPastDate) fail("date_in_past", "This end date has passed. Confirm that you want to stop this entry.", 409);
     // S2-7: a start date in the future stops a working entry at once (floor, not_started), so it counts as a stop. A later date on an entry that already waits does not.
     const startsLater = from !== null && from > now && (s.validFrom === null || s.validFrom <= now) && (s.lifecycle === "active" || s.lifecycle === "proposed");
-    if (startsLater && !input.noCap) assertCap(db, input.confirmCount, now, stopReach(db, s.kind, s.id));
+    if (startsLater && !input.noCap) assertCap(db, input.confirmCount, now, stopReach(s.kind, s.id));
     bump(db);
     const table = s.kind === "agent" ? "fleet_agents" : "fleet_people";
     db.prepare(`UPDATE ${table} SET valid_from = ?, valid_until = ?, lifecycle_rev = ? WHERE id = ?`).run(from, until, revision(db), s.id);
     const iso = (ms: number | null) => (ms === null ? "none" : new Date(ms).toISOString().slice(0, 10));
     appendEvent(db, { subject: { kind: s.kind, id: s.id, name: s.name }, kind: "changed", from: s.lifecycle, to: startsLater ? "not_started" : s.lifecycle, actor: input.actor, note: `Start date ${iso(from)}. End date ${iso(until)}.`, at: now });
-  });
-}
-
-/** The keep-running tick of one agent. The reason is kept: the person who left may still hold this agent's key. */
-export function setKeepRunning(db: Db, agentId: string, reason: string, actor: Actor, now = Date.now()): void {
-  db.transaction(() => {
-    const s = loadSubject(db, "agent", agentId) ?? fail("agent_not_found", "No such agent.", 404);
-    const why = cleanText(reason).slice(0, 200);
-    if (!why) fail("reason_required", "Say why this agent keeps running.", 400);
-    bump(db);
-    db.prepare("UPDATE fleet_agents SET keep_running = 1, keep_reason = ?, lifecycle_rev = ? WHERE id = ?").run(why, revision(db), agentId);
-    appendEvent(db, { subject: { kind: "agent", id: s.id, name: s.name }, kind: "changed", from: s.lifecycle, to: s.lifecycle, actor, note: `Keeps running: ${why}`.slice(0, 500), at: now });
   });
 }
 

@@ -1,10 +1,10 @@
 // One person or agent (DESIGN-C380 §10): the one-line state, what no longer matches, what is left to do in Portal, the moves
 // the server allows (with the reason when one is blocked), and the history. Raw ids and the three axes sit under Details only.
 import { callOp } from "@opt2-tealbrick/miniapp-sdk/client";
-import { appName, Button, ButtonLink, EmptyState, Notice, Table, Tag, TextLink } from "@opt2-tealbrick/ui";
+import { appName, Button, ButtonLink, Dialog, EmptyState, Notice, Table, Tag, TextLink } from "@opt2-tealbrick/ui";
 import { useCallback, useEffect, useState } from "react";
 import type { ColleagueGetOutput } from "#kit";
-import { LoadFailed, Loading, PageHead, useLoad } from "../common.tsx";
+import { changeError, LoadFailed, Loading, PageHead, useLoad } from "../common.tsx";
 import { canChoose } from "./agent-choice.ts";
 import { ChooseDialog } from "./agent-choices.tsx";
 import { ChangeDialog, CloseDialog } from "./change-dialogs.tsx";
@@ -12,6 +12,7 @@ import { CheckNow } from "./check-now.tsx";
 import { KEY_USE_TEXT } from "./credential.ts";
 import { FEATURES } from "./features.ts";
 import { LeaveFlow } from "./leave-flow.tsx";
+import { lifecycleError } from "./lifecycle-errors.ts";
 import { PlanResult } from "./plan-result.tsx";
 import { StopNow } from "./stop-now.tsx";
 import { StoreRows } from "./store-rows.tsx";
@@ -50,6 +51,7 @@ function Subject({ kind, id, portalHref }: { kind: SubjectKind; id: string; port
   const { data, error, loading, reload } = useLoad(load);
   const [doing, setDoing] = useState<Action | null>(null);
   const [choosing, setChoosing] = useState(false);
+  const [newKey, setNewKey] = useState(false);
   const c = data?.colleague;
   const gone = error !== null && !data;
   return (
@@ -63,7 +65,7 @@ function Subject({ kind, id, portalHref }: { kind: SubjectKind; id: string; port
           <PageHead title={c.name} lede={c.line} />
           {error ? <LoadFailed message={`This page may be old. ${error}`} retrying={loading} onRetry={() => void reload()} /> : null}
           <Actions actions={c.actions} onChoose={setDoing} />
-          <KeyChoice c={c} onChoose={() => setChoosing(true)} />
+          <KeyChoice c={c} onChoose={() => setChoosing(true)} onNewKey={() => setNewKey(true)} />
           <Facts c={c} />
           {c.findings.length ? (
             <section className="tb-stack" aria-label="Differences">
@@ -82,6 +84,7 @@ function Subject({ kind, id, portalHref }: { kind: SubjectKind; id: string; port
             </section>
           ) : null}
           {FEATURES.preview ? <AccessByStore kind={c.kind} id={c.id} name={c.name} /> : null}
+          {c.kind === "person" && c.reach.length && (c.lifecycle === "active" || c.lifecycle === "proposed") ? <Reach reach={c.reach} /> : null}
           {c.kind === "person" && c.agents.length ? <OwnedAgents agents={c.agents} /> : null}
           {c.grantsBefore?.length ? <GrantsBefore c={c} grants={c.grantsBefore} /> : null}
           <History items={c.history} />
@@ -103,6 +106,7 @@ function Subject({ kind, id, portalHref }: { kind: SubjectKind; id: string; port
             </dl>
           </details>
           {choosing ? <ChooseDialog c={c} onClose={() => setChoosing(false)} onChanged={reload} /> : null}
+          {newKey ? <NewKeyDialog c={c} onClose={() => setNewKey(false)} onChanged={reload} /> : null}
           {doing ? <Doing c={c} action={doing} portalHref={portalHref} onClose={() => setDoing(null)} onChanged={reload} /> : null}
         </>
       ) : !gone ? (
@@ -134,8 +138,8 @@ function Actions({ actions, onChoose }: { actions: Action[]; onChoose: (a: Actio
   );
 }
 
-/** The second stage (D2): a stopped person's agents wait for a choice; an agent stopped through its owner is chosen on the owner's page. */
-function KeyChoice({ c, onChoose }: { c: Colleague; onChoose: () => void }) {
+/** C381: a marked person's agents keep working and wait for a new owner. On the agent's page: where to name one, and the new key the old owner may still hold (D16). */
+function KeyChoice({ c, onChoose, onNewKey }: { c: Colleague; onChoose: () => void; onNewKey: () => void }) {
   if (!FEATURES.plans) return null;
   if (c.kind === "person") {
     const stopped = c.lifecycle === "suspended" || c.lifecycle === "leaving";
@@ -143,28 +147,84 @@ function KeyChoice({ c, onChoose }: { c: Colleague; onChoose: () => void }) {
     return (
       <div className="tb-row">
         <Button variant="primary" onClick={onChoose}>
-          Choose for their agents
+          Name new owners for their agents
         </Button>
-        <span className="tb-hint">An agent with no choice is only paused, when you approve in Portal, and its key still exists.</span>
+        <span className="tb-hint">These agents keep working. Each one needs an owner.</span>
       </div>
     );
   }
-  if (!c.findings.some((f) => f.code === "key_not_decided") || !c.owner || c.lifecycle === "suspended") return null;
-  const { owner } = c;
+  const needsOwner = c.findings.some((f) => f.code === "owner_inactive") && c.owner;
+  const noOwner = c.findings.some((f) => f.code === "no_owner");
+  const needsKey = c.findings.some((f) => f.code === "key_after_transfer" || (f.code === "owner_inactive" && /key/.test(f.text)));
+  if (!needsOwner && !needsKey && !noOwner) return null;
+  const owner = c.owner;
   return (
-    <p className="tb-soft">
-      {"Choose for this agent on the page of "}
-      <TextLink
-        href={subjectHref("person", owner.id)}
-        onClick={(e) => {
-          e.preventDefault();
-          openSubject("person", owner.id);
-        }}
-      >
-        {owner.name}
-      </TextLink>
-      .
-    </p>
+    <div className="tb-row">
+      {needsKey && !c.newKeyAsked ? <Button onClick={onNewKey}>Make a new key</Button> : null}
+      {needsKey && c.newKeyAsked ? <span className="tb-hint">A new key waits for your approval in Portal.</span> : null}
+      {noOwner ? <ButtonLink href="./agents">Name an owner</ButtonLink> : null}
+      {needsOwner && owner ? (
+        <p className="tb-soft">
+          {"Name a new owner on the page of "}
+          <TextLink
+            href={subjectHref("person", owner.id)}
+            onClick={(e) => {
+              e.preventDefault();
+              openSubject("person", owner.id);
+            }}
+          >
+            {owner.name}
+          </TextLink>
+          .
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** D16: a new key with its effect said first. It is never a silent stop: the agent runs until the owner approves in Portal, and then it must be connected again. */
+function NewKeyDialog({ c, onClose, onChanged }: { c: Colleague; onClose: () => void; onChanged: () => void | Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  const send = async () => {
+    setBusy(true);
+    setFailure(null);
+    try {
+      await callOp("plan_send", { kind: c.kind, id: c.id, transfers: [c.id], expectedRev: c.rev });
+      await onChanged();
+      onClose();
+    } catch (e) {
+      setFailure(lifecycleError(e, changeError).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog
+      open
+      title={`Make a new key for ${c.name}`}
+      onClose={onClose}
+      busy={busy}
+      footer={
+        <>
+          <Button onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={() => void send()} disabled={busy}>
+            Send to Portal
+          </Button>
+        </>
+      }
+    >
+      <div className="tb-stack">
+        {failure ? (
+          <Notice tone="needs-you" role="alert">
+            {failure}
+          </Notice>
+        ) : null}
+        <p>{`${c.name} keeps working until you approve this in Portal. Then the old key stops, and ${c.name} cannot work until you connect it again. Its access to apps stays.`}</p>
+      </div>
+    </Dialog>
   );
 }
 
@@ -183,7 +243,6 @@ function Facts({ c }: { c: Colleague }) {
   if (c.teams.length) rows.push(["Teams", c.teams.map((t) => t.name).join(", ")]);
   if (c.reason) rows.push(["Reason", reasonLabel(c.reason)]);
   if (c.note) rows.push(["Note", c.note]);
-  if (c.keepRunning) rows.push(["Kept running", c.keepReason ?? "Yes"]);
   if (c.validFrom) rows.push(["Starts", when(c.validFrom)]);
   if (c.validUntil) rows.push(["Ends", when(c.validUntil)]);
   if (rows.length === 0) return null;
@@ -205,10 +264,28 @@ function AccessByStore({ kind, id, name }: { kind: SubjectKind; id: string; name
   return (
     <section className="tb-stack" aria-label="Access">
       <h2 className="sub-head">Access</h2>
-      <p className="tb-soft">What each app reports now, and what Stop and remove access would do to it. Stop now ends less.</p>
+      <p className="tb-soft">{kind === "person" ? "What each app reports now, and what would end if this person leaves. Their agents keep what they hold, unless you choose to stop one." : "What each app reports now, and what Stop and remove access would do to it. Stop now ends less."}</p>
       <CheckNow onRead={reload} />
       {error ? <LoadFailed message={error} retrying={loading} onRetry={() => void reload()} /> : null}
       {data === null ? error ? null : <Loading what="what each app reports" /> : <StoreRows stores={data.stores} subjectName={name} unlinkedAccounts={data.unlinkedAccounts} />}
+    </section>
+  );
+}
+
+/** C381: a move or a promotion changes this list. Governance shows what the teams and roles hold; Rules decides from them. */
+function Reach({ reach }: { reach: Colleague["reach"] }) {
+  return (
+    <section className="tb-stack" aria-label="What this person can reach">
+      <h2 className="sub-head">What this person can reach</h2>
+      <p className="tb-soft">Rules & Approvals can use these teams and roles, and an agent that works with many people can treat this person by them. A change here can change which agents they may talk to. History shows what they gained and lost.</p>
+      <ul className="ready">
+        {reach.map((r) => (
+          <li key={`${r.kind}:${r.name}`}>
+            <span>{r.kind === "team" ? `Team ${r.name}` : `Role ${r.name}`}</span>
+            <span className="tb-hint">{r.kind === "role" ? "Rules that name this role apply." : r.agents.length === 0 ? "No agent is in this team." : `Agents: ${r.agents.join(", ")}${r.more > 0 ? ` and ${r.more} more` : ""}`}</span>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
@@ -259,7 +336,7 @@ function GrantsBefore({ c, grants }: { c: Colleague; grants: NonNullable<Colleag
 const FROM_TO: Record<string, string> = { proposed: "New, not reviewed", active: "Active", suspended: "Stopped", leaving: "Leaving", archived: "Closed", not_started: "Not started" };
 const stateWord = (s: string | null) => (s ? (FROM_TO[s] ?? "another state") : "");
 const changeWord = (h: Colleague["history"][number]) => {
-  if (h.kind === "moved") return "Owner or team changed";
+  if (h.kind === "moved") return "Owner, team or role changed";
   if (h.kind === "migrated") return "Set by the update";
   if (h.kind === "restored") return "Restored from a backup";
   if (h.kind !== "transition") return "Changed";

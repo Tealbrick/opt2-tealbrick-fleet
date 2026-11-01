@@ -10,7 +10,7 @@ import { FEATURES } from "./features.ts";
 import { type LifecycleErrorInfo, lifecycleError } from "./lifecycle-errors.ts";
 import { sendPlan } from "./plan-live.tsx";
 import { NotChanged, PlanResult } from "./plan-result.tsx";
-import { NOTE_HINT, type Reason, reasonOptions } from "./words.ts";
+import { NOTE_HINT, notChangedOf, type Reason, reasonOptions } from "./words.ts";
 
 export function StopNow({ subject, portalHref, onClose, onChanged }: { subject: { kind: "agent" | "person"; id: string; name: string }; portalHref?: string; onClose: () => void; onChanged: () => void | Promise<void> }) {
   const [reason, setReason] = useState<Reason | "">("");
@@ -54,7 +54,7 @@ export function StopNow({ subject, portalHref, onClose, onChanged }: { subject: 
   return (
     <Dialog
       open
-      title={result ? `${subject.name}: what happens now` : `Stop ${subject.name}`}
+      title={result ? `${subject.name}: what happens now` : subject.kind === "person" ? `Stop ${subject.name}'s access for now` : `Stop ${subject.name}`}
       onClose={onClose}
       busy={busy}
       footer={
@@ -68,7 +68,7 @@ export function StopNow({ subject, portalHref, onClose, onChanged }: { subject: 
               Cancel
             </Button>
             <Button variant="danger" onClick={() => void stop()} disabled={busy || !reason}>
-              {cap.count !== null ? capButton(cap.count) : "Stop"}
+              {cap.count !== null ? capButton(cap.count) : subject.kind === "person" ? "Stop their access" : "Stop"}
             </Button>
           </>
         )
@@ -83,7 +83,7 @@ export function StopNow({ subject, portalHref, onClose, onChanged }: { subject: 
               {failure.message}
             </Notice>
           ) : null}
-          <p className="tb-soft">{subject.kind === "agent" ? "Governance records this now. The agent is paused only when you approve in Portal. Scheduled posts due while it is paused are cancelled, not moved." : "Governance records this now, for this person and their agents. Their agents are paused only when you approve in Portal. Scheduled posts due while an agent is paused are cancelled, not moved."}</p>
+          <p className="tb-soft">{subject.kind === "agent" ? "Governance records this now. The agent is paused only when you approve in Portal. Scheduled posts due while it is paused are cancelled, not moved." : "Governance records this now, for this person only. Rules refuses calls by, for and to this person, if its hook is on. Their messages can still reach agents: to bar them, use Mark as leaving. Their agents keep working. Their employment and their own logins do not change."}</p>
           <Field label="Reason">
             <Select placeholder="Choose a reason" options={reasonOptions("suspended")} value={reason} onValueChange={(v) => {
                 setReason(v as Reason);
@@ -93,7 +93,7 @@ export function StopNow({ subject, portalHref, onClose, onChanged }: { subject: 
           <Field label="Note" hint={NOTE_HINT}>
             <Textarea rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
           </Field>
-          <NotChanged />
+          <NotChanged items={notChangedOf(subject.kind)} />
         </div>
       )}
     </Dialog>

@@ -3,6 +3,7 @@
 // review reason. Every query here selects the columns it returns, so a new column of a table cannot leak by accident.
 import type { Db } from "@opt2-tealbrick/miniapp-sdk";
 import { leanPersonStatus } from "./lifecycle/states.ts";
+import { ownerShownToAgents } from "./plans/guards.ts";
 import { type AgentStatus, fail, MAX_TEAMS_PER_ANSWER, type PersonStatus, type Resolved, type Role, resolveSender, revision, teamsOf } from "./store.ts";
 import type { ContactKind, Trust } from "./trust.ts";
 
@@ -141,6 +142,7 @@ function teamRefs(db: Db): Map<string, LeanTeamRef[]> {
 export function leanDirectory(db: Db): LeanDirectory {
   const members = membersByTeam(db);
   const refs = teamRefs(db);
+  const shownOwner = ownerShownToAgents(db);
   return {
     revision: revision(db),
     unchanged: false,
@@ -171,7 +173,7 @@ export function leanDirectory(db: Db): LeanDirectory {
           id: String(r.id),
           name: String(r.name),
           status: r.status as AgentStatus,
-          owner: r.owner_id === null ? null : { id: String(r.owner_id), name: String(r.owner_name) },
+          owner: shownOwner.get(String(r.id)) ?? (r.owner_id === null ? null : { id: String(r.owner_id), name: String(r.owner_name) }),
           role: String(r.role),
           trust: r.trust as Trust,
           teams: refs.get(`agent:${r.id}`) ?? [],

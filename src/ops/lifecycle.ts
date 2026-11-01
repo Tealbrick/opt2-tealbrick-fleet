@@ -10,13 +10,16 @@ import {
   type LifecycleSetOutput,
   OP,
   type OpId,
+  type RefusalsGetInput,
+  type RefusalsGetOutput,
   type SettingsSetInput,
   type SettingsSetOutput,
   type SummaryGetInput,
   type SummaryGetOutput,
 } from "#kit";
+import { refusalsGet } from "../lifecycle/refusals.ts";
 import { setSettings } from "../lifecycle/settings.ts";
-import { type Actor, assertCap, loadSubject, setDates, setKeepRunning, transition } from "../lifecycle/transitions.ts";
+import { type Actor, assertCap, loadSubject, setDates, transition } from "../lifecycle/transitions.ts";
 import { colleagueDetail, colleaguesList, grantsOf, readTopology, summaryGet } from "../lifecycle/view.ts";
 import { fail } from "../meta.ts";
 import { planCtxOf } from "../plans/context.ts";
@@ -42,7 +45,7 @@ export const lifecycleOps = {
   [OP.colleaguesList]: op<ColleaguesListInput, ColleaguesListOutput>({
     async run(input, ctx) {
       assertOwner(ctx.caller);
-      return colleaguesList(ctx.db, input);
+      return colleaguesList(ctx.db, input, Date.now(), readTopology(ctx));
     },
   }),
   [OP.colleagueGet]: op<ColleagueGetInput, ColleagueGetOutput>({
@@ -69,20 +72,21 @@ export const lifecycleOps = {
           for (const d of input.decisions ?? []) {
             if (input.kind !== "person") fail("input_invalid", "Decisions belong to a person's change.", 400);
             if (!db.prepare("SELECT 1 FROM fleet_agents WHERE id = ? AND owner_id = ?").get(d.agent, input.id)) fail("agent_not_owned", "This agent does not belong to this person.", 409);
-            if (d.decision === "keep") setKeepRunning(db, d.agent, d.reason ?? "", actor, now);
-            else transition(db, { kind: "agent", id: d.agent, to: "leaving", reason: input.reason ?? "other", actor, noCap: true, grants: grantsOf(db, topology, "agent", d.agent) }, now);
+            transition(db, { kind: "agent", id: d.agent, to: "leaving", reason: input.reason ?? "other", actor, noCap: true, grants: grantsOf(db, topology, "agent", d.agent) }, now);
           }
         };
         const dates = () => {
           if (input.validFrom === undefined && input.validUntil === undefined) return;
           setDates(db, { kind: input.kind, id: input.id, ...(input.validFrom !== undefined ? { validFrom: input.validFrom } : {}), ...(input.validUntil !== undefined ? { validUntil: input.validUntil } : {}), confirmPastDate: input.confirmPastDate, confirmCount: input.confirmCount, noCap: stopping, actor }, now);
         };
-        const move = () => (input.to === undefined ? null : transition(db, { kind: input.kind, id: input.id, to: input.to, reason: input.reason ?? "other", note: input.note, actor, confirmCount: input.confirmCount, waive: input.waive, grants: input.to === "leaving" ? grantsOf(db, topology, input.kind, input.id) : [] }, now));
+        const move = (noCap = false) => (input.to === undefined ? null : transition(db, { kind: input.kind, id: input.id, to: input.to, reason: input.reason ?? "other", note: input.note, actor, confirmCount: input.confirmCount, waive: input.waive, noCap, grants: input.to === "leaving" ? grantsOf(db, topology, input.kind, input.id) : [] }, now));
         // One call passes the cap once. A stop goes first and counts for its dates and decisions. Otherwise the dates and decisions go first:
         // a resume can need a new end date, and a close needs the decisions. Stop decisions with no stop of their own pass the cap here.
         const stopping = input.to === "suspended" || input.to === "leaving";
         if (stopping) {
-          const out = move();
+          // C381: a person counts as one entry, so the agents stopped in this one call count here (N2-3).
+          assertCap(db, input.confirmCount, now, [`${input.kind}:${input.id}`, ...(input.decisions ?? []).map((d) => `agent:${d.agent}`)]);
+          const out = move(true);
           dates();
           decide();
           return out;
@@ -119,6 +123,13 @@ export const lifecycleOps = {
       }
       if (input.kind === "person" && input.to === "leaving") kickBarRun(ctx as never, now);
       return { colleague: await colleagueDetail(ctx, input.kind, input.id), transition: made ? { from: made.from, to: made.to, event: made.event } : null };
+    },
+  }),
+  [OP.refusalsGet]: op<RefusalsGetInput, RefusalsGetOutput>({
+    // Read only. N2-4: what Rules refuses, and what starts to refuse with this update, read before Rules is updated.
+    async run(_input, ctx) {
+      assertOwner(ctx.caller);
+      return refusalsGet(ctx);
     },
   }),
   [OP.settingsSet]: op<SettingsSetInput, SettingsSetOutput>({

@@ -21,7 +21,7 @@ test("migration 0013 on 0012 data: every row stays, the revision does not move, 
   const before = dump();
   const rev = () => Number(db.prepare("SELECT value FROM fleet_meta WHERE key = 'revision'").get()?.value);
   const was = rev();
-  for (const m of migrationFiles().slice(12)) db.exec(`BEGIN;\n${m.sql}\nCOMMIT;`);
+  for (const m of migrationFiles(13).slice(12)) db.exec(`BEGIN;\n${m.sql}\nCOMMIT;`);
   assert.deepEqual(dump(), before, "no row of the release before changed");
   assert.equal(rev(), was, "a rule is not in the feed: no reader reads it again");
   assert.equal(Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_exclusions").get()?.n), 0);

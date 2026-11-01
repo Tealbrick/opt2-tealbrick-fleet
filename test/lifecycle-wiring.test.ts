@@ -10,7 +10,7 @@ import { type DirectoryFeed, directoryFeed } from "../src/feed.ts";
 import { FLOOR_TEXT, floorView, readFloorStatus } from "../src/lifecycle/floor.ts";
 import { setAgentMoved, setMembersMoved } from "../src/lifecycle/moved.ts";
 import { effectiveAgent, floorOf } from "../src/lifecycle/states.ts";
-import { CAP_WINDOW_MS, setDates, setKeepRunning } from "../src/lifecycle/transitions.ts";
+import { CAP_WINDOW_MS, setDates } from "../src/lifecycle/transitions.ts";
 import { tickDates } from "../src/lifecycle/validity.ts";
 import { NOT_APPLIED, portalPlan } from "../src/plans/portal-link.ts";
 import * as store from "../src/store.ts";
@@ -31,7 +31,7 @@ test("A24b: a 0.3.2 database can read the old feed shape after the migration, by
   assert.deepEqual(directoryFeed(db, { accept: ["future"] }), plain, "an unknown accept value changes nothing");
 });
 
-test("A32: a person's stop reaches the agents at once; keep-running lifts one; the state lifts with the person; the Core pause stays", () => {
+test("A32 (C381): a person's stop bars the person, not their agents; an agent's floor is its own; the Core pause stays", () => {
   const { db, ann } = world();
   store.setAgent(db, { agent: AGENT_B.id, owner: ann.id }, T0);
   set(db, "agent", AGENT_B.id, "active");
@@ -40,18 +40,22 @@ test("A32: a person's stop reaches the agents at once; keep-running lifts one; t
   set(db, "person", ann.id, "leaving");
   const contact = () => feedOf(db).contacts.find((c) => c.id === ann.id);
   assert.deepEqual([contact()?.lifecycle, contact()?.floor, contact()?.status], ["leaving", true, "departed"]);
-  assert.deepEqual([row(AGENT_A.id)?.lifecycle, row(AGENT_A.id)?.floor], ["suspended", true], "effective suspended, own row unchanged");
+  assert.deepEqual([row(AGENT_A.id)?.lifecycle, row(AGENT_A.id)?.floor], ["active", false], "the owner's stop does not change the agent");
+  assert.deepEqual([row(AGENT_B.id)?.lifecycle, row(AGENT_B.id)?.floor], ["active", false]);
   assert.equal(stateOf(db, "agent", AGENT_A.id), "active");
-  setKeepRunning(db, AGENT_B.id, "Runs payroll until Friday", OWNER, T0);
-  assert.deepEqual([row(AGENT_B.id)?.lifecycle, row(AGENT_B.id)?.floor], ["active", false], "the ticked one runs");
-  // person T3 cascades the same way
+  // the owner back to work changes no agent either way
   set(db, "person", ann.id, "active", { reason: "mistake" });
-  assert.deepEqual([row(AGENT_A.id)?.floor, row(AGENT_B.id)?.floor], [false, false], "lifts by itself");
-  assert.equal(Number(db.prepare("SELECT keep_running AS k FROM fleet_agents WHERE id = ?").get(AGENT_B.id)?.k), 0, "the tick ends with the stop it answered");
+  assert.deepEqual([row(AGENT_A.id)?.floor, row(AGENT_B.id)?.floor], [false, false]);
   set(db, "person", ann.id, "suspended");
-  assert.deepEqual([row(AGENT_A.id)?.lifecycle, row(AGENT_B.id)?.lifecycle], ["suspended", "suspended"]);
+  assert.deepEqual([row(AGENT_A.id)?.lifecycle, row(AGENT_B.id)?.lifecycle], ["active", "active"]);
   assert.equal(store.getPerson(db, ann.id).status, "active", "suspended is still an active directory entry");
+  assert.equal(feedOf(db).contacts.find((c) => c.id === ann.id)?.floor, true, "the person is barred");
+  // an agent's own stop is the only thing that stops it, whoever the owner is
+  set(db, "agent", AGENT_A.id, "suspended");
+  assert.deepEqual([row(AGENT_A.id)?.lifecycle, row(AGENT_A.id)?.floor], ["suspended", true]);
   set(db, "person", ann.id, "active", { reason: "mistake" });
+  assert.equal(row(AGENT_A.id)?.floor, true, "the person's return does not lift the agent's own stop");
+  set(db, "agent", AGENT_A.id, "active");
   db.prepare("UPDATE fleet_agents SET status = 'paused' WHERE id = ?").run(AGENT_A.id);
   assert.equal(row(AGENT_A.id)?.status, "paused", "the Core pause is Core's: Governance does not lift it");
   assert.equal(row(AGENT_A.id)?.floor, false);
@@ -63,8 +67,9 @@ test("the floor: blocked refuses, a closed row with no card does not, and a pers
   assert.equal(floorOf("archived", "blocked", true), true);
   assert.equal(floorOf("proposed", "unreviewed"), false);
   assert.equal(floorOf(null, "trusted"), false);
-  assert.equal(effectiveAgent({ lifecycle: "proposed", validFrom: T0 + 1, keepRunning: false }, "active"), "not_started");
-  assert.equal(effectiveAgent({ lifecycle: "active", validFrom: null, keepRunning: false }, null), "active", "an outside owner or no owner: no cascade");
+  assert.equal(effectiveAgent({ lifecycle: "proposed", validFrom: T0 + 1 }), "not_started");
+  assert.equal(effectiveAgent({ lifecycle: "active", validFrom: null }), "active", "C381: the owner is not an input at all");
+  assert.equal(effectiveAgent({ lifecycle: "suspended", validFrom: T0 + 1 }), "suspended", "an own stop wins over a start date");
   const { db, ann } = world();
   store.setPerson(db, { id: ann.id, name: "Ann", handles: ["slack:UANN00001"] }, T0);
   db.prepare("INSERT INTO fleet_agent_handles (agent_id, handle) VALUES (?, 'slack:UANN00001'), (?, 'slack:UAGENT001')").run(AGENT_A.id, AGENT_A.id);
@@ -91,7 +96,7 @@ test("dates: an end date passes on two ticks only, stops once by the system, a r
   assert.equal(tickDates(db, seen, until + 180_000).stopped, 0, "once");
   const ev = db.prepare("SELECT actor_kind, reason FROM fleet_lifecycle_events WHERE subject_id = ? AND to_state = 'suspended'").get(ann.id);
   assert.deepEqual({ ...ev }, { actor_kind: "system", reason: "contract_ended" });
-  assert.equal(feedOf(db).agents.find((a) => a.id === AGENT_A.id)?.floor, true, "the person's agents follow");
+  assert.equal(feedOf(db).agents.find((a) => a.id === AGENT_A.id)?.floor, false, "C381: the person's agents do not follow");
   // a changed date resets the agreement
   const p = store.setPerson(db, { name: "Pat" }, T0);
   setDates(db, { kind: "person", id: p.id, validUntil: new Date(until).toISOString(), actor: OWNER }, T0);
@@ -128,16 +133,20 @@ test("mover: members_set and an owner change write a moved event and open one sy
   assert.equal(openReviews(bob.id), 1, "one open per subject");
   setAgentMoved(db, { agent: AGENT_A.id, role: "new role" }, OWNER, T0);
   assert.equal(moved(AGENT_A.id).length, 0, "a role edit is no move");
-  setKeepRunning(db, AGENT_A.id, "x", OWNER, T0);
   setAgentMoved(db, { agent: AGENT_A.id, owner: bob.id }, OWNER, T0);
   assert.match(String(moved(AGENT_A.id)[0]?.note), /from Ann to Bob/);
   assert.deepEqual(JSON.parse(String(moved(AGENT_A.id)[0]?.snapshot_json)), { after: bob.id, before: ann.id });
-  assert.equal(Number(db.prepare("SELECT keep_running AS k FROM fleet_agents WHERE id = ?").get(AGENT_A.id)?.k), 0, "the tick was about the old owner's key");
-  // fire on bad: taking the owner away cannot lift a stop that comes from the owner
+  // C381: an owner change away from a stopped owner is a plain change: it needs no transfer, and it lifts and starts nothing
   const c = world();
   set(c.db, "person", c.ann.id, "leaving");
-  assert.throws(() => setAgentMoved(c.db, { agent: AGENT_A.id, owner: null }, OWNER, T0), refused("owner_stopped", 409));
-  assert.equal(feedOf(c.db).agents.find((a) => a.id === AGENT_A.id)?.floor, true);
+  setAgentMoved(c.db, { agent: AGENT_A.id, owner: null }, OWNER, T0);
+  assert.equal(c.db.prepare("SELECT owner_id AS o FROM fleet_agents WHERE id = ?").get(AGENT_A.id)?.o, null, "no owner_stopped refusal any more");
+  assert.deepEqual([feedOf(c.db).agents.find((a) => a.id === AGENT_A.id)?.lifecycle, feedOf(c.db).agents.find((a) => a.id === AGENT_A.id)?.floor], ["active", false]);
+  const d = world();
+  set(d.db, "person", d.ann.id, "suspended");
+  const dan = store.setPerson(d.db, { name: "Dan" }, T0);
+  setAgentMoved(d.db, { agent: AGENT_A.id, owner: dan.id }, OWNER, T0);
+  assert.equal(store.getAgent(d.db, AGENT_A.id).owner?.id, dan.id, "no use_transfer refusal any more");
   // quiet on good: an unowned agent stays unowned, and a working owner can be taken away
   setAgentMoved(db, { agent: AGENT_B.id, owner: null }, OWNER, T0);
   setAgentMoved(db, { agent: AGENT_A.id, owner: null }, OWNER, T0);

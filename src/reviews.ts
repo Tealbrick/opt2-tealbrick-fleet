@@ -415,7 +415,7 @@ export function recordReview(db: Db, reviewer: string, input: RecordInput, now =
     if (pendingHandle !== null) {
       // the owner adds the entry now (source agent: it came from an agent's request); the verdict is its first trust state
       const name = cleanText(input.subject.name ?? "").slice(0, 120) || s.name.slice(0, 120);
-      const made = setPerson(db, { name, kind: s.kind as "person" | "outside_agent", source: "agent", handles: [pendingHandle] }, now);
+      const made = setPerson(db, { name, kind: s.kind as "person" | "outside_agent", source: "agent", handles: [pendingHandle], sameName: true }, now);
       s = subjectOf(db, s.kind, made.id) as Subject;
     }
     if (input.verdict === "blocked") assertCap(db, input.confirmCount, now, [`${s.kind}:${s.id}`]);

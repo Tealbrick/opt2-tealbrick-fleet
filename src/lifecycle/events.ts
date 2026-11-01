@@ -120,18 +120,16 @@ export function lastLeavingSnapshot(db: Db, kind: string, id: string): Record<st
 const STOP_EVENT = "((kind = 'transition' AND to_state IN ('suspended', 'leaving')) OR (kind = 'changed' AND to_state = 'not_started'))";
 
 /**
- * Who was stopped since `since` (ms): each entry once. N2-3: a stop on a person counts the agents it stops with them, and a `blocked` verdict counts: it is a stop in the floor.
+ * Who was stopped since `since` (ms): each entry once. C381: a stop on a person counts that person. N2-3: an explicit stop of an agent counts, and a `blocked` verdict counts: it is a stop in the floor.
  * The one count behind the cap and the "stopped today" banner. It limits accidents. A script that can call these ops can also send the confirm.
  */
 export function stoppedSince(db: Db, since: number): Set<string> {
   const rows = db
     .prepare(
       `SELECT subject_kind || ':' || subject_id AS k FROM fleet_lifecycle_events WHERE ${STOP_EVENT} AND at > ?
-       UNION SELECT 'agent:' || a.id FROM fleet_lifecycle_events e JOIN fleet_agents a ON a.owner_id = e.subject_id
-         WHERE e.subject_kind = 'person' AND e.kind = 'transition' AND e.to_state IN ('suspended', 'leaving') AND e.at > ? AND a.status <> 'removed' AND a.keep_running = 0 AND a.lifecycle <> 'archived'
        UNION SELECT subject_kind || ':' || subject_id FROM fleet_reviews WHERE verdict = 'blocked' AND subject_id <> '' AND COALESCE(decided_at, created_at) > ?`,
     )
-    .all(since, since, since);
+    .all(since, since);
   return new Set(rows.map((r) => String(r.k)));
 }
 export const stopsSince = (db: Db, since: number): number => stoppedSince(db, since).size;
@@ -149,6 +147,15 @@ export function feedEpoch(db: Db, now = Date.now()): string {
   const made = newEpoch(now);
   db.prepare("INSERT INTO fleet_settings (key, value) VALUES ('feed_epoch', ?) ON CONFLICT (key) DO NOTHING").run(made);
   return String(db.prepare("SELECT value FROM fleet_settings WHERE key = 'feed_epoch'").get()?.value);
+}
+
+/** C381: once, through the chain, where a record exists: the rule of an owner's state changed. A new install has nothing to correct. */
+export function noteOwnerRule(db: Db, now: number): void {
+  if (db.prepare("SELECT 1 FROM fleet_settings WHERE key = 'owner_rule_noted'").get()) return;
+  db.transaction(() => {
+    if (db.prepare("SELECT 1 FROM fleet_lifecycle_events LIMIT 1").get()) appendEvent(db, { subject: { kind: "workspace", id: "", name: "Governance" }, kind: "migrated", actor: { kind: "system", id: null }, note: "From this version an owner's change no longer stops the owner's agents. Agents keep working, and a finding says when an agent needs an owner.", at: now });
+    db.prepare("INSERT INTO fleet_settings (key, value) VALUES ('owner_rule_noted', '1') ON CONFLICT (key) DO NOTHING").run();
+  });
 }
 
 /**

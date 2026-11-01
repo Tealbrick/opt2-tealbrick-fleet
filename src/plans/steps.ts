@@ -76,4 +76,4 @@ export const HOLD_RECHECK_MS = 5 * 60_000;
 export const REISSUE_MS = 86_400_000;
 export const STEPS_PER_DRAFT = 100;
 export const DEFAULT_EXPIRES_SEC = 86_400;
-export const DRAFT_TITLE = "Governance: stop request";
+export const DRAFT_TITLE = "Governance: request for your approval";

@@ -1,37 +1,45 @@
-// The choice for each of a person's agents, on the first step of a stop and later on the person's page (C380 D2). "Decide later" is the
-// default and only pauses the agent; the sentence that says so is the server's own.
+// The choice for each of a person's agents, on the first step of Leave and later on the person's page (C381). Move to a new owner is the default and the agent runs on throughout.
+// Stop this agent stays an explicit choice. A new key is offered in the move step, and its effect is stated before any approval.
 import { callOp } from "@opt2-tealbrick/miniapp-sdk/client";
-import { Button, Dialog, Field, Choices as KitChoices, Notice, Select, TextInput } from "@opt2-tealbrick/ui";
+import { Button, Dialog, Field, Choices as KitChoices, Notice, Select, Switch } from "@opt2-tealbrick/ui";
 import { useCallback, useState } from "react";
 import type { ColleagueGetOutput, ColleaguesListOutput, PlanSendInput } from "#kit";
 import { changeError, useLoad } from "../common.tsx";
-import { type Choice, type Choices, canChoose, choiceOf, choicesReady, decisionsOf, hasOwnStop } from "./agent-choice.ts";
+import { type Choice, type ChoiceDefaults, type Choices, canChoose, choiceOf, choicesReady, decisionsOf, newKeyEffect } from "./agent-choice.ts";
 import { capButton, useCapConfirm } from "./cap-confirm.ts";
 import { lifecycleError } from "./lifecycle-errors.ts";
+import { apartLabels } from "./many.ts";
 
 type Colleague = ColleagueGetOutput["colleague"];
 type Agent = Colleague["agents"][number];
 export type Owner = { value: string; label: string };
 
-/** Before the approval: the server's "Paused. The key still exists until you choose." is true only after it. */
-const LATER_SENTENCE = "It is only paused, when you approve in Portal. Its key still exists until you choose.";
-const STOP_SENTENCE = "Its access and key go when you approve in Portal. To undo this you must pair it again and grant its access again.";
-const KEEP_SENTENCE = "The person who left may still hold this agent's key.";
-const TRANSFER_SENTENCE = "A new key is needed. The agent loses this person's personal memory and gains the new owner's.";
+const MOVE_SENTENCE = "It keeps running. It has its new owner at once. It loses this person's personal memory.";
+const MOVE_STOPPED = "It stays stopped, as you chose. It has its new owner at once.";
+const STOP_SENTENCE = "It stops when you approve in Portal. Its access and key go. To undo this you must connect it again and grant its access again.";
+const LATER_SENTENCE = "It keeps running with this owner. Governance shows that it needs an owner, and this person may still hold its key.";
+const LATER_STOPPED = "It stays stopped, with this owner. Governance shows that it needs an owner.";
+const KEY_ON = "When you approve in Portal, the old key stops and this agent must be connected again. It cannot work until then. After that it gains the new owner's personal memory.";
+const KEY_OFF = "The old key keeps working, and this person may hold it. So apps read no owner for this agent: it does not get the new owner's personal memory or team reads. Governance shows this until a new key exists.";
+const NO_ONE = "No other active person is in the directory. Add one, then name them here. These agents keep working until then.";
 
 /** The active people who can take an agent, without this person. */
 export function useOwners(personId: string): Owner[] | null {
   const people = useLoad(useCallback(() => callOp<ColleaguesListOutput>("colleagues_list", { kind: "person", lifecycle: "active", limit: 200 }), []));
-  return people.data ? people.data.items.filter((p) => p.id !== personId).map((p) => ({ value: p.id, label: p.name })) : null;
+  return people.data ? apartLabels(people.data.items.filter((p) => p.id !== personId).map((p) => ({ value: p.id, label: p.name }))) : null;
 }
 
-export function AgentChoices({ agents, choices, onChange, owners }: { agents: readonly Agent[]; choices: Choices; onChange: (next: Choices) => void; owners: Owner[] | null }) {
-  const set = (id: string, patch: Partial<(typeof choices)[string]>) => onChange({ ...choices, [id]: { ...choiceOf(choices, id), ...patch } });
+/** The start of each choice: the workspace default owner when one is set and active, and a new key for a person who leaves. */
+export const defaultsOf = (c: Colleague, leaving: boolean): ChoiceDefaults => ({ owner: c.defaultOwner?.id ?? "", newKey: leaving });
+
+export function AgentChoices({ agents, choices, onChange, owners, defaults }: { agents: readonly Agent[]; choices: Choices; onChange: (next: Choices) => void; owners: Owner[] | null; defaults: ChoiceDefaults }) {
+  const canMove = owners === null || owners.length > 0;
+  const set = (id: string, patch: Partial<Choices[string]>) => onChange({ ...choices, [id]: { ...choiceOf(choices, id, defaults, canMove), ...patch } });
   return (
     <div className="tb-stack">
+      {canMove ? null : <Notice tone="needs-you">{NO_ONE}</Notice>}
       {agents.map((a) => {
-        const c = choiceOf(choices, a.id);
-        const own = hasOwnStop(a);
+        const c = choiceOf(choices, a.id, defaults, canMove);
         return (
           <div className="tb-stack" key={a.id}>
             <h3 className="flow-agent">
@@ -43,21 +51,19 @@ export function AgentChoices({ agents, choices, onChange, owners }: { agents: re
               value={c.choice}
               onChange={(v) => set(a.id, { choice: v })}
               options={[
-                { value: "later", title: "Decide later", body: a.keepRunning ? "It keeps running, as you chose before." : LATER_SENTENCE },
-                { value: "stop", title: "Stop and remove", body: STOP_SENTENCE },
-                ...(own || !owners ? [] : [{ value: "transfer" as const, title: "Pause and move to a new owner", body: TRANSFER_SENTENCE }]),
-                ...(own ? [] : [{ value: "keep" as const, title: "Keep running", body: KEEP_SENTENCE }]),
+                ...(canMove ? [{ value: "move" as const, title: "Move to a new owner", body: a.lifecycle === "suspended" ? MOVE_STOPPED : MOVE_SENTENCE }] : []),
+                { value: "later", title: "Name a new owner later", body: a.lifecycle === "suspended" ? LATER_STOPPED : LATER_SENTENCE },
+                { value: "stop", title: "Stop this agent", body: STOP_SENTENCE },
               ]}
             />
-            {c.choice === "transfer" ? (
-              <Field label={`New owner of ${a.name}`}>
-                <Select placeholder="Choose a person" options={owners ?? []} value={c.newOwner} onValueChange={(v) => set(a.id, { newOwner: v })} />
-              </Field>
-            ) : null}
-            {c.choice === "keep" ? (
-              <Field label={`Why does ${a.name} keep running?`} hint="Required. This is kept in the history.">
-                <TextInput value={c.reason} maxLength={200} onChange={(e) => set(a.id, { reason: e.target.value })} />
-              </Field>
+            {c.choice === "move" ? (
+              <>
+                <Field label={`New owner of ${a.name}`}>
+                  <Select placeholder="Choose a person" options={owners ?? []} value={c.newOwner} onValueChange={(v) => set(a.id, { newOwner: v })} />
+                </Field>
+                <Switch label={`Make a new key for ${a.name}`} checked={c.newKey} onCheckedChange={(on) => set(a.id, { newKey: on })} />
+                <p className="tb-hint">{c.newKey ? KEY_ON : KEY_OFF}</p>
+              </>
             ) : null}
           </div>
         );
@@ -66,15 +72,18 @@ export function AgentChoices({ agents, choices, onChange, owners }: { agents: re
   );
 }
 
-/** The second stage: the person is stopped and their agents wait for a choice. Sends only what was chosen. */
+/** The person is marked, and their agents still have them as owner. Sends what was chosen. */
 export function ChooseDialog({ c, onClose, onChanged }: { c: Colleague; onClose: () => void; onChanged: () => void | Promise<void> }) {
   const agents = c.agents.filter(canChoose);
   const owners = useOwners(c.id);
+  const canMove = owners === null || owners.length > 0;
+  const defaults = defaultsOf(c, c.lifecycle === "leaving");
   const [choices, setChoices] = useState<Choices>({});
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const cap = useCapConfirm();
-  const decisions = decisionsOf(agents, choices);
+  const decisions = decisionsOf(agents, choices, defaults, canMove);
+  const key = newKeyEffect(agents, choices, defaults, canMove);
   const save = async () => {
     setBusy(true);
     setFailure(null);
@@ -96,7 +105,7 @@ export function ChooseDialog({ c, onClose, onChanged }: { c: Colleague; onClose:
     <Dialog
       open
       size="lg"
-      title={`Choose for ${c.name}'s agents`}
+      title={`New owners for ${c.name}'s agents`}
       onClose={onClose}
       busy={busy}
       footer={
@@ -104,8 +113,8 @@ export function ChooseDialog({ c, onClose, onChanged }: { c: Colleague; onClose:
           <Button onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={() => void save()} disabled={busy || decisions.length === 0 || !choicesReady(agents, choices)}>
-            {cap.count !== null ? capButton(cap.count) : "Send to Portal"}
+          <Button variant="primary" onClick={() => void save()} disabled={busy || decisions.length === 0 || !choicesReady(agents, choices, defaults, canMove)}>
+            {cap.count !== null ? capButton(cap.count) : "Save"}
           </Button>
         </>
       }
@@ -116,16 +125,9 @@ export function ChooseDialog({ c, onClose, onChanged }: { c: Colleague; onClose:
             {failure}
           </Notice>
         ) : null}
-        <p className="tb-soft">Your choices are recorded when you send: a new owner and Keep running apply at once. Pause, removal and new keys wait for your approval in Portal. This takes back an older request for this person, with any new key it asked for.</p>
-        <AgentChoices
-          agents={agents}
-          choices={choices}
-          onChange={(next) => {
-            setChoices(next);
-            cap.clear();
-          }}
-          owners={owners}
-        />
+        <p className="tb-soft">An agent you did not stop keeps working. A new owner applies at once. A new key and a stop wait for your approval in Portal. This takes back an older request for this person, and asks again for any new key in it.</p>
+        <AgentChoices agents={agents} choices={choices} onChange={(next) => { setChoices(next); cap.clear(); }} owners={owners} defaults={defaults} />
+        {key ? <Notice tone="needs-you">{key}</Notice> : null}
       </div>
     </Dialog>
   );

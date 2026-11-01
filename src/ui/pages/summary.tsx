@@ -54,6 +54,8 @@ export function SummaryPage() {
  */
 function RulesNotice({ data }: { data: SummaryGetOutput }) {
   const stopping = data.agents.stopping + data.people.leaving + data.people.suspended > 0;
+  // C381: with only people marked, no approval in Portal is what stops anything.
+  const noAgent = data.agents.stopping === 0;
   const { floor } = data;
   // After a restore this directory lists no stop, and Rules still holds them: that is said with nothing else stopping.
   if (!stopping && floor.rulesHolds) {
@@ -64,7 +66,7 @@ function RulesNotice({ data }: { data: SummaryGetOutput }) {
     );
   }
   if (!stopping && (floor.state === "confirmed" || floor.state === "not_confirmed") && !floor.gateNote) return null;
-  const text = stopping ? afterChangeText(floor) : floor.gateNote && floor.lastGateAt ? `Rules has not checked a call since ${when(floor.lastGateAt)}.` : floor.text;
+  const text = stopping ? afterChangeText(floor, noAgent ? "person" : "agent") : floor.gateNote && floor.lastGateAt ? `Rules has not checked a call since ${when(floor.lastGateAt)}.` : floor.text;
   return (
     <Notice tone={stopping ? floorTone(floor) : "neutral"} role="status">
       {text}
@@ -123,7 +125,7 @@ function SummaryBody({ data, onRead }: { data: SummaryGetOutput; onRead: () => v
       ) : null}
       <div className="cards stats">
         <Stat label="Agents" value={String(data.agents.total)} note={`${data.agents.running} running, ${data.agents.paused} paused, ${data.agents.notReviewed} not reviewed`} href="./people-and-agents" />
-        <Stat label="No owner" value={String(data.noOwner)} note={data.settings.defaultOwner ? `Default owner: ${data.settings.defaultOwner.name}` : "No default owner"} />
+        <Stat label="Need an owner" value={String(data.noOwner)} note={data.settings.defaultOwner ? `Default owner: ${data.settings.defaultOwner.name}` : "No default owner"} />
         <Stat label="Can write or send" value={data.canWriteOrSend === null ? "Not known" : String(data.canWriteOrSend)} note={data.canWriteOrSend === null ? "Turn on See who has access for Governance in Portal." : undefined} />
         <Stat label="Differences" value={String(data.differences)} note="From what Governance read." />
       </div>

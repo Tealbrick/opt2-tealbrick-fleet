@@ -98,7 +98,7 @@ const ASG = (over: Record<string, unknown> = {}) => ({
 const DIRECTORY = {
   revision: 1,
   teams: [],
-  people: [{ id: "per_1", name: "Marco", kind: "person", status: "active", trust: "trusted", email: null, title: "", tags: [], handles: [], teams: [], updatedAt: "2026-10-30T09:00:00Z", org: "", relationship: "" }],
+  people: [{ id: "per_1", name: "Marco", kind: "person", status: "active", lifecycle: "active", trust: "trusted", email: null, title: "", tags: [], handles: [], teams: [], updatedAt: "2026-10-30T09:00:00Z", org: "", relationship: "" }],
   agents: [{ id: "agt_A", name: "Henry", status: "active", trust: "trusted", mode: "free", owner: null, role: "", tags: [], teams: [], updatedAt: "2026-10-30T09:00:00Z" }],
 };
 const list = (roles: unknown[]) => ok({ roles, assignments: [] });

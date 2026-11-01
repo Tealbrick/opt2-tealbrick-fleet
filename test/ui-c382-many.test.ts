@@ -27,7 +27,7 @@ for (const k of ["window", "document", "navigator", "location", "history", "sess
 g.IS_REACT_ACT_ENVIRONMENT = true;
 g.requestAnimationFrame = (cb: () => void) => setTimeout(cb, 0);
 
-const PERSON = (id: string, name: string, over: object = {}) => ({ id, name, kind: "person", status: "active", trust: "trusted", email: null, title: "", tags: [], handles: [], teams: [], updatedAt: "2026-10-31T09:00:00Z", org: "", relationship: "", ...over });
+const PERSON = (id: string, name: string, over: object = {}) => ({ id, name, kind: "person", status: "active", lifecycle: "active", trust: "trusted", email: null, title: "", tags: [], handles: [], teams: [], updatedAt: "2026-10-31T09:00:00Z", org: "", relationship: "", ...over });
 const AGENT = (id: string, name: string, over: object = {}) => ({ id, name, status: "active", trust: "trusted", mode: "free", owner: null, role: "Triage", tags: ["eu"], teams: [], updatedAt: "2026-10-31T09:00:00Z", ...over });
 const TEAM = (over: object = {}) => ({ id: "tea_1", name: "Support", description: "", tags: [], members: [], ...over });
 
@@ -249,11 +249,11 @@ describe("Teams", () => {
 describe("Agents: the owner of many", () => {
   it("sends the owner and nothing else, per agent; a refused row says why and stops no other; removed agents and outside agents are not offered", async () => {
     reset({
-      people: [PERSON("per_1", "Marco"), PERSON("per_2", "Outside", { kind: "outside_agent" }), PERSON("per_3", "Left", { status: "departed" })],
+      people: [PERSON("per_1", "Marco"), PERSON("per_2", "Outside", { kind: "outside_agent", lifecycle: null }), PERSON("per_3", "Left", { status: "departed", lifecycle: "leaving" })],
       agents: [AGENT("agt_1", "Henry"), AGENT("agt_2", "Tempo", { owner: { id: "per_3", name: "Left" } }), AGENT("agt_3", "Old", { status: "removed" })],
     });
     stub.answers.agent_set = (input) => {
-      if (input.agent === "agt_2") return refuse(409, "use_transfer", "The owner is stopped, and may hold this agent's key.");
+      if (input.agent === "agt_2") return refuse(409, "owner_inactive", "The new owner must be an active person.");
       const a = (stub.dir.agents as { id: string; owner: unknown }[]).find((x) => x.id === input.agent);
       if (a) a.owner = input.owner ? { id: input.owner, name: "Marco" } : null;
       return undefined;
@@ -271,7 +271,7 @@ describe("Agents: the owner of many", () => {
       { agent: "agt_2", owner: "per_1" },
     ]);
     const text = m.host.textContent ?? "";
-    assert.match(text, /Failed: Tempo\. The owner is stopped/);
+    assert.match(text, /Failed: Tempo\. The new owner must be an active person/);
     assert.match(text, /1 set, 1 failed/);
     await m.unmount();
   });

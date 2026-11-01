@@ -9,6 +9,7 @@ import { normalizeHandle } from "@opt2-tealbrick/manifest";
 import { type Db, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { feedEpoch } from "./lifecycle/events.ts";
 import { type Effective, effectiveAgent, effectivePerson, floorOf, type Lifecycle } from "./lifecycle/states.ts";
+import { ownerWithheld } from "./plans/guards.ts";
 import { type FeedRole, feedRoles } from "./roles/roles.ts";
 import { revision } from "./store.ts";
 import type { ContactKind, Trust } from "./trust.ts";
@@ -44,7 +45,7 @@ export interface FeedAgent {
   owner: string | null;
   /** only with `accept: ["agent_handles"]` (C373 §3): canonical handles Connect issued to the agent, sorted, <= 16 */
   handles?: string[];
-  /** only with `accept: ["lifecycle"]` (C380): the effective lifecycle, with the owner's stop and the dates in it */
+  /** only with `accept: ["lifecycle"]` (C380): the effective lifecycle: the agent's own stop and its start date. C381: its owner's state is not in it */
   lifecycle?: Effective;
   /** only with `accept: ["lifecycle"]`: true = Rules refuses it before any rule */
   floor?: boolean;
@@ -174,7 +175,6 @@ export function directoryFeed(db: Db, input: FeedInput, warn?: Warn): DirectoryF
   }
   const contacts: FeedContact[] = [];
   const contactIds = new Set<string>();
-  const ownerLifecycle = new Map<string, string | null>();
   for (const c of db.prepare(`SELECT id, kind, status, trust${lifecycle ? ", lifecycle, valid_from" : ""} FROM fleet_people ORDER BY id`).all()) {
     const id = String(c.id);
     if (!validId(id)) {
@@ -185,7 +185,6 @@ export function directoryFeed(db: Db, input: FeedInput, warn?: Warn): DirectoryF
     const contact: FeedContact = { id, kind: c.kind as ContactKind, status: c.status as FeedContact["status"], trust: c.trust as Trust, handles: (handles.get(id) ?? []).slice(0, FEED_CAPS.handlesPerContact) };
     if (lifecycle) {
       const own = (c.lifecycle ?? null) as Lifecycle | null;
-      ownerLifecycle.set(id, own);
       const effective = own === null ? null : effectivePerson({ lifecycle: own, validFrom: c.valid_from === null ? null : Number(c.valid_from) });
       if (effective !== null) contact.lifecycle = effective;
       contact.floor = floorOf(effective, contact.trust);
@@ -196,9 +195,10 @@ export function directoryFeed(db: Db, input: FeedInput, warn?: Warn): DirectoryF
 
   const agents: FeedAgent[] = [];
   const agentIds = new Set<string>();
+  const withheld = ownerWithheld(db);
   for (const a of db
     // C380: a reader drops a floor entry when its row leaves a full feed, so a stopped or blocked agent stays listed after its card is gone
-    .prepare(`SELECT id, status, trust, owner_id${lifecycle ? ", lifecycle, valid_from, keep_running, migrated_note" : ""} FROM fleet_agents WHERE status <> 'removed' OR id IN (SELECT subject_id FROM fleet_members WHERE kind = 'agent')${lifecycle ? " OR trust = 'blocked' OR (lifecycle IN ('suspended', 'leaving', 'archived') AND migrated_note IS NULL)" : ""} ORDER BY id`)
+    .prepare(`SELECT id, status, trust, owner_id${lifecycle ? ", lifecycle, valid_from, migrated_note" : ""} FROM fleet_agents WHERE status <> 'removed' OR id IN (SELECT subject_id FROM fleet_members WHERE kind = 'agent')${lifecycle ? " OR trust = 'blocked' OR (lifecycle IN ('suspended', 'leaving', 'archived') AND migrated_note IS NULL)" : ""} ORDER BY id`)
     .all()) {
     const id = String(a.id);
     if (!AGENT_ID_PATTERN.test(id)) {
@@ -207,7 +207,7 @@ export function directoryFeed(db: Db, input: FeedInput, warn?: Warn): DirectoryF
     }
     agentIds.add(id);
     const owner = a.owner_id === null ? null : String(a.owner_id);
-    const agent: FeedAgent = { id, status: a.status as FeedAgent["status"], trust: a.trust as Trust, owner: owner !== null && contactIds.has(owner) ? owner : null };
+    const agent: FeedAgent = { id, status: a.status as FeedAgent["status"], trust: a.trust as Trust, owner: owner !== null && contactIds.has(owner) && !withheld.has(id) ? owner : null };
     if (agentHandles) {
       const list: string[] = [];
       for (const h of agentHandles.get(id) ?? []) {
@@ -222,7 +222,7 @@ export function directoryFeed(db: Db, input: FeedInput, warn?: Warn): DirectoryF
       agent.handles = list;
     }
     if (lifecycle) {
-      const effective = effectiveAgent({ lifecycle: a.lifecycle as Lifecycle, validFrom: a.valid_from === null ? null : Number(a.valid_from), keepRunning: Number(a.keep_running) === 1 }, a.owner_id === null ? null : (ownerLifecycle.get(String(a.owner_id)) ?? null));
+      const effective = effectiveAgent({ lifecycle: a.lifecycle as Lifecycle, validFrom: a.valid_from === null ? null : Number(a.valid_from) });
       agent.lifecycle = effective;
       agent.floor = floorOf(effective, agent.trust, a.migrated_note === "no_card");
     }

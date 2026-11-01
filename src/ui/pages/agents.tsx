@@ -17,9 +17,9 @@ function AgentDialog({ agent, dir, onClose, reload }: { agent: Agent; dir: Dir; 
   };
   return (
     <EditDialog title={`Edit ${agent.name}`} onClose={onClose} save={save}>
-      <Field label="Owner">
+      <Field label="Owner" hint="The agent keeps working. With a new owner, the old one may still hold its key: Governance shows this until you make a new key on the agent's page. If the old owner is not active, apps read no owner until then, so it has no owner's memory or team reads.">
         <Select
-          options={[{ value: "", label: "No owner" }, ...dir.people.filter((p) => p.kind === "person" || p.id === agent.owner?.id).map((p) => ({ value: p.id, label: p.name }))]}
+          options={[{ value: "", label: "No owner" }, ...apartLabels(dir.people.filter((p) => (p.kind === "person" && p.lifecycle === "active") || p.id === agent.owner?.id).map((p) => ({ id: p.id, label: p.name }))).map((o) => ({ value: o.id, label: o.label }))]}
           value={owner}
           onValueChange={setOwner}
         />
@@ -42,7 +42,7 @@ function OwnerMany({ dir, onBack, reload }: { dir: Dir; onBack: () => void; relo
   const agents = useMemo(() => dir.agents.filter((a) => a.status !== "removed"), [dir.agents]);
   const who = useMemo(() => agents.map((a) => ({ id: a.id, name: a.name, note: a.status === "paused" ? "paused" : "" })), [agents]);
   const cells = useMemo(() => ownerCells(agents), [agents]);
-  const owners = useMemo(() => apartLabels(dir.people.filter((p) => p.kind === "person" && p.status === "active").map((p) => ({ id: p.id, label: p.name }))), [dir.people]);
+  const owners = useMemo(() => apartLabels(dir.people.filter((p) => p.kind === "person" && p.lifecycle === "active").map((p) => ({ id: p.id, label: p.name }))), [dir.people]);
   const names = useMemo(() => new Map(agents.flatMap((a) => (a.owner ? [[a.owner.id, a.owner.name] as const] : []))), [agents]);
   const write = useCallback((change: AccessChange) => callOp("agent_set", { agent: change.agent, owner: change.level }), []);
   const read = useCallback(async () => {
@@ -67,7 +67,7 @@ function OwnerMany({ dir, onBack, reload }: { dir: Dir; onBack: () => void; relo
         backLabel="Back to agents"
         onBack={onBack}
         nowText={(level) => (level === null ? "No owner" : `Owner ${names.get(level) ?? "not in the list"}`)}
-        panel={<Notice tone="neutral">Each change opens a review and stays in the history of the agent. Its role and tags stay as they are.</Notice>}
+        panel={<Notice tone="neutral">Each change opens a review and stays in the history of the agent. Its role and tags stay as they are. The agent keeps working. The old owner may still hold its key: Governance shows this until you make a new key on the agent's page.</Notice>}
         words={{
           unit: { one: "agent", many: "agents" },
           set: "Choose one owner",

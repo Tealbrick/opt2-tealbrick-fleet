@@ -20,20 +20,35 @@ function PersonDialog({ person, onClose, reload }: { person: Person | "new"; onC
   const [org, setOrg] = useState(p?.org ?? "");
   const [relationship, setRelationship] = useState(p?.relationship ?? "");
   const outside = p?.kind === "outside_agent";
+  // QA D11: the name of someone in the directory. Two people can share a name, so the owner may go on, but only after reading this.
+  const [sameName, setSameName] = useState(false);
   const save = async () => {
     const input: PersonSetInput = { name, email: email.trim() || null, title, status, tags: csv(tags), handles: csv(handles) };
+    if (sameName) input.sameName = true;
     if (outside) {
       input.org = org;
       input.relationship = relationship;
     }
     if (p) input.id = p.id;
-    await callOp("person_set", input);
+    try {
+      await callOp("person_set", input);
+    } catch (e) {
+      if ((e as { code?: unknown } | null)?.code === "person_name_taken") setSameName(true);
+      throw e;
+    }
     await reload();
   };
   return (
-    <EditDialog title={p ? `Edit ${p.name}` : "New person"} onClose={onClose} save={save}>
+    <EditDialog title={p ? `Edit ${p.name}` : "New person"} onClose={onClose} save={save} saveLabel={sameName ? "Add a second person" : undefined}>
       <Field label="Name">
-        <TextInput value={name} maxLength={120} onChange={(e) => setName(e.target.value)} />
+        <TextInput
+          value={name}
+          maxLength={120}
+          onChange={(e) => {
+            setName(e.target.value);
+            setSameName(false);
+          }}
+        />
       </Field>
       <Field label="Email" hint="Optional.">
         <TextInput type="email" value={email} maxLength={200} onChange={(e) => setEmail(e.target.value)} />
@@ -53,7 +68,7 @@ function PersonDialog({ person, onClose, reload }: { person: Person | "new"; onC
       ) : null}
       {FEATURES.lifecycle ? (
         p && !outside ? (
-          <p className="tb-hint">To stop this person's agents or bring the person back, open the person in People and agents.</p>
+          <p className="tb-hint">To mark this person as leaving or bring the person back, open the person in People and agents.</p>
         ) : null
       ) : (
         <Field label="Status" hint="A departed person keeps the entry but gives no team facts.">

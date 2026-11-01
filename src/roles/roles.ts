@@ -119,6 +119,10 @@ function toAssignment(r: Record<string, unknown>): AssignmentView {
 }
 
 /** Open assignments of one role first, then the newest ended ones (at most `endedLimit`). */
+/** The roles a person holds now, by name (C381: what a person can reach). Owner side only. */
+export const heldRoleNames = (db: Db, personId: string): string[] =>
+  db.prepare("SELECT r.name FROM fleet_role_assignments a JOIN fleet_roles r ON r.id = a.role_id WHERE a.subject_kind = 'person' AND a.subject_id = ? AND a.ended_at IS NULL AND a.started_at IS NOT NULL ORDER BY r.name COLLATE NOCASE, r.id LIMIT 50").all(personId).map((r) => String(r.name));
+
 export function assignmentsOfRole(db: Db, roleId: string, endedLimit = 50): AssignmentView[] {
   const open = db.prepare(`${ASSIGNMENT_SQL} WHERE a.role_id = ? AND a.ended_at IS NULL ORDER BY lower(subject_name), a.id`).all(roleId);
   const ended = db.prepare(`${ASSIGNMENT_SQL} WHERE a.role_id = ? AND a.ended_at IS NOT NULL ORDER BY a.ended_at DESC, a.id DESC LIMIT ?`).all(roleId, endedLimit);

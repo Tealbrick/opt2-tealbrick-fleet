@@ -140,7 +140,7 @@ export function EveryonePage({ portalHref }: { portalHref?: string }) {
                       <span className="tb-row tight row-actions">
                         {FEATURES.preview ? (
                           <Button size="sm" onClick={() => setPreview(r)}>
-                            See what would stop
+                            {r.kind === "person" ? "See what would change" : "See what would stop"}
                           </Button>
                         ) : null}
                         {canStop(r) ? (

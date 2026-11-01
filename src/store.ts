@@ -5,8 +5,10 @@
 // tenants, roles-per-tenant or license; people are directory entries, never sign-ins (C84).
 import { handleChannel, normalizeHandle, ulid } from "@opt2-tealbrick/manifest";
 import type { Db, SliceAgent } from "@opt2-tealbrick/miniapp-sdk";
+import { appendEvent } from "./lifecycle/events.ts";
 import { beforePersonDelete, initPerson, kindChanged, setDates, statusRequested } from "./lifecycle/transitions.ts";
 import { bump, fail, revision } from "./meta.ts";
+import { ownerWithheldFor } from "./plans/guards.ts";
 import { endAssignmentsOf } from "./roles/roles.ts";
 import { cleanText } from "./text.ts";
 import { type ContactKind, defaultTrust, NEW_AGENT_TRUST, type Source, type Trust } from "./trust.ts";
@@ -53,6 +55,8 @@ export interface Person {
   org: string;
   relationship: string;
   status: PersonStatus;
+  /** owner side only: no agent op reads a Person. Null for an outside agent. */
+  lifecycle: "proposed" | "active" | "suspended" | "leaving" | "archived" | null;
   tags: string[];
   handles: string[];
   teams: TeamRef[];
@@ -149,6 +153,7 @@ function toPerson(db: Db, r: Row): Person {
     org: r.org === undefined ? "" : String(r.org),
     relationship: r.relationship === undefined ? "" : String(r.relationship),
     status: r.status as PersonStatus,
+    lifecycle: (r.lifecycle ?? null) as Person["lifecycle"],
     tags: tags(r.tags),
     handles: handlesOf(db, id),
     teams: teamsOf(db, "person", id),
@@ -332,6 +337,8 @@ export interface PersonInput {
   status?: PersonStatus;
   tags?: string[];
   handles?: string[];
+  /** QA D11: the owner read that this name is in the directory, and this is another person. */
+  sameName?: boolean;
   /** A person's end date (C380 T2-d, a contractor). Saved in the same transaction as the person. A date that has passed is refused; null clears it. Not for an outside agent. */
   validUntil?: string | null;
 }
@@ -376,6 +383,14 @@ export function setPerson(db: Db, input: PersonInput, now = Date.now()): Person 
     } else {
       const count = Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_people").get()?.n);
       if (count >= LIMITS.people) fail("limit_reached", `a workspace has at most ${LIMITS.people} people`, 409);
+      // QA D11: the same name twice made a second person with no word. Two people may share a name, as in Join: different emails say so, or the owner does.
+      if ((input.kind ?? "person") === "person" && !input.sameName) {
+        const email = input.email?.toLowerCase() ?? null;
+        for (const o of db.prepare("SELECT email FROM fleet_people WHERE kind = 'person' AND lower(name) = lower(?)").all(name)) {
+          const other = o.email === null ? null : String(o.email).toLowerCase();
+          if (email === null || other === null || email === other) fail("person_name_taken", `A person named ${name} is in the directory. To add another person with this name, press Add a second person.`, 409);
+        }
+      }
       id = `psn_${ulid(now)}`;
       const source = input.source ?? "owner";
       const extra = input.org !== undefined || input.relationship !== undefined;
@@ -424,6 +439,10 @@ export function deletePerson(db: Db, id: string, now = Date.now()): boolean {
     endAssignmentsOf(db, "person", id, "deleted", OWNER, now);
     db.prepare("DELETE FROM fleet_members WHERE kind = 'person' AND subject_id = ?").run(id);
     db.prepare("DELETE FROM fleet_handles WHERE person_id = ?").run(id);
+    // C381: a delete is an owner change. The record says it, so the key this person may hold shows as a finding, and apps read no later owner until Core replaced the key.
+    for (const a of db.prepare("SELECT a.id, a.name, p.name AS owner_name FROM fleet_agents a JOIN fleet_people p ON p.id = a.owner_id WHERE a.owner_id = ? AND a.status <> 'removed'").all(id)) {
+      appendEvent(db, { subject: { kind: "agent", id: String(a.id), name: String(a.name) }, kind: "moved", actor: OWNER, note: `Owner changed from ${String(a.owner_name)} to nobody.`.slice(0, 500), snapshot: { before: id, after: null }, at: now });
+    }
     db.prepare("UPDATE fleet_agents SET owner_id = NULL WHERE owner_id = ?").run(id);
     const gone = db.prepare("DELETE FROM fleet_people WHERE id = ?").run(id).changes > 0;
     if (gone) bump(db);
@@ -514,7 +533,8 @@ export function syncAgents(db: Db, agents: readonly Pick<SliceAgent, "id" | "nam
 export function agentFacts(db: Db, id: string): { owner: Ref | null; teams: TeamRef[] } {
   const r = db.prepare(`${AGENT_SELECT} WHERE a.id = ? AND a.status <> 'removed'`).get(id);
   if (!r) return { owner: null, teams: [] };
-  return { owner: r.owner_id === null ? null : { id: String(r.owner_id), name: String(r.owner_name) }, teams: r.trust === "blocked" ? [] : teamsOf(db, "agent", id).slice(0, MAX_TEAMS_PER_ANSWER) };
+  // C381: an old key may run this agent, so no app reads the new owner as its owner yet.
+  return { owner: r.owner_id === null || ownerWithheldFor(db, id) ? null : { id: String(r.owner_id), name: String(r.owner_name) }, teams: r.trust === "blocked" ? [] : teamsOf(db, "agent", id).slice(0, MAX_TEAMS_PER_ANSWER) };
 }
 
 /** The trust of a workspace agent that is not removed; null for an unknown or removed agent. */
