@@ -149,7 +149,7 @@ function KeyChoice({ c, onChoose, onNewKey }: { c: Colleague; onChoose: () => vo
         <Button variant="primary" onClick={onChoose}>
           Name new owners for their agents
         </Button>
-        <span className="tb-hint">These agents keep working. Each one needs an owner.</span>
+        <span className="tb-hint">An agent you did not stop keeps working. Each one needs an owner.</span>
       </div>
     );
   }

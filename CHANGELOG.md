@@ -2,6 +2,13 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
+## 0.4.0-dev.102 - 2026-11-01
+
+From the DEV proof of dev.101 (C381). DEV only.
+
+- "It keeps working" is said only of an agent that runs, not of one with its own stop or paused.
+- The page of a person who is not stopped no longer says that calls for them are refused.
+
 ## 0.4.0-dev.101 - 2026-11-01
 
 C381 and C383: a person's change bars that person. Their agents keep working. DEV only until the release lead promotes it.
