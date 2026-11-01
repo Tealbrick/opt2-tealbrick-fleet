@@ -2,6 +2,26 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
+## 0.4.0 - 2026-11-01
+
+The final version of the 0.4.0-dev series: C380 lifecycle and C381, a person's change bars that person and their agents keep working. See the dev entries below for what is in it. New in this cut, from the C383 QA run and the C381 review:
+
+- After a new key is approved, the agent page says so. When the agent has paired again, the owner stops being withheld as soon as Portal's picture shows only connections made after the approval; before, up to 30 minutes. A picture that lags, or no picture, waits as before.
+- The words of an agent's own stop say what happens: Rules refuses its calls in about 2 minutes if the hook is on, and Portal pauses and removes it on approval.
+- After an Undo, a person's page lists no done step as something to do in Portal.
+- A blocked person or agent reads Blocked, not "working". A blocked person is no new owner, in the lists and on the server. A person who is not active shows as "current owner, not active" on the Edit dialog of their agent.
+- "Still has access after leaving" does not count an agent's own memory area or Buzz identity once Portal no longer lists it or Core removed its access. A scheduled post still counts.
+- A later plan asks Portal nothing for an agent whose access Core already removed since its stop.
+- The preview says that an agent's read of its owner's personal memory stays until it moves to a new owner.
+- A person's page links to Access, Differences. Access opens on it from that link.
+- An agent's Stop dialog has its own Not changed list, with no words about a person.
+- person_set takes no handle off a person who is stopped, leaving, closed or blocked: Rules and the sender bar refuse by that handle. Adding one still works. Refusal: `handles_stay`.
+- A new agent that was stopped and resumed still needs an active owner, as Mark as reviewed does. A blocked person does not count as one.
+
+Upgrade: Core's companion gate refuses this version until the apps it reads are new enough. Update, where installed: bridge 0.2.14, Connect 0.7.14, Rules 0.7.0, Knowledge 0.1.31, Task Board 0.1.17, Evolution 0.4.3, and then Governance 0.4.0. So the page Who is refused cannot be read before Rules 0.7. Read People on Governance 0.3.2 first: the rows with `departed`, and each Blocked trust tag on People and Agents. That is the whole list that starts to refuse with Rules 0.7. An older note here said to read Who is refused before Rules; that order cannot run. Rules 0.7 on Governance 0.3.2 passes the gate, and it refuses those entries at its first feed read, so read the list before you update Rules.
+
+Known limit, D11 (C384, corrected by C384a): all apps share one web address. With a live session of an app in the same browser, a script on another app's page can do what the owner can do on that app's page, including reading its data and changing app-level scopes under Portal's connection. Portal approvals stay out of reach because Portal is another site. QA A17b proved the Fleet read and stop path live. Each app gets its own web address as the next platform job; this limit stays until then.
+
 ## 0.4.0-dev.103 - 2026-11-01
 
 From the C383 QA run. DEV only.
@@ -34,10 +54,10 @@ Behaviour:
 - Finding no_handle_to_bar when a leaving person has no handle. Finding owner_inactive names the key the old owner may hold.
 - Words: the leave page, See what would change, Stop their access for now, the Not changed block.
 
-Upgrade: read before Rules & Approvals 0.7 is updated (N2-4):
+Upgrade: read before Rules & Approvals 0.7 is updated (N2-4). Corrected in 0.4.0: step (2) below cannot run, because Core needs Rules 0.7 before this version. Step (1) is the way.
 - With this version nobody's agent stops because its owner left, through the migration or later. Migration 0014 states this, corrects the header of 0008, and moves the revision; one note goes into the record at boot. A Core pause approved earlier stays: finding paused_outside.
 - What starts to refuse once Rules 0.7 reads the feed, as D3 A: each blocked entry, and each person who was marked departed before 0.4 (now `leaving`, reason `migrated`).
-- How to read it first: (1) on Governance 0.3.2, read People: the rows with `departed`, and each Blocked trust tag on People and Agents. This is the whole list. (2) After the Governance update and before the Rules update, open the new page Who is refused: section "Starts to refuse with this update". Rules 0.6 does not read the floor, so nothing there is refused yet. Update Governance first, Rules second. Rules 0.7 on Governance 0.3.2 already refuses blocked and departed contacts, so hold the Rules update until Governance is on the workspace and the page is read. Rules' manifest does not enforce this order. A dev build's open draft with agents.pause stays approvable after the update (DEV only): reject it in Portal.
+- How to read it first: (1) on Governance 0.3.2, read People: the rows with `departed`, and each Blocked trust tag on People and Agents. This is the whole list. (2) The new page Who is refused, section "Starts to refuse with this update", shows the same list after the update, when Rules already refuses it. Rules 0.6 does not read the floor, so nothing there is refused yet. Update Governance first, Rules second. Rules 0.7 on Governance 0.3.2 already refuses blocked and departed contacts, so hold the Rules update until Governance is on the workspace and the page is read. Rules' manifest does not enforce this order. A dev build's open draft with agents.pause stays approvable after the update (DEV only): reject it in Portal.
 
 Defects closed: QA D5 (the cap says it limits mistakes, not a program), D6 (the alert line says what happens with and without Inbox), D7 (the key is offered at each move), D11 (the same name twice asks first, Add a second person; different emails pass, as in Join), D12 (Tab stays in a dialog with radio groups). C382 S3: Back to teams waits for a write; owner choices read the lifecycle, not the old `status`.
 

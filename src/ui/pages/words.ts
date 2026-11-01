@@ -45,8 +45,16 @@ export const NOT_CHANGED: readonly string[] = [
   "Email, Teams and Discord. Governance bars Buzz, Slack and Telegram handles only. Use the Accounts page in Connect for the others.",
 ];
 
-/** The block for one entry: the line about a person's agents is for a person. */
-export const notChangedOf = (kind: "person" | "agent"): readonly string[] => (kind === "person" ? NOT_CHANGED : NOT_CHANGED.slice(2));
+/** C383 QA S3-11: for an agent's own stop. No line about a person's logins, messages or handles. */
+const NOT_CHANGED_AGENT: readonly string[] = [
+  "This agent's machine and its native tools.",
+  "Copies of data that were already made.",
+  "Engine steps after an agent step, and scheduled posts before you approve.",
+  "Its key. It ends only with Stop and remove access, when you approve in Portal.",
+];
+
+/** The block for one entry: the person's list is for a person. */
+export const notChangedOf = (kind: "person" | "agent"): readonly string[] => (kind === "person" ? NOT_CHANGED : NOT_CHANGED_AGENT);
 
 /**
  * What may be said BEFORE a change, from what Governance can read. Rules can have confirmed only a change already made,
@@ -68,11 +76,11 @@ export function beforeChangeText(floor: Pick<Floor, "state">, kind: "person" | "
   }
   switch (floor.state) {
     case "not_installed":
-      return "Rules & Approvals adds an early stop. It is not installed, so nothing stops until you approve in Portal.";
+      return "Rules & Approvals adds an early stop. It is not installed, so the agent stops only when you approve in Portal.";
     case "older":
-      return "Rules & Approvals is too old to confirm this change, so nothing may stop until you approve in Portal.";
+      return "Rules & Approvals is too old to refuse calls for this agent, so it stops only when you approve in Portal.";
     case "not_read":
-      return "Governance could not read Rules & Approvals, so nothing may stop until you approve in Portal.";
+      return "Governance could not read Rules & Approvals, so calls may go on. The agent stops when you approve in Portal.";
     default:
       return "If the Rules hook is on, calls stop in about 2 minutes. Governance cannot see that switch: check it in Portal. The next screen says if Rules has this change.";
   }

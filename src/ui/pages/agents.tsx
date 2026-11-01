@@ -7,6 +7,9 @@ import { TrustTag } from "../reviews.tsx";
 import { apartLabels } from "./many.ts";
 import { type Agent, csv, type Dir, loadDirectory, type Reload } from "./shared.tsx";
 
+/** C383 QA S3-8: who can take an agent. A blocked person is on the list of who is refused, so they are no new owner. */
+const canOwn = (p: Dir["people"][number]): boolean => p.kind === "person" && p.lifecycle === "active" && p.trust !== "blocked";
+
 function AgentDialog({ agent, dir, onClose, reload }: { agent: Agent; dir: Dir; onClose: () => void; reload: Reload }) {
   const [owner, setOwner] = useState(agent.owner?.id ?? "");
   const [role, setRole] = useState(agent.role);
@@ -19,7 +22,7 @@ function AgentDialog({ agent, dir, onClose, reload }: { agent: Agent; dir: Dir; 
     <EditDialog title={`Edit ${agent.name}`} onClose={onClose} save={save}>
       <Field label="Owner" hint="The agent keeps working. With a new owner, the old one may still hold its key: Governance shows this until you make a new key on the agent's page. If the old owner is not active, apps read no owner until then, so it has no owner's memory or team reads.">
         <Select
-          options={[{ value: "", label: "No owner" }, ...apartLabels(dir.people.filter((p) => (p.kind === "person" && p.lifecycle === "active") || p.id === agent.owner?.id).map((p) => ({ id: p.id, label: p.name }))).map((o) => ({ value: o.id, label: o.label }))]}
+          options={[{ value: "", label: "No owner" }, ...apartLabels(dir.people.filter((p) => canOwn(p) || p.id === agent.owner?.id).map((p) => ({ id: p.id, label: canOwn(p) ? p.name : `${p.name} (current owner, ${p.trust === "blocked" ? "blocked" : "not active"})` }))).map((o) => ({ value: o.id, label: o.label }))]}
           value={owner}
           onValueChange={setOwner}
         />
@@ -42,7 +45,7 @@ function OwnerMany({ dir, onBack, reload }: { dir: Dir; onBack: () => void; relo
   const agents = useMemo(() => dir.agents.filter((a) => a.status !== "removed"), [dir.agents]);
   const who = useMemo(() => agents.map((a) => ({ id: a.id, name: a.name, note: a.status === "paused" ? "paused" : "" })), [agents]);
   const cells = useMemo(() => ownerCells(agents), [agents]);
-  const owners = useMemo(() => apartLabels(dir.people.filter((p) => p.kind === "person" && p.lifecycle === "active").map((p) => ({ id: p.id, label: p.name }))), [dir.people]);
+  const owners = useMemo(() => apartLabels(dir.people.filter(canOwn).map((p) => ({ id: p.id, label: p.name }))), [dir.people]);
   const names = useMemo(() => new Map(agents.flatMap((a) => (a.owner ? [[a.owner.id, a.owner.name] as const] : []))), [agents]);
   const write = useCallback((change: AccessChange) => callOp("agent_set", { agent: change.agent, owner: change.level }), []);
   const read = useCallback(async () => {

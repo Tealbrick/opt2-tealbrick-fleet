@@ -9,6 +9,7 @@ import { appendEvent } from "../lifecycle/events.ts";
 import { effectiveAgent, type Lifecycle, type SubjectKind } from "../lifecycle/states.ts";
 import { type Actor, loadSubject, type Subject } from "../lifecycle/transitions.ts";
 import { bump, fail } from "../meta.ts";
+import { accessRemovedAt } from "./guards.ts";
 import { DEFAULT_EXPIRES_SEC, isOpenPlan, OPEN_PLAN_STATES, STEPS_PER_DRAFT } from "./steps.ts";
 
 export type CoreOp = "agents.pause" | "agents.offboard" | "agents.rotate";
@@ -47,11 +48,16 @@ export function coreStepsFor(db: Db, s: Subject, transfers: readonly string[]): 
   const add = (opId: CoreOp, agt: string) => {
     if (!steps.some((x) => x.opId === opId && x.agt === agt)) steps.push({ opId, agt });
   };
-  const agentRow = (id: string) => db.prepare("SELECT id, lifecycle, valid_from, status FROM fleet_agents WHERE id = ?").get(id);
+  const agentRow = (id: string) => db.prepare("SELECT id, lifecycle, lifecycle_at, valid_from, status FROM fleet_agents WHERE id = ?").get(id);
+  // C383 QA S3-6: Core already removed this agent's access since this stop began (the card can stay, paused). A later plan of its owner asks nothing new.
+  const removedAt = accessRemovedAt(db);
   const forAgent = (r: Row) => {
     if (r.status === "removed") return;
     const effective = effectiveAgent({ lifecycle: r.lifecycle as Lifecycle, validFrom: r.valid_from === null ? null : Number(r.valid_from) });
-    if (effective === "leaving") add("agents.offboard", String(r.id));
+    if (effective === "leaving") {
+      // One that runs again in Portal since then is asked for again.
+      if (r.status === "active" || (removedAt.get(String(r.id)) ?? -1) < Number(r.lifecycle_at)) add("agents.offboard", String(r.id));
+    }
     // Already paused, by an earlier approval or in Portal: a second draft asks only for what is new.
     else if (effective === "suspended" && r.status !== "paused") add("agents.pause", String(r.id));
   };
@@ -101,7 +107,11 @@ export function checkPlan(db: Db, input: PlanInput): { s: Subject; steps: CoreSt
   if (input.expectedRev !== undefined && input.expectedRev !== s.rev) fail("lifecycle_stale", "This entry changed since you looked. Open it again.", 409);
   if (s.lifecycle === "archived") fail("subject_closed", "This entry is closed. Bring it back first.", 409);
   const steps = input.barOnly ? [] : coreStepsFor(db, s, input.transfers ?? []);
-  if (steps.length === 0 && !(s.kind === "person" && STOPPED.includes(s.lifecycle)) && !input.items?.length) fail("nothing_to_stop", "This entry has nothing to stop. Tick what to remove.", 409);
+  if (steps.length === 0 && !(s.kind === "person" && STOPPED.includes(s.lifecycle)) && !input.items?.length) {
+    // Core is done with it, and the plan that asked is still at work: that is the answer, not an empty entry.
+    if (db.prepare(`SELECT 1 FROM fleet_plans WHERE subject_kind = ? AND subject_id = ? AND state IN (${OPEN_SQL})`).get(s.kind, s.id)) fail("plan_open", "A plan for this entry is still open. Cancel it or wait for it.", 409);
+    fail("nothing_to_stop", "This entry has nothing to stop. Tick what to remove.", 409);
+  }
   return { s, steps };
 }
 

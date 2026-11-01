@@ -114,7 +114,7 @@ export function JoinAgentFlow({ portalHref, onClose, onChanged }: { portalHref?:
         {people.error && !people.data ? <LoadFailed message={people.error} retrying={people.loading} onRetry={() => void people.reload()} /> : null}
         {people.data && people.data.total > people.data.items.length ? <p className="tb-hint">{`This list shows ${people.data.items.length} of ${people.data.total} people. Add the owner on the People page if the person is not here.`}</p> : null}
         <Field label="Owner" hint="A person who is active. They answer for this agent." error={agent && !owner && people.data ? "Choose an owner." : undefined}>
-          <Select placeholder="Choose a person" options={(people.data?.items ?? []).map((p) => ({ value: p.id, label: p.name }))} value={ownerId} onValueChange={setOwnerPick} />
+          <Select placeholder="Choose a person" options={(people.data?.items ?? []).filter((p) => p.trust !== "blocked").map((p) => ({ value: p.id, label: p.name }))} value={ownerId} onValueChange={setOwnerPick} />
         </Field>
         <Field label="Team" hint="Optional.">
           <Select placeholder="No team" options={[{ value: NO_TEAM, label: "No team" }, ...teams.map((t) => ({ value: t.id, label: t.name }))]} value={team} onValueChange={setTeam} />

@@ -69,6 +69,8 @@ export const MANY_PLANS = 3;
 export const POLL_FAST_MS = 60_000;
 export const POLL_SLOW_MS = 15 * 60_000;
 export const FAST_WINDOW_MS = 30 * 60_000;
+/** Clocks of Core and of this app may differ by this much when a connection's own time is read against the moment an approval was seen. */
+export const CLOCK_MARGIN_MS = 5_000;
 /** "Portal stopped mid-way": a draft `applying` for longer than this. */
 export const APPLYING_STUCK_MS = 30 * 60_000;
 export const LIST_BACKOFF_MS = 15 * 60_000;

@@ -183,7 +183,8 @@ test("A23: each case has its own words from what Fleet can read; the hook switch
   const st = { version: "0.7.0-dev.1", feedRevision: 10, entries: 2, lastGateAt: new Date(T0 - 60_000).toISOString() };
   assert.equal(floorView(st, 10, T0, true).text, FLOOR_TEXT.confirmed);
   assert.equal(floorView(st, 11, T0, true).state, "not_confirmed", "behind on the revision");
-  assert.equal(floorView(st, 11, T0, true).text, "Not confirmed: nothing may stop until you approve in Portal.");
+  assert.equal(floorView(st, 11, T0, true).text, FLOOR_TEXT.not_confirmed);
+  assert.match(FLOOR_TEXT.not_confirmed, /Rules has not read this change yet\. It may refuse calls soon/);
   assert.equal(floorView("not_installed", 1, T0, true).state, "not_installed");
   assert.equal(floorView("older", 1, T0, true).state, "older");
   assert.equal(floorView(st, 10, T0, true).gateNote, null);

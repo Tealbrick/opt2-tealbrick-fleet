@@ -113,7 +113,7 @@ describe("words before a change", () => {
     }
   });
   it("says the Portal step when Rules cannot help", () => {
-    for (const state of ["not_installed", "older", "not_read"] as const) assert.match(beforeChangeText({ state }), /nothing (stops|may stop) until you approve in Portal/);
+    for (const state of ["not_installed", "older", "not_read"] as const) assert.match(beforeChangeText({ state }), /stops? (only )?when you approve in Portal/);
   });
   it("names what Governance cannot see when Rules is there", () => {
     for (const state of ["confirmed", "not_confirmed"] as const) assert.match(beforeChangeText({ state }), /cannot see that switch/);
@@ -131,7 +131,9 @@ describe("words before a change", () => {
   it("the first line says that agents keep working; an agent's own block has no such line (C381)", () => {
     assert.match(NOT_CHANGED[0] ?? "", /^Their agents\. Agents keep working when a person leaves/);
     assert.deepEqual([...notChangedOf("person")], [...NOT_CHANGED]);
-    assert.deepEqual([...notChangedOf("agent")], NOT_CHANGED.slice(2));
+    // C383 QA S3-11: an agent's block has no line about a person
+    assert.ok(notChangedOf("agent").every((t) => !/logins|person|handles|direct message/i.test(t)));
+    assert.ok(notChangedOf("agent").some((t) => /machine/.test(t)) && notChangedOf("agent").some((t) => /Its key/.test(t)));
     assert.match(NOT_CHANGED[1] ?? "", /key/);
     assert.ok(notChangedOf("agent").every((t) => !/^Their agents\./.test(t) && !/this person may hold/.test(t)));
   });
@@ -157,7 +159,7 @@ describe("words before and after a person's change (C381)", () => {
   });
   it("an agent's words are the old ones by default", () => {
     assert.equal(beforeChangeText({ state: "confirmed" }), beforeChangeText({ state: "confirmed" }, "agent"));
-    assert.match(beforeChangeText({ state: "not_installed" }), /nothing stops until you approve in Portal/);
+    assert.match(beforeChangeText({ state: "not_installed" }), /the agent stops only when you approve in Portal/);
   });
   it("after a confirmed change the person's sentence says by, for and to; the agent's says calls stop", () => {
     const floor = { state: "confirmed", text: "Rules has this change.", version: "0.7.0", feedRevision: 2, entries: 1, lastGateAt: null, gateNote: null } as Parameters<typeof afterChangeText>[0];

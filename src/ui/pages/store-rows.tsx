@@ -23,7 +23,8 @@ function Item({ item, product, storeName, ticks, bare }: { item: PreviewItem; pr
       {canTick ? <Switch label={item.label} checked={ticks.isOn(product, item.id)} onCheckedChange={(on) => ticks.toggle(product, item, on)} /> : <span>{item.label}</span>}
       {bare ? null : (
         <Tag status={item.effect === "stops" ? "live" : item.effect === "manual" ? "needs-you" : "default"} title={item.who ?? undefined}>
-          {EFFECT[item.effect]}
+          {/* C383 QA S3-7: an agent's read of its owner's personal memory ends with a move, as the move step says. */}
+          {item.effect === "stays" && item.kind === "person_area" ? "Stays until it moves to a new owner" : EFFECT[item.effect]}
         </Tag>
       )}
       {!bare && item.effect === "manual" ? <span className="tb-hint store-who">{item.who ?? `Governance cannot end this. Someone must do it in ${storeName}.`}</span> : null}

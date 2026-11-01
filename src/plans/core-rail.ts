@@ -97,6 +97,24 @@ export interface Proof {
 }
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) ? v : null);
 
+const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+/** When Core made this connection: its id is `con_` and a ULID, whose first 10 characters are the time in ms. Null for any other shape: then nothing is proved. */
+export function connectionMadeAt(con: string): number | null {
+  const m = /^con_([0-9A-HJKMNP-TV-Z]{26})$/.exec(con);
+  if (!m?.[1]) return null;
+  let ms = 0;
+  for (const c of m[1].slice(0, 10)) ms = ms * 32 + CROCKFORD.indexOf(c);
+  return ms;
+}
+
+/** A whole picture, at least one active connection of this agent, and each of them made after `after`. A cut list, no list, or an id with no time proves nothing. */
+export function onlyNewKeys(agent: string, view: Pick<SliceView, "topology">, after: number): boolean {
+  const top = view.topology();
+  if (!top || top.truncated) return false;
+  const keys = top.connections.filter((c) => c.agt === agent && c.status === "active");
+  return keys.length > 0 && keys.every((c) => (connectionMadeAt(c.con) ?? -1) > after);
+}
+
 /**
  * §5.7: the proof of one Core step. Paused comes from `agents[].status`. Removed comes from Core's step output, and it counts as seen only when the slice agrees:
  * a slice revision at or above the step's `configRevision`, or a whole topology that shows nothing left. A cut list proves nothing (S2-5).

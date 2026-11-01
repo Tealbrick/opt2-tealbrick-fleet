@@ -425,6 +425,10 @@ export function setPerson(db: Db, input: PersonInput, now = Date.now()): Person 
         const owner = db.prepare("SELECT person_id FROM fleet_handles WHERE handle = ?").get(h);
         if (owner && owner.person_id !== id) fail("handle_taken", `${h} belongs to another person`, 409);
       }
+      // C381 lead S3: the floor and the sender bar refuse by handle. Taking one off a person who is stopped, leaving, closed or blocked would lift that refusal with no step on record. New handles are welcome.
+      const stays = db.prepare("SELECT lifecycle, trust FROM fleet_people WHERE id = ?").get(id);
+      if (stays && (stays.trust === "blocked" || (stays.lifecycle !== null && stays.lifecycle !== "active" && stays.lifecycle !== "proposed")) && handlesOf(db, id as string).some((h) => !(handles as string[]).includes(h)))
+        fail("handles_stay", "A handle stays while this person is stopped, leaving, closed or blocked: Rules refuses them by it. You can add a handle. To take one off, give their access back first.", 409);
       db.prepare("DELETE FROM fleet_handles WHERE person_id = ?").run(id);
       for (const h of handles) db.prepare("INSERT INTO fleet_handles (handle, person_id, created_at) VALUES (?, ?, ?)").run(h, id, now);
     }

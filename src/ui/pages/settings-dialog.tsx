@@ -18,7 +18,7 @@ export function SettingsDialog({ settings, onClose, onChanged }: { settings: Sum
   const [assigned, setAssigned] = useState<number | null>(null);
   const dayCount = Number(days);
   const validDays = Number.isInteger(dayCount) && dayCount >= 1 && dayCount <= 365;
-  const options = [{ value: NONE, label: "No default owner" }, ...(people.data?.items ?? []).map((p) => ({ value: p.id, label: p.name }))];
+  const options = [{ value: NONE, label: "No default owner" }, ...(people.data?.items ?? []).filter((p) => p.trust !== "blocked").map((p) => ({ value: p.id, label: p.name }))];
   // the current owner stays selectable when the list cannot be read or no longer has them
   if (settings.defaultOwner && !options.some((o) => o.value === settings.defaultOwner?.id)) options.push({ value: settings.defaultOwner.id, label: settings.defaultOwner.name });
   const save = async () => {
