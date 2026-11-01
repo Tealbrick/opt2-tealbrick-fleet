@@ -39,7 +39,7 @@ function PersonDialog({ person, onClose, reload }: { person: Person | "new"; onC
     } catch (e) {
       const code = (e as { code?: unknown } | null)?.code;
       if (code === "person_name_taken") setSameName(true);
-      if (code === "handles_stay") setFixAsked(true);
+      if (code === "handles_stay" && !outside) setFixAsked(true);
       throw e;
     }
     await reload();

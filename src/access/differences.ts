@@ -25,7 +25,7 @@ const iso = (ms: number): string => new Date(ms).toISOString();
  * Stores that still report something a leaving or closed subject holds, by subject. An item for information, one that only says others
  * can read the subject's things, and a dormant one are not access held. A paused one is: it comes back at a resume, until it is revoked.
  * C383 QA S3-5: an agent's own memory area and Buzz name are not access held once Portal no longer lists it, or Core removed its access since this stop: nobody can act as it. What can run without it, as a scheduled post, still counts.
- * C383 review (row 5): the same for its owner's personal memory: Knowledge lists what the directory says the agent would reach, and only a call with a key reads it. A key or app access Portal shows again (`back`) ends all of this.
+ * C383 review (row 5): the same for its owner's personal memory: Knowledge lists what the directory says the agent would reach, and only a call with a key reads it. A key or app access Portal shows again (`back`), or an agent that runs again, which needs no picture to see, ends all of this.
  */
 export function accessAfterLeave(db: Db, back: ReadonlySet<string> = new Set()): Map<string, { stores: string[]; newest: number }> {
   const out = new Map<string, { stores: string[]; newest: number }>();
@@ -35,7 +35,7 @@ export function accessAfterLeave(db: Db, back: ReadonlySet<string> = new Set()):
        LEFT JOIN fleet_agents a ON i.subject_kind = 'agent' AND a.id = i.subject_id
        LEFT JOIN fleet_people p ON i.subject_kind = 'person' AND p.id = i.subject_id
        WHERE i.level <> 'info' AND i.direction = 'held_by' AND i.state <> 'dormant' AND COALESCE(a.lifecycle, p.lifecycle) IN ('leaving', 'archived')
-         AND NOT (i.kind IN ('buzz_identity', 'agent_area', 'person_area') AND (a.status IS 'removed' OR (a.id NOT IN (SELECT value FROM json_each(?)) AND EXISTS (SELECT 1 FROM fleet_plan_steps s WHERE s.agent_id = a.id AND s.phase = 'core' AND s.op = 'agents.offboard' AND s.state IN ('done', 'reported')
+         AND NOT (i.kind IN ('buzz_identity', 'agent_area', 'person_area') AND (a.status IS 'removed' OR (a.status <> 'active' AND a.id NOT IN (SELECT value FROM json_each(?)) AND EXISTS (SELECT 1 FROM fleet_plan_steps s WHERE s.agent_id = a.id AND s.phase = 'core' AND s.op = 'agents.offboard' AND s.state IN ('done', 'reported')
            AND s.updated_at >= COALESCE((SELECT MAX(e.at) FROM fleet_lifecycle_events e WHERE e.subject_kind = 'agent' AND e.subject_id = a.id AND e.kind = 'transition' AND e.to_state = 'leaving'), a.lifecycle_at)))))
        GROUP BY i.subject_kind, i.subject_id, i.target ORDER BY i.target`,
     )

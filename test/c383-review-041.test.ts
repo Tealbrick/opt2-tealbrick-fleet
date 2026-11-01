@@ -5,11 +5,13 @@ import { test } from "node:test";
 import { accessAfterLeave, findingsList, openDifferences } from "../src/access/differences.ts";
 import { directoryFeed } from "../src/feed.ts";
 import { ACCESS_BACK, ACCESS_REMOVED } from "../src/findings.ts";
+import { verifyChain } from "../src/lifecycle/events.ts";
 import { loadSubject } from "../src/lifecycle/transitions.ts";
 import { loadColleagues } from "../src/lifecycle/view.ts";
 import { coreStepsFor } from "../src/plans/plan.ts";
 import * as store from "../src/store.ts";
 import { accessShown, type DecodedTopology } from "../src/topology-slice.ts";
+import { AGENT_A } from "./helpers.ts";
 import { refused, set, T0, WAIVE, world } from "./lifecycle-helpers.ts";
 import { makeWorld, SALES } from "./plans-world.ts";
 
@@ -183,4 +185,71 @@ test("row 5: before Core removed it, the owner's memory counts", () => {
   set(w.db, "agent", SALES, "leaving", {}, w.clock.t);
   w.db.prepare("INSERT INTO fleet_access_items (target, item_id, kind, subject_kind, subject_id, resource, direction, level, label, state, revocable, digest, first_seen, last_seen) VALUES ('knowledge', 'person_area:a', 'person_area', 'agent', ?, 'r', 'held_by', 'read', 'l', 'active', 0, 'sha256:x', 1, 1)").run(SALES);
   assert.equal(accessAfterLeave(w.db).has(`agent:${SALES}`), true, "the key may still work");
+});
+
+test("review S2: an agent that runs again counts, with no picture to say so", async () => {
+  const w = await removed();
+  w.db.prepare("INSERT INTO fleet_access_items (target, item_id, kind, subject_kind, subject_id, resource, direction, level, label, state, revocable, digest, first_seen, last_seen) VALUES ('knowledge', 'person_area:a', 'person_area', 'agent', ?, 'r', 'held_by', 'read', 'l', 'active', 0, 'sha256:x', 1, 1)").run(SALES);
+  assert.equal(accessAfterLeave(w.db).has(`agent:${SALES}`), false);
+  w.db.prepare("UPDATE fleet_agents SET status = 'active' WHERE id = ?").run(SALES);
+  assert.equal(accessAfterLeave(w.db).has(`agent:${SALES}`), true);
+});
+
+test("review S2: a blocked outside agent keeps its handles, also with a reason: it has no history page, and the handle is all Rules knows it by", () => {
+  const { db } = world();
+  const out = store.setPerson(db, { name: "Outside", kind: "outside_agent", handles: [WRONG, RIGHT] }, T0);
+  blocked(db, out.id);
+  assert.throws(() => store.setPerson(db, { id: out.id, name: "Outside", handles: [RIGHT], handleFix: "wrong" }, T0), refused("handles_stay", 409));
+  assert.equal(store.getPerson(db, out.id).handles.length, 2);
+  assert.equal(store.setPerson(db, { id: out.id, name: "Outside", handles: [WRONG, RIGHT, "slack:UNEW000001"] }, T0).handles.length, 3, "adding one still works");
+});
+
+test("review S2: a person Rules refuses with no handle left is a finding; it is not one for a person with a handle, or one with no refusal", () => {
+  const { db, ann } = world();
+  const code = "no_handle_to_bar";
+  const has = (id: string) => loadColleagues(db, T0).byId.get(`person:${id}`)?.findings.some((f) => f.code === code);
+  store.setPerson(db, { id: ann.id, name: "Ann", handles: [WRONG] }, T0);
+  set(db, "person", ann.id, "suspended", { noCap: true });
+  assert.equal(has(ann.id), false);
+  store.setPerson(db, { id: ann.id, name: "Ann", handles: [], handleFix: "wrong" }, T0);
+  assert.equal(has(ann.id), true, "stopped, and nothing left to refuse by");
+  const free = store.setPerson(db, { name: "Free" }, T0);
+  assert.equal(has(free.id), false);
+  blocked(db, free.id);
+  assert.equal(has(free.id), true);
+  const later = store.setPerson(db, { name: "Later" }, T0);
+  startsLater(db, later.id);
+  assert.equal(has(later.id), true);
+});
+
+test("review S2: a handle of an agent Rules refuses cannot become a person's; of an agent that works it can, as before", () => {
+  const { db, ann } = world();
+  db.prepare("INSERT INTO fleet_agent_handles (agent_id, handle) VALUES (?, ?)").run(AGENT_A.id, WRONG);
+  assert.equal(store.setPerson(db, { id: ann.id, name: "Ann", handles: [WRONG] }, T0).handles.length, 1);
+  store.setPerson(db, { id: ann.id, name: "Ann", handles: [] }, T0);
+  set(db, "agent", AGENT_A.id, "suspended");
+  assert.throws(() => store.setPerson(db, { id: ann.id, name: "Ann", handles: [WRONG] }, T0), refused("handle_taken", 409));
+  set(db, "agent", AGENT_A.id, "active");
+  db.prepare("UPDATE fleet_agents SET trust = 'blocked' WHERE id = ?").run(AGENT_A.id);
+  assert.throws(() => store.setPerson(db, { name: "New", handles: [WRONG] }, T0), refused("handle_taken", 409));
+  db.prepare("UPDATE fleet_agents SET trust = 'trusted' WHERE id = ?").run(AGENT_A.id);
+  assert.equal(store.setPerson(db, { id: ann.id, name: "Ann", handles: [WRONG] }, T0).handles.length, 1);
+  set(db, "agent", AGENT_A.id, "suspended");
+  assert.equal(store.setPerson(db, { id: ann.id, name: "Ann", handles: [WRONG, RIGHT] }, T0).handles.length, 2, "one the person has already stays");
+});
+
+test("a plan of the owner adds no step for an agent that has a key again: only a request for that agent does", async () => {
+  const w = await removed();
+  const owner = loadSubject(w.db, "person", w.ann.id);
+  assert.ok(owner);
+  assert.deepEqual(coreStepsFor(w.db, owner, [], accessShown(picture([KEY]))).filter((s) => s.agt === SALES), []);
+});
+
+test("a reason with a lone surrogate does not break the record: the next event still hashes, and the chain holds", () => {
+  const { db, ann } = world();
+  store.setPerson(db, { id: ann.id, name: "Ann", handles: [WRONG] }, T0);
+  set(db, "person", ann.id, "suspended", { noCap: true });
+  store.setPerson(db, { id: ann.id, name: "Ann", handles: [], handleFix: "bad \ud800 reason" }, T0);
+  set(db, "person", ann.id, "active");
+  assert.deepEqual(verifyChain(db).ok, true);
 });

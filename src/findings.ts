@@ -22,7 +22,7 @@ export interface FindingInput {
   validUntil: number | null;
   noCard: boolean;
   handleConflict: boolean;
-  /** C381: a person marked leaving with no handle in the directory: nothing can bar their messages */
+  /** C381: a person marked leaving with no handle in the directory: nothing can bar their messages. C383 review: every person Rules refuses, because a wrong handle can come off */
   noHandleToBar?: boolean | undefined;
   /** N2-6: a person marked leaving whose sender bar Connect has not shown */
   senderBarOpen?: boolean | undefined;

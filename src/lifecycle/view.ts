@@ -16,7 +16,7 @@ import { lastLeavingSnapshot, stopsSince, subjectEvents } from "./events.ts";
 import { type FloorContext, type FloorView, floorView, readFloorStatus } from "./floor.ts";
 import { reachOf } from "./moved.ts";
 import { activeDefaultOwner, getSettings } from "./settings.ts";
-import { type Effective, effectiveAgent, effectivePerson, type Lifecycle, NEXT, type SubjectKind } from "./states.ts";
+import { type Effective, effectiveAgent, effectivePerson, floorOf, type Lifecycle, NEXT, type SubjectKind } from "./states.ts";
 import { CAP_WINDOW_MS, capState, coolingEnd, DAY_MS, type Grant, guardOf, loadSubject } from "./transitions.ts";
 
 export type Row = ColleaguesListOutput["items"][number];
@@ -77,7 +77,7 @@ export function loadColleagues(db: Db, now: number, topology?: DecodedTopology |
       trust: p.trust as Trust,
       owner: null,
       line: lineOf("person", lifecycle, effective, null, p.valid_from, false, null, false, p.trust as Trust),
-      findings: findingsOf({ kind: "person", lifecycle, effective, runtime: null, hasOwner: false, ownerLifecycle: null, reason: p.lifecycle_reason === null ? null : String(p.lifecycle_reason), at: Number(p.lifecycle_at), validUntil: p.valid_until === null ? null : Number(p.valid_until), noCard: false, handleConflict: false, noHandleToBar: lifecycle === "leaving" && !handled.has(String(p.id)), senderBarOpen: lifecycle === "leaving" && senderBarOpen(db, String(p.id)), planState: plans.get(`person:${String(p.id)}`) ?? null, unnamedAccounts: lifecycle === "leaving" ? unnamedAccounts(db, String(p.id), now) : 0 }, now),
+      findings: findingsOf({ kind: "person", lifecycle, effective, runtime: null, hasOwner: false, ownerLifecycle: null, reason: p.lifecycle_reason === null ? null : String(p.lifecycle_reason), at: Number(p.lifecycle_at), validUntil: p.valid_until === null ? null : Number(p.valid_until), noCard: false, handleConflict: false, noHandleToBar: floorOf(effective, p.trust as Trust) && !handled.has(String(p.id)), senderBarOpen: lifecycle === "leaving" && senderBarOpen(db, String(p.id)), planState: plans.get(`person:${String(p.id)}`) ?? null, unnamedAccounts: lifecycle === "leaving" ? unnamedAccounts(db, String(p.id), now) : 0 }, now),
       validFrom: isoOf(p.valid_from),
       validUntil: isoOf(p.valid_until),
       at: isoOf(p.lifecycle_at),
