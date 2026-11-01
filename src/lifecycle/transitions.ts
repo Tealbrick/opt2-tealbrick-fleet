@@ -13,7 +13,7 @@ import { cleanText } from "../text.ts";
 import type { Trust } from "../trust.ts";
 import { appendEvent, SNAPSHOT_MAX, stoppedSince, stopsSince } from "./events.ts";
 import { coolingDays, stopCap } from "./settings.ts";
-import { type Lifecycle, NEXT, personStatusOf, type Reason, STOP_STATES, type SubjectKind } from "./states.ts";
+import { effectivePerson, floorOf, type Lifecycle, NEXT, personStatusOf, type Reason, STOP_STATES, type SubjectKind } from "./states.ts";
 
 export const DAY_MS = 86_400_000;
 export const CAP_WINDOW_MS = 600_000;
@@ -68,6 +68,14 @@ export function loadSubject(db: Db, kind: SubjectKind, id: string): Subject | nu
 }
 
 const personLifecycle = (db: Db, id: string | null): string | null => (id === null ? null : ((db.prepare("SELECT lifecycle FROM fleet_people WHERE id = ?").get(id)?.lifecycle as string | null | undefined) ?? null));
+
+/** C383 review: Rules refuses this entry by its handles now (the feed's `floor`). The one answer for what may not take a handle away: a delete, a handle list, a change of kind. */
+export function personFloor(db: Db, id: string): boolean {
+  const r = db.prepare("SELECT lifecycle, valid_from, trust FROM fleet_people WHERE id = ?").get(id);
+  if (!r) return false;
+  const effective = r.lifecycle === null ? null : effectivePerson({ lifecycle: r.lifecycle as Lifecycle, validFrom: r.valid_from === null ? null : Number(r.valid_from) });
+  return floorOf(effective, r.trust as Trust);
+}
 
 const personBlocked = (db: Db, id: string): boolean => db.prepare("SELECT trust FROM fleet_people WHERE id = ?").get(id)?.trust === "blocked";
 
@@ -284,6 +292,8 @@ export function kindChanged(db: Db, id: string, name: string, from: string, to: 
   }
   const cur = db.prepare("SELECT lifecycle FROM fleet_people WHERE id = ?").get(id)?.lifecycle;
   if (cur !== "active") fail("lifecycle_open", "This person is not active. Bring the person back first.", 409);
+  // C383 review: an outside agent has no lifecycle, so a start date that has not come would stop counting.
+  if (personFloor(db, id) && db.prepare("SELECT valid_from FROM fleet_people WHERE id = ?").get(id)?.valid_from !== null) fail("lifecycle_open", "This person has a start date that has not come. Remove the start date first.", 409);
   endAssignmentsOf(db, "person", id, "kind_changed", { kind: "owner", id: null }, now); // an outside agent has no roles
   db.prepare("UPDATE fleet_people SET lifecycle = NULL, lifecycle_rev = ?, lifecycle_at = ? WHERE id = ?").run(revision(db), now, id);
   appendEvent(db, { subject: { kind: "person", id, name }, kind: "transition", from: "active", to: null, actor: { kind: "owner", id: null }, reason: "other", note: "Changed from person to outside agent.", at: now });
@@ -305,11 +315,16 @@ export function statusRequested(db: Db, id: string, want: "active" | "departed",
   transition(db, { kind: "person", id, to: "leaving", reason: "other", note: "Marked as departed on the People page.", actor, noCap: true }, now);
 }
 
-/** person_delete: a stop must end first, by the owner's named step, because the delete would remove the floor on this person's handles. Handles stay on a closed row (T7). */
+/**
+ * person_delete: a stop must end first, by the owner's named step, because the delete would remove the floor on this person's handles. Handles stay on a closed row (T7).
+ * C383 review: the same for all that puts an entry on the floor. Blocked: the way out is a new review. A start date that has not come: the owner removes the date.
+ */
 export function beforePersonDelete(db: Db, id: string, actor: Actor, now: number): void {
-  const r = db.prepare("SELECT name, kind, lifecycle FROM fleet_people WHERE id = ?").get(id);
+  const r = db.prepare("SELECT name, kind, lifecycle, valid_from, trust FROM fleet_people WHERE id = ?").get(id);
   if (!r) return;
   if (r.lifecycle === "suspended" || r.lifecycle === "leaving" || r.lifecycle === "archived") fail("lifecycle_open", "This person is stopped, leaving or closed. Undo that or bring the person back first. A delete would end the refusal on this person's handles.", 409);
+  if (r.trust === "blocked") fail("blocked_stays", "This entry is blocked. A delete would end the refusal on its handles. Record a new review first if the block is wrong.", 409);
+  if (personFloor(db, id)) fail("lifecycle_open", "This person has a start date that has not come. Remove the start date first. A delete would end the refusal on this person's handles.", 409);
   appendEvent(db, { subject: { kind: r.kind === "person" ? "person" : "outside_agent", id, name: String(r.name) }, kind: "changed", from: r.lifecycle === null ? null : String(r.lifecycle), to: null, actor, note: "Deleted from the directory.", at: now });
 }
 

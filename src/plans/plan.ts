@@ -32,6 +32,8 @@ export interface PlanInput {
   /** the owner's ticks; absent = every item an app can end that is held by the subject */
   items?: readonly Tick[] | undefined;
   expiresInSec?: number | undefined;
+  /** C383 review: agents with a key or app access in Portal's whole picture. One whose access Core already removed is asked for again. */
+  accessShown?: ReadonlySet<string> | undefined;
   /** N2-6: only the sender bar of a person marked leaving. No Core step, Connect only. */
   barOnly?: boolean | undefined;
   actor: Actor;
@@ -43,7 +45,7 @@ export const OPEN_SQL = OPEN_PLAN_STATES.map((s) => `'${s}'`).join(", ");
 const STOPPED: readonly Lifecycle[] = ["suspended", "leaving"];
 
 /** The Core steps of this stop. A kept agent has none. Closed agents have none: they stopped before. */
-export function coreStepsFor(db: Db, s: Subject, transfers: readonly string[]): CoreStep[] {
+export function coreStepsFor(db: Db, s: Subject, transfers: readonly string[], shown: ReadonlySet<string> = new Set()): CoreStep[] {
   const steps: CoreStep[] = [];
   const add = (opId: CoreOp, agt: string) => {
     if (!steps.some((x) => x.opId === opId && x.agt === agt)) steps.push({ opId, agt });
@@ -55,8 +57,8 @@ export function coreStepsFor(db: Db, s: Subject, transfers: readonly string[]): 
     if (r.status === "removed") return;
     const effective = effectiveAgent({ lifecycle: r.lifecycle as Lifecycle, validFrom: r.valid_from === null ? null : Number(r.valid_from) });
     if (effective === "leaving") {
-      // One that runs again in Portal since then is asked for again.
-      if (r.status === "active" || (removedAt.get(String(r.id)) ?? -1) < Number(r.lifecycle_at)) add("agents.offboard", String(r.id));
+      // One that runs again in Portal since then, or that Portal gave a key or access again, is asked for again.
+      if (r.status === "active" || shown.has(String(r.id)) || (removedAt.get(String(r.id)) ?? -1) < Number(r.lifecycle_at)) add("agents.offboard", String(r.id));
     }
     // Already paused, by an earlier approval or in Portal: a second draft asks only for what is new.
     else if (effective === "suspended" && r.status !== "paused") add("agents.pause", String(r.id));
@@ -106,7 +108,7 @@ export function checkPlan(db: Db, input: PlanInput): { s: Subject; steps: CoreSt
   const s = loadSubject(db, input.kind, input.id) ?? fail(input.kind === "agent" ? "agent_not_found" : "person_not_found", "No such entry.", 404);
   if (input.expectedRev !== undefined && input.expectedRev !== s.rev) fail("lifecycle_stale", "This entry changed since you looked. Open it again.", 409);
   if (s.lifecycle === "archived") fail("subject_closed", "This entry is closed. Bring it back first.", 409);
-  const steps = input.barOnly ? [] : coreStepsFor(db, s, input.transfers ?? []);
+  const steps = input.barOnly ? [] : coreStepsFor(db, s, input.transfers ?? [], input.accessShown);
   if (steps.length === 0 && !(s.kind === "person" && STOPPED.includes(s.lifecycle)) && !input.items?.length) {
     // Core is done with it, and the plan that asked is still at work: that is the answer, not an empty entry.
     if (db.prepare(`SELECT 1 FROM fleet_plans WHERE subject_kind = ? AND subject_id = ? AND state IN (${OPEN_SQL})`).get(s.kind, s.id)) fail("plan_open", "A plan for this entry is still open. Cancel it or wait for it.", 409);

@@ -7,6 +7,7 @@ import { opEnv } from "../access/env.ts";
 import { planPreview } from "../access/preview.ts";
 import { startSweep } from "../access/sweep.ts";
 import { loadColleagues, portalReadState, readTopology } from "../lifecycle/view.ts";
+import { accessShown } from "../topology-slice.ts";
 import { op } from "./op.ts";
 
 const assertPerson = (caller: { type: string }): void => {
@@ -33,7 +34,8 @@ export const accessOps = {
     async run(_input, ctx) {
       assertPerson(ctx.caller);
       const now = Date.now();
-      return findingsList(ctx.db, subjectsOf(loadColleagues(ctx.db, now, readTopology(ctx)).rows), portalReadState(readTopology(ctx)), now);
+      const topology = readTopology(ctx);
+      return findingsList(ctx.db, subjectsOf(loadColleagues(ctx.db, now, topology).rows), portalReadState(topology), now, accessShown(topology));
     },
   }),
   [OP.exceptionSet]: op<ExceptionSetInput, ExceptionSetOutput>({

@@ -39,7 +39,7 @@ export function PlanResult({ colleague, portalHref, showLine = true, showNotChan
             {n}
           </Notice>
         ))}
-        <PlanLive kind={colleague.kind} id={colleague.id} since={colleague.at} portalHref={portal} sendFailure={sendFailure} onEnded={onEnded} removed={/^Stopped\. Portal removed/.test(colleague.line)} />
+        <PlanLive kind={colleague.kind} id={colleague.id} since={colleague.at} portalHref={portal} sendFailure={sendFailure} onEnded={onEnded} removed={/^Stopped\. Portal removed/.test(colleague.line)} accessBack={colleague.findings.some((f) => f.code === "access_back")} />
       </div>
     );
   return (

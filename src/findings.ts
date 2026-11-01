@@ -38,6 +38,8 @@ export interface FindingInput {
   ownerWithheld?: boolean | undefined;
   /** the owner is not active, and Core has not replaced the key since that */
   ownerMayHoldKey?: boolean | undefined;
+  /** C383 review: Core removed this agent's access since this stop, and Portal shows a key or app access again */
+  accessBack?: boolean | undefined;
   /** Core replaced the key: "yes" Portal shows no key yet, "not_seen" Governance cannot see */
   needsConnect?: "yes" | "not_seen" | null | undefined;
 }
@@ -52,6 +54,9 @@ export const KEY_STILL_EXISTS = "Paused. The key still exists. Resume this agent
 
 /** C383: an agent's stop that Portal applied, from its own plan or its owner's: nothing is left to prepare. */
 export const ACCESS_REMOVED = "Stopped. Portal removed its access and key.";
+
+/** C383 review: a stop Portal applied, and after it Reinstate with a new key or a new grant. The agent is paused, and it can run again when someone resumes it. */
+export const ACCESS_BACK = "Paused. Portal shows a new key or app access for it. Governance still says stop.";
 
 const f = (code: string, text: string): Finding => ({ code, text });
 
@@ -81,6 +86,7 @@ export function findingsOf(r: FindingInput, now: number): Finding[] {
   if (r.noHandleToBar) out.push(f("no_handle_to_bar", "This person has no channel handle in the directory, so Governance cannot bar their messages. Add their handles."));
   if (r.senderBarOpen) out.push(f("sender_bar_open", "Messages from this person can still reach agents. Connect has not shown the bar yet."));
   if (agent && r.keyAfterTransfer && r.lifecycle !== "archived" && r.runtime !== "gone") out.push(f("key_after_transfer", r.ownerWithheld ? "The owner changed, and an old owner who is not active may still hold this agent's key. Until a new key exists, apps read no owner for this agent: it does not have the owner's memory or team reads. Make a new key. The agent must then be connected again." : "The owner changed, and the old owner may still hold this agent's key. Make a new key. The agent must then be connected again."));
+  if (agent && r.accessBack && r.lifecycle === "leaving" && r.runtime === "paused") out.push(f("access_back", "Portal removed this agent's access, and now shows a new key or app access for it. It is paused. Ask Portal to remove it again, or use Bring back."));
   if (agent && r.needsConnect === "yes") out.push(f("connect_again", NEEDS_CONNECT));
   if (agent && r.needsConnect === "not_seen") out.push(f("connect_again", "The old key is gone. If you did not connect this agent again, do it in Portal. Governance cannot see this. Turn on 'See who has access'."));
   if (r.planState === "expired" && (r.lifecycle === "suspended" || r.lifecycle === "leaving")) out.push(f("plan_expired", "A request ran out of time before you approved it. Nothing in it was applied. Ask again."));

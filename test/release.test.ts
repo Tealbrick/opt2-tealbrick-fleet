@@ -26,7 +26,7 @@ test("one version everywhere: package.json = manifest = the newest CHANGELOG ent
   const pkg = JSON.parse(read("package.json")) as { version: string };
   const manifest = JSON.parse(read("tealbrick.manifest.json")) as { version: string };
   const top = /^## (\S+)/m.exec(read("CHANGELOG.md"))?.[1];
-  assert.equal(pkg.version, "0.4.0");
+  assert.equal(pkg.version, "0.4.1");
   assert.equal(manifest.version, pkg.version);
   assert.equal(top, pkg.version);
 });
@@ -41,6 +41,8 @@ test("update path: every image admits 0.2.3 (stable) and 0.2.x; the range check 
   const ci = JSON.parse(read("tealbrick-ci.json")) as { images: { name: string; upgradeFrom?: string }[] };
   const from = ["0.2.0", "0.2.1", "0.2.2", "0.2.3", "0.2.4", "0.2.99"];
   for (const img of ci.images) assert.ok(admits(img.upgradeFrom ?? "*", from), `${img.name}: upgradeFrom ${img.upgradeFrom ?? "* (default)"} must admit 0.2.x`);
+  // C383: 0.4.1 also comes from 0.3.x, 0.4.0 and what qa1 ran. Only the default range admits a dev version here, and a narrower one fails closed: then this needs a look.
+  for (const img of ci.images) assert.ok(admits(img.upgradeFrom ?? "*", ["0.3.0", "0.3.2", "0.4.0", "0.4.0-dev.103"]), `${img.name}: upgradeFrom must admit 0.3.x, 0.4.0 and the 0.4.0 dev versions`);
   // the checker itself: quiet on good ranges, fires on bad ones
   assert.equal(admits(">=0.2.0 <0.3.0", from), true);
   assert.equal(admits(">=0.2.3", from), false, "leaves out 0.2.0 to 0.2.2");

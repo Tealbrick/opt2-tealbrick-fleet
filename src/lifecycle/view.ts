@@ -5,12 +5,12 @@ import type { ColleagueGetOutput, ColleaguesListOutput, SummaryGetOutput } from 
 import { readStates } from "../access/client.ts";
 import { ACCESS_AFTER_LEAVE, accessAfterLeave, openDifferences } from "../access/differences.ts";
 import { type AccessTarget, TARGET_NAMES } from "../access/items.ts";
-import { ACCESS_REMOVED, CONNECT_UNSEEN_MS, type Finding, findingsOf, KEY_STILL_EXISTS, stampFinding } from "../findings.ts";
+import { ACCESS_BACK, ACCESS_REMOVED, CONNECT_UNSEEN_MS, type Finding, findingsOf, KEY_STILL_EXISTS, stampFinding } from "../findings.ts";
 import { fail, revision } from "../meta.ts";
 import { accessRemovedAt, keyEndedAt, keyReplacedAt, latestPlanStates, newKeyApproved, newKeyAsked, ownerChangedAt, ownerWithheld, senderBarOpen, unnamedAccounts } from "../plans/guards.ts";
 import { type PlanAgent, portalPlan } from "../plans/portal-link.ts";
 import { exclusionFindings } from "../roles/exclusions.ts";
-import { cleanTopology, type DecodedTopology, decodeTopology } from "../topology-slice.ts";
+import { accessShown, cleanTopology, type DecodedTopology, decodeTopology } from "../topology-slice.ts";
 import type { Trust } from "../trust.ts";
 import { lastLeavingSnapshot, stopsSince, subjectEvents } from "./events.ts";
 import { type FloorContext, type FloorView, floorView, readFloorStatus } from "./floor.ts";
@@ -26,7 +26,7 @@ const isoOf = (ms: unknown): string | null => (ms === null || ms === undefined ?
 const runtimeOf = (status: unknown): "running" | "paused" | "gone" => (status === "active" ? "running" : status === "paused" ? "paused" : "gone");
 
 /** One line, no pills: the three axes in plain words. */
-function lineOf(kind: SubjectKind, lifecycle: Lifecycle, effective: Effective, runtime: Row["runtime"], validFrom: unknown, keyEnded = false, needsConnect: "yes" | "not_seen" | null = null, removed = false, trust: Trust = "unreviewed"): string {
+function lineOf(kind: SubjectKind, lifecycle: Lifecycle, effective: Effective, runtime: Row["runtime"], validFrom: unknown, keyEnded = false, needsConnect: "yes" | "not_seen" | null = null, removed = false, trust: Trust = "unreviewed", accessBack = false): string {
   if (effective === "not_started") return `Starts on ${String(isoOf(validFrom)).slice(0, 10)}`;
   // C383 QA S3-4: blocked holds whatever the lifecycle says (floorOf), so a line that reads "working" or "Active" would be wrong. A stop's own line says more, and a card that is gone has nothing to refuse.
   if (trust === "blocked" && (effective === "proposed" || effective === "active") && runtime !== "gone") return kind === "person" ? "Blocked: refused if the Rules hook is on" : runtime === "running" ? "Blocked: its calls are refused if the Rules hook is on" : "Blocked: paused in Portal";
@@ -39,7 +39,7 @@ function lineOf(kind: SubjectKind, lifecycle: Lifecycle, effective: Effective, r
   if (effective === "proposed") return runtime === "running" ? "New: working, not reviewed" : "New, not reviewed: paused";
   if (effective === "active") return runtime === "running" ? "Working" : "Paused in Portal";
   const word = effective === "leaving" ? "Stop and remove" : "Stop";
-  return runtime === "running" ? `${word} asked: still running` : effective === "leaving" ? (removed ? ACCESS_REMOVED : "Stopped, removal waits for you") : keyEnded ? "Stopped" : KEY_STILL_EXISTS;
+  return runtime === "running" ? `${word} asked: still running` : effective === "leaving" ? (accessBack ? ACCESS_BACK : removed ? ACCESS_REMOVED : "Stopped, removal waits for you") : keyEnded ? "Stopped" : KEY_STILL_EXISTS;
 }
 
 interface Loaded {
@@ -60,6 +60,7 @@ export function loadColleagues(db: Db, now: number, topology?: DecodedTopology |
   const replaced = keyReplacedAt(db);
   const withheld = ownerWithheld(db);
   const seen = keysSeen(topology);
+  const shown = accessShown(topology);
   const handled = new Set(db.prepare("SELECT DISTINCT person_id FROM fleet_handles").all().map((r) => String(r.person_id)));
   const owners = new Map<string, { name: string; lifecycle: string | null; at: number }>();
   const rows: Row[] = [];
@@ -93,10 +94,12 @@ export function loadColleagues(db: Db, now: number, topology?: DecodedTopology |
     const runtime = runtimeOf(a.status);
     // Only after this stop began: an agent brought back has a new key.
     const keyEnded = (keysGone.get(String(a.id)) ?? -1) >= Number(a.lifecycle_at);
+    const removed = (accessGone.get(String(a.id)) ?? -1) >= Number(a.lifecycle_at);
+    const accessBack = removed && shown.has(String(a.id));
     const rotated = replaced.get(String(a.id));
     const needsConnect = rotated === undefined || runtime === "gone" || lifecycle === "archived" || lifecycle === "leaving" ? null : seen ? (seen.has(String(a.id)) ? null : "yes") : rotated + CONNECT_UNSEEN_MS > now ? "not_seen" : null;
     const findings = findingsOf(
-      { kind: "agent", lifecycle, effective, runtime, hasOwner: owner !== undefined, ownerLifecycle: owner?.lifecycle ?? null, reason: a.lifecycle_reason === null ? null : String(a.lifecycle_reason), at: Number(a.lifecycle_at), validUntil: a.valid_until === null ? null : Number(a.valid_until), noCard: a.migrated_note === "no_card", handleConflict: conflicts.has(String(a.id)), planState: plans.get(`agent:${String(a.id)}`) ?? null, keyEnded, keyAfterTransfer: moved.has(String(a.id)) && (keysGone.get(String(a.id)) ?? -1) < (moved.get(String(a.id)) as number), ownerWithheld: withheld.has(String(a.id)), ownerMayHoldKey: owner !== undefined && (keysGone.get(String(a.id)) ?? -1) < owner.at, needsConnect },
+      { kind: "agent", lifecycle, effective, runtime, hasOwner: owner !== undefined, ownerLifecycle: owner?.lifecycle ?? null, reason: a.lifecycle_reason === null ? null : String(a.lifecycle_reason), at: Number(a.lifecycle_at), validUntil: a.valid_until === null ? null : Number(a.valid_until), noCard: a.migrated_note === "no_card", handleConflict: conflicts.has(String(a.id)), planState: plans.get(`agent:${String(a.id)}`) ?? null, keyEnded, keyAfterTransfer: moved.has(String(a.id)) && (keysGone.get(String(a.id)) ?? -1) < (moved.get(String(a.id)) as number), ownerWithheld: withheld.has(String(a.id)), ownerMayHoldKey: owner !== undefined && (keysGone.get(String(a.id)) ?? -1) < owner.at, needsConnect, accessBack },
       now,
     );
     // An acceptance covers the owner change the owner saw, not the next one.
@@ -111,14 +114,14 @@ export function loadColleagues(db: Db, now: number, topology?: DecodedTopology |
       runtime,
       trust: a.trust as Trust,
       owner: owner ? { id: String(a.owner_id), name: owner.name } : null,
-      line: lineOf("agent", lifecycle, effective, runtime, a.valid_from, keyEnded, needsConnect, (accessGone.get(String(a.id)) ?? -1) >= Number(a.lifecycle_at), a.trust as Trust),
+      line: lineOf("agent", lifecycle, effective, runtime, a.valid_from, keyEnded, needsConnect, removed, a.trust as Trust, accessBack),
       findings,
       validFrom: isoOf(a.valid_from),
       validUntil: isoOf(a.valid_until),
       at: isoOf(a.lifecycle_at),
     });
   }
-  const leave = accessAfterLeave(db);
+  const leave = accessAfterLeave(db, shown);
   for (const r of rows) if (leave.has(`${r.kind}:${r.id}`)) r.findings.push(ACCESS_AFTER_LEAVE);
   // C380 T2-c "Cannot hold both": broken rules, computed here from the role rows like every finding (no rule: no query beyond one)
   const clash = exclusionFindings(db, now);
@@ -258,7 +261,8 @@ const alertsReadiness = (inbox: boolean) =>
 
 export async function summaryGet(ctx: OpContext, now = Date.now()): Promise<SummaryGetOutput> {
   const db = ctx.db;
-  const { rows } = loadColleagues(db, now, readTopology(ctx));
+  const pictured = readTopology(ctx);
+  const { rows } = loadColleagues(db, now, pictured);
   const agents = rows.filter((r) => r.kind === "agent" && r.runtime !== "gone");
   const people = rows.filter((r) => r.kind === "person");
   const running = agents.filter((r) => r.runtime === "running").length;
@@ -282,7 +286,7 @@ export async function summaryGet(ctx: OpContext, now = Date.now()): Promise<Summ
     people: { total: people.length, leaving: people.filter((r) => r.lifecycle === "leaving").length, suspended: people.filter((r) => r.lifecycle === "suspended").length },
     noOwner,
     keysUndecided: agents.filter((r) => r.findings.some((f: Finding) => f.code === "key_not_decided")).map((r) => ({ id: r.id, name: r.name, text: KEY_STILL_EXISTS })),
-    differences: openDifferences(db, rows, now),
+    differences: openDifferences(db, rows, now, accessShown(pictured)),
     canWriteOrSend: topology && !topology.truncated ? new Set(topology.edges.filter((e) => e.crud.some((c) => c !== "read")).map((e) => e.agent)).size : null,
     stores: [
       { product: "core", name: "Portal", state: "read", text: "Agents and their state come from the workspace copy.", at: null },
