@@ -85,6 +85,12 @@ function stillRunning(db: Db, personId: string): string[] {
     .map((r) => String(r.name));
 }
 
+/** C381 lead S3: an agent stopped while it was new, and not reviewed since. Its way to `active` is still T2: a stop and a resume must not skip who answers for it. A row with no such event was never new here. */
+function neverReviewed(db: Db, id: string): boolean {
+  const last = db.prepare("SELECT to_state FROM fleet_lifecycle_events WHERE subject_kind = 'agent' AND subject_id = ? AND kind = 'transition' AND to_state IN ('proposed', 'active') ORDER BY seq DESC LIMIT 1").get(id);
+  return last?.to_state === "proposed";
+}
+
 export interface Problem {
   code: string;
   message: string;
@@ -112,7 +118,7 @@ export function guardOf(db: Db, s: Subject, to: Lifecycle, opts: { waive?: strin
   if (to === "active") {
     if (s.trust === "blocked") return no("trust_blocked", "It is blocked. Record a new review first.");
     // T2 records a review, and a review names who answers for the agent. C381: a resume (T4, T6) is not tied to the owner: an agent with no active owner has a finding, it is not refused.
-    if (s.kind === "agent" && s.lifecycle === "proposed") {
+    if (s.kind === "agent" && (s.lifecycle === "proposed" || neverReviewed(db, s.id))) {
       if (s.ownerId === null) return no("owner_required", "Name an owner first.");
       if (personLifecycle(db, s.ownerId) !== "active") return no("owner_inactive", "The owner is not active. Name an active owner first.");
     }

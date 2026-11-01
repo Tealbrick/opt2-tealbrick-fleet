@@ -76,8 +76,8 @@ export function setAgentMoved(db: Db, input: Parameters<typeof store.setAgent>[1
     const old = db.prepare("SELECT a.owner_id, p.name AS owner_name FROM fleet_agents a LEFT JOIN fleet_people p ON p.id = a.owner_id WHERE a.id = ?").get(input.agent);
     const changing = input.owner !== undefined && old !== undefined && input.owner !== old.owner_id;
     if (changing && input.owner) {
-      const who = db.prepare("SELECT kind, lifecycle FROM fleet_people WHERE id = ?").get(input.owner);
-      if (who && who.kind === "person" && who.lifecycle !== "active") fail("owner_inactive", "The new owner must be an active person.", 409);
+      const who = db.prepare("SELECT kind, lifecycle, trust FROM fleet_people WHERE id = ?").get(input.owner);
+      if (who && who.kind === "person" && (who.lifecycle !== "active" || who.trust === "blocked")) fail("owner_inactive", "The new owner must be an active person who is not blocked.", 409);
     }
     // A new plan of the old owner would replace the draft and drop this agent's removal with no word. Same for a new owner: the stop stands in that plan.
     if (changing) {

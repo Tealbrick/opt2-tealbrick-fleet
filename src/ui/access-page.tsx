@@ -20,7 +20,8 @@ const VIEWS: { value: View; label: string }[] = [
 ];
 
 export function AccessPage({ portalHref }: { portalHref?: string }) {
-  const [view, setView] = useState<View>("grants");
+  // A link from a person's page opens the list it speaks of.
+  const [view, setView] = useState<View>(() => (new URLSearchParams(globalThis.location?.search ?? "").get("view") === "differences" ? "differences" : "grants"));
   if (!FEATURES.differences) return <Grants portalHref={portalHref} />;
   return (
     <section className="app-page" aria-label="Access">

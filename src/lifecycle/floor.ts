@@ -26,16 +26,16 @@ export interface FloorStatus {
 
 export const FLOOR_TEXT = {
   confirmed: "Rules has this change.",
-  not_confirmed: "Not confirmed: nothing may stop until you approve in Portal.",
+  not_confirmed: "Rules has not read this change yet. It may refuse calls soon. The agent stops for certain when you approve in Portal.",
   not_installed: "Rules & Approvals adds an early stop. It is not installed, or it needs an update.",
   older: "Rules & Approvals is installed, but this version has no early stop. Update it.",
-  not_read: "Rules & Approvals could not be read. Nothing may stop until you approve in Portal.",
+  not_read: "Rules & Approvals could not be read, so calls may go on. The agent stops for certain when you approve in Portal.",
 } as const;
 /** N2-4: whether the list of who is refused holds now, in words for the owner. */
 export const FLOOR_READ_TEXT = {
   reads: "Rules & Approvals reads this list, so these entries are refused now if its hook is on.",
   not_installed: "Rules & Approvals is not installed, so nothing here is refused yet.",
-  older: "This version of Rules & Approvals does not read this list, so nothing here is refused yet. Update Rules & Approvals when you have read it.",
+  older: "This version of Rules & Approvals does not read this list, so nothing here is refused yet. Update Rules & Approvals.",
   not_read: "Rules & Approvals could not be read, so Governance cannot say if these entries are refused now.",
 } as const;
 

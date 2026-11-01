@@ -408,9 +408,9 @@ test("Try again leaves `changed` alone: the owner did not see the new row, so on
   // the way out: cancel, new plan, new look
   await run("plan_cancel", { plan: id }, ctxOf(w));
   const next = (await run("plan_send", { kind: "agent", id: HENRY, items: [{ product: "connect", id: row.id, digest: w.connect.digestOf(row) }] }, ctxOf(w))).plans[0].id;
+  // C383 QA S3-6: Core removed this agent's access already, so the new plan asks Portal for nothing new.
   await w.tick(next);
-  approveAndDeliver(w, String(w.plan(next).draft_key), HENRY);
-  await w.tick(next);
+  assert.equal(w.plan(next).draft_key ?? null, null);
   assert.equal(w.plan(next).state, "done");
 });
 

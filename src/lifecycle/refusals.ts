@@ -1,5 +1,5 @@
 // Who Rules refuses before any rule, and why (C381, N2-4). Read only, owner only. An upgrade makes `blocked` a hard refusal and turns departed people into `leaving`: both were records before 0.4.
-// So the owner reads this list BEFORE Rules 0.7 starts to read the feed. Update Governance first, read this page, then update Rules. Agents whose owner left are listed apart: they keep working.
+// Core's companion gate needs Rules 0.7 before Fleet 0.4 where Rules is installed, so an owner reads People on Fleet 0.3.2 first (CHANGELOG), and this page says what Rules now refuses. Agents whose owner left are listed apart: they keep working.
 import type { OpContext, SdkOpContext } from "@opt2-tealbrick/miniapp-sdk";
 import type { RefusalsGetOutput } from "#kit";
 import type { Trust } from "../trust.ts";

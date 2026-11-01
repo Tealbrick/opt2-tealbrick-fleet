@@ -33,6 +33,7 @@ export function accessAfterLeave(db: Db): Map<string, { stores: string[]; newest
        LEFT JOIN fleet_agents a ON i.subject_kind = 'agent' AND a.id = i.subject_id
        LEFT JOIN fleet_people p ON i.subject_kind = 'person' AND p.id = i.subject_id
        WHERE i.level <> 'info' AND i.direction = 'held_by' AND i.state <> 'dormant' AND COALESCE(a.lifecycle, p.lifecycle) IN ('leaving', 'archived')
+         AND NOT (i.kind = 'buzz_identity' AND a.status = 'removed') -- C383 QA S3-5: a Buzz name on an agent Portal no longer lists: nobody can act as it
        GROUP BY i.subject_kind, i.subject_id, i.target ORDER BY i.target`,
     )
     .all();

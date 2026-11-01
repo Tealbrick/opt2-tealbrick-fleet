@@ -111,6 +111,10 @@ export function senderBarOpen(db: Db, personId: string): boolean {
 export const newKeyAsked = (db: Db): Set<string> =>
   new Set(db.prepare(`SELECT DISTINCT s.agent_id AS id FROM fleet_plan_steps s JOIN fleet_plans p ON p.id = s.plan_id WHERE s.op = 'agents.rotate' AND s.state NOT IN ('done', 'reported', 'cancelled') AND p.state IN (${OPEN})`).all().map((r) => String(r.id)));
 
+/** C383: of those, the ones the owner already approved. Core made the new key, and Governance is only waiting to see the old one gone. */
+export const newKeyApproved = (db: Db): Set<string> =>
+  new Set(db.prepare(`SELECT DISTINCT s.agent_id AS id FROM fleet_plan_steps s JOIN fleet_plans p ON p.id = s.plan_id WHERE s.op = 'agents.rotate' AND s.state = 'pending_bridge' AND p.state IN (${OPEN})`).all().map((r) => String(r.id)));
+
 /** When Core last replaced each agent's key, for "connect it again". */
 export const keyReplacedAt = (db: Db): Map<string, number> =>
   new Map(db.prepare("SELECT s.agent_id AS id, MAX(s.updated_at) AS at FROM fleet_plan_steps s WHERE s.phase = 'core' AND s.op = 'agents.rotate' AND s.state IN ('done', 'reported') GROUP BY s.agent_id").all().map((r) => [String(r.id), Number(r.at)]));

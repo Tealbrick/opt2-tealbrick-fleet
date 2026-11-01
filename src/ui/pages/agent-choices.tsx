@@ -16,7 +16,7 @@ export type Owner = { value: string; label: string };
 
 const MOVE_SENTENCE = "It keeps running. It has its new owner at once. It loses this person's personal memory.";
 const MOVE_STOPPED = "It stays stopped, as you chose. It has its new owner at once.";
-const STOP_SENTENCE = "It stops when you approve in Portal. Its access and key go. To undo this you must connect it again and grant its access again.";
+const STOP_SENTENCE = "If the Rules hook is on, its calls are refused in about 2 minutes. When you approve in Portal, it is paused, and its access and key go. To undo this you must connect it again and grant its access again.";
 const LATER_SENTENCE = "It keeps running with this owner. Governance shows that it needs an owner, and this person may still hold its key.";
 const LATER_STOPPED = "It stays stopped, with this owner. Governance shows that it needs an owner.";
 const KEY_ON = "When you approve in Portal, the old key stops and this agent must be connected again. It cannot work until then. After that it gains the new owner's personal memory.";
@@ -26,7 +26,7 @@ const NO_ONE = "No other active person is in the directory. Add one, then name t
 /** The active people who can take an agent, without this person. */
 export function useOwners(personId: string): Owner[] | null {
   const people = useLoad(useCallback(() => callOp<ColleaguesListOutput>("colleagues_list", { kind: "person", lifecycle: "active", limit: 200 }), []));
-  return people.data ? apartLabels(people.data.items.filter((p) => p.id !== personId).map((p) => ({ value: p.id, label: p.name }))) : null;
+  return people.data ? apartLabels(people.data.items.filter((p) => p.id !== personId && p.trust !== "blocked").map((p) => ({ value: p.id, label: p.name }))) : null;
 }
 
 /** The start of each choice: the workspace default owner when one is set and active, and a new key for a person who leaves. */

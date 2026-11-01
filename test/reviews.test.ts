@@ -558,9 +558,9 @@ test("the snapshot is what the owner sees (name, title, kind, trust, handles, ow
     ["email", () => store.setPerson(db, { id: s.ann.id, name: "Ann Example", email: "ann@new.example" })],
     ["title", () => store.setPerson(db, { id: s.ann.id, name: "Ann Example", title: "Boss" })],
     ["trust", () => db.prepare("UPDATE fleet_people SET trust = 'limited' WHERE id = ?").run(s.ann.id)],
-    ["status", () => store.setPerson(db, { id: s.ann.id, name: "Ann Example", status: "departed" })],
     ["team", () => store.setMembers(db, { team: s.ops.id, people: [{ id: s.ann.id, role: "lead" }], agents: [] })],
     ["handle", () => store.setPerson(db, { id: s.ann.id, name: "Ann Example", handles: ["slack:UANN00009"] })],
+    ["status", () => store.setPerson(db, { id: s.ann.id, name: "Ann Example", status: "departed" })],
   ];
   for (const [what, change] of changes) {
     const before = (await look("person", s.ann.id)).digest;

@@ -7,7 +7,7 @@ import { ACCESS_AFTER_LEAVE, accessAfterLeave, openDifferences } from "../access
 import { type AccessTarget, TARGET_NAMES } from "../access/items.ts";
 import { ACCESS_REMOVED, CONNECT_UNSEEN_MS, type Finding, findingsOf, KEY_STILL_EXISTS, stampFinding } from "../findings.ts";
 import { fail, revision } from "../meta.ts";
-import { accessRemovedAt, keyEndedAt, keyReplacedAt, latestPlanStates, newKeyAsked, ownerChangedAt, ownerWithheld, senderBarOpen, unnamedAccounts } from "../plans/guards.ts";
+import { accessRemovedAt, keyEndedAt, keyReplacedAt, latestPlanStates, newKeyApproved, newKeyAsked, ownerChangedAt, ownerWithheld, senderBarOpen, unnamedAccounts } from "../plans/guards.ts";
 import { type PlanAgent, portalPlan } from "../plans/portal-link.ts";
 import { exclusionFindings } from "../roles/exclusions.ts";
 import { cleanTopology, type DecodedTopology, decodeTopology } from "../topology-slice.ts";
@@ -26,8 +26,10 @@ const isoOf = (ms: unknown): string | null => (ms === null || ms === undefined ?
 const runtimeOf = (status: unknown): "running" | "paused" | "gone" => (status === "active" ? "running" : status === "paused" ? "paused" : "gone");
 
 /** One line, no pills: the three axes in plain words. */
-function lineOf(kind: SubjectKind, lifecycle: Lifecycle, effective: Effective, runtime: Row["runtime"], validFrom: unknown, keyEnded = false, needsConnect: "yes" | "not_seen" | null = null, removed = false): string {
+function lineOf(kind: SubjectKind, lifecycle: Lifecycle, effective: Effective, runtime: Row["runtime"], validFrom: unknown, keyEnded = false, needsConnect: "yes" | "not_seen" | null = null, removed = false, trust: Trust = "unreviewed"): string {
   if (effective === "not_started") return `Starts on ${String(isoOf(validFrom)).slice(0, 10)}`;
+  // C383 QA S3-4: blocked holds whatever the lifecycle says (floorOf), so a line that reads "working" or "Active" would be wrong. A stop's own line says more, and a card that is gone has nothing to refuse.
+  if (trust === "blocked" && (effective === "proposed" || effective === "active") && runtime !== "gone") return kind === "person" ? "Blocked: refused if the Rules hook is on" : runtime === "running" ? "Blocked: its calls are refused if the Rules hook is on" : "Blocked: paused in Portal";
   if (kind === "person") {
     return { proposed: "New, not reviewed", active: "Active", suspended: "Access stop asked", leaving: "Leaving", archived: "Closed" }[effective];
   }
@@ -73,7 +75,7 @@ export function loadColleagues(db: Db, now: number, topology?: DecodedTopology |
       runtime: null,
       trust: p.trust as Trust,
       owner: null,
-      line: lineOf("person", lifecycle, effective, null, p.valid_from),
+      line: lineOf("person", lifecycle, effective, null, p.valid_from, false, null, false, p.trust as Trust),
       findings: findingsOf({ kind: "person", lifecycle, effective, runtime: null, hasOwner: false, ownerLifecycle: null, reason: p.lifecycle_reason === null ? null : String(p.lifecycle_reason), at: Number(p.lifecycle_at), validUntil: p.valid_until === null ? null : Number(p.valid_until), noCard: false, handleConflict: false, noHandleToBar: lifecycle === "leaving" && !handled.has(String(p.id)), senderBarOpen: lifecycle === "leaving" && senderBarOpen(db, String(p.id)), planState: plans.get(`person:${String(p.id)}`) ?? null, unnamedAccounts: lifecycle === "leaving" ? unnamedAccounts(db, String(p.id), now) : 0 }, now),
       validFrom: isoOf(p.valid_from),
       validUntil: isoOf(p.valid_until),
@@ -109,7 +111,7 @@ export function loadColleagues(db: Db, now: number, topology?: DecodedTopology |
       runtime,
       trust: a.trust as Trust,
       owner: owner ? { id: String(a.owner_id), name: owner.name } : null,
-      line: lineOf("agent", lifecycle, effective, runtime, a.valid_from, keyEnded, needsConnect, (accessGone.get(String(a.id)) ?? -1) >= Number(a.lifecycle_at)),
+      line: lineOf("agent", lifecycle, effective, runtime, a.valid_from, keyEnded, needsConnect, (accessGone.get(String(a.id)) ?? -1) >= Number(a.lifecycle_at), a.trust as Trust),
       findings,
       validFrom: isoOf(a.valid_from),
       validUntil: isoOf(a.valid_until),
@@ -206,7 +208,9 @@ export async function colleagueDetail(ctx: OpContext, kind: SubjectKind, id: str
   const wasStopped = kind === "agent" && lastLeavingSnapshot(db, "agent", id) !== null;
   const planAgents: PlanAgent[] = (kind === "agent" ? [row] : owned).map((r) => ({ id: r.id, name: r.name, lifecycle: r.lifecycle, effective: r.effective, runtime: r.runtime, wasStopped }));
   const built = portalPlan(planAgents, topology, portalUrl(ctx), kind === "person" && owned.length === 0 ? "This person owns no agents. Nothing to do in Portal." : null);
-  const plan = built.steps.length > 0 || s.lifecycle === "suspended" || s.lifecycle === "leaving" ? built : null;
+  // C383 QA S3-3: a person who is not stopped has steps here only for their agents' own stops. One that is done is not a thing to do in Portal, and an Undo must not leave "Not applied".
+  const shownSteps = kind === "person" && s.lifecycle !== "suspended" && s.lifecycle !== "leaving" ? { ...built, steps: built.steps.filter((p) => p.state !== "done") } : built;
+  const plan = shownSteps.steps.length > 0 || s.lifecycle === "suspended" || s.lifecycle === "leaving" ? shownSteps : null;
   const actions = NEXT[s.lifecycle]
     .map((to) => {
       const label = (s.kind === "person" ? PERSON_LABELS : AGENT_LABELS)[s.lifecycle][to];
@@ -231,6 +235,7 @@ export async function colleagueDetail(ctx: OpContext, kind: SubjectKind, id: str
     reason: extra.lifecycle_reason === null ? null : String(extra.lifecycle_reason),
     note: extra.lifecycle_note === null ? null : String(extra.lifecycle_note),
     newKeyAsked: kind === "agent" && newKeyAsked(db).has(id),
+    newKeyApproved: kind === "agent" && newKeyApproved(db).has(id),
     defaultOwner: kind === "person" ? ((d) => (d && d.id !== id ? d : null))(activeDefaultOwner(db)) : null,
     reach: kind === "person" ? reachOf(db, id) : [],
     teams,

@@ -88,17 +88,54 @@ test("T4: resume is the owner's act, needs no passed end date and no active owne
   assert.equal(set(db, "agent", AGENT_A.id, "active").to, "active");
 });
 
-test("T6: undo keeps the guards of a move to active (block, passed date); an owner is not one of them (C381)", () => {
+test("T6: undo keeps the guards of a move to active (block, passed date); an owner is not one of them for a reviewed agent (C381)", () => {
   const { db } = world();
+  store.setAgent(db, { agent: AGENT_A.id, owner: null }, T0);
+  set(db, "agent", AGENT_A.id, "suspended");
+  set(db, "agent", AGENT_A.id, "leaving");
+  db.prepare("UPDATE fleet_agents SET trust = 'blocked' WHERE id = ?").run(AGENT_A.id);
+  assert.throws(() => set(db, "agent", AGENT_A.id, "active"), refused("trust_blocked", 409));
+  db.prepare("UPDATE fleet_agents SET trust = 'trusted' WHERE id = ?").run(AGENT_A.id);
+  setDates(db, { kind: "agent", id: AGENT_A.id, validUntil: new Date(T0 - 1).toISOString(), confirmPastDate: true, actor: OWNER }, T0);
+  assert.throws(() => set(db, "agent", AGENT_A.id, "active"), refused("date_passed", 409));
+  setDates(db, { kind: "agent", id: AGENT_A.id, validUntil: null, actor: OWNER }, T0);
+  assert.equal(set(db, "agent", AGENT_A.id, "active").to, "active");
+});
+
+test("C381 lead S3: a new agent stopped and resumed still answers T2: an owner who is active, once a review has not named one", () => {
+  const { db, ann } = world();
   set(db, "agent", AGENT_B.id, "suspended");
+  assert.throws(() => set(db, "agent", AGENT_B.id, "active"), refused("owner_required", 409));
+  store.setAgent(db, { agent: AGENT_B.id, owner: ann.id }, T0);
+  set(db, "person", ann.id, "suspended");
+  assert.throws(() => set(db, "agent", AGENT_B.id, "active"), refused("owner_inactive", 409));
+  set(db, "person", ann.id, "active");
   set(db, "agent", AGENT_B.id, "leaving");
-  db.prepare("UPDATE fleet_agents SET trust = 'blocked' WHERE id = ?").run(AGENT_B.id);
-  assert.throws(() => set(db, "agent", AGENT_B.id, "active"), refused("trust_blocked", 409));
-  db.prepare("UPDATE fleet_agents SET trust = 'trusted' WHERE id = ?").run(AGENT_B.id);
-  setDates(db, { kind: "agent", id: AGENT_B.id, validUntil: new Date(T0 - 1).toISOString(), confirmPastDate: true, actor: OWNER }, T0);
-  assert.throws(() => set(db, "agent", AGENT_B.id, "active"), refused("date_passed", 409));
-  setDates(db, { kind: "agent", id: AGENT_B.id, validUntil: null, actor: OWNER }, T0);
+  set(db, "person", ann.id, "suspended");
+  assert.throws(() => set(db, "agent", AGENT_B.id, "active"), refused("owner_inactive", 409), "through leaving too");
+  set(db, "person", ann.id, "active");
   assert.equal(set(db, "agent", AGENT_B.id, "active").to, "active");
+  // now reviewed: a later stop and resume is not tied to the owner (C381)
+  set(db, "agent", AGENT_B.id, "suspended");
+  set(db, "person", ann.id, "suspended");
+  assert.equal(set(db, "agent", AGENT_B.id, "active").to, "active");
+});
+
+test("C381 lead S3: person_set takes no handle off a stopped, leaving, closed or blocked person; it can add one, and a person brought back can change them", () => {
+  const { db, ann } = world();
+  store.setPerson(db, { id: ann.id, name: "Ann", handles: ["slack:UANN00001"] }, T0);
+  for (const state of ["suspended", "leaving"] as const) {
+    set(db, "person", ann.id, state, { noCap: true });
+    assert.throws(() => store.setPerson(db, { id: ann.id, name: "Ann", handles: [] }, T0), refused("handles_stay", 409));
+    assert.throws(() => store.setPerson(db, { id: ann.id, name: "Ann", handles: ["slack:UANN00002"] }, T0), refused("handles_stay", 409), "a swap takes one off");
+    assert.equal(store.setPerson(db, { id: ann.id, name: "Ann", handles: ["slack:UANN00001"] }, T0).handles.length, 1, "the same list is no change");
+    set(db, "person", ann.id, "active");
+  }
+  db.prepare("UPDATE fleet_people SET trust = 'blocked' WHERE id = ?").run(ann.id);
+  assert.throws(() => store.setPerson(db, { id: ann.id, name: "Ann", handles: [] }, T0), refused("handles_stay", 409));
+  assert.equal(store.setPerson(db, { id: ann.id, name: "Ann", handles: ["slack:UANN00001", "slack:UANN00002"] }, T0).handles.length, 2, "a new handle is welcome");
+  db.prepare("UPDATE fleet_people SET trust = 'trusted' WHERE id = ?").run(ann.id);
+  assert.equal(store.setPerson(db, { id: ann.id, name: "Ann", handles: [] }, T0).handles.length, 0);
 });
 
 test("transitions: same state, not in the table, unknown entry, outside agent, stale revision", () => {

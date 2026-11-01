@@ -126,7 +126,7 @@ export const lifecycleOps = {
     },
   }),
   [OP.refusalsGet]: op<RefusalsGetInput, RefusalsGetOutput>({
-    // Read only. N2-4: what Rules refuses, and what starts to refuse with this update, read before Rules is updated.
+    // Read only. N2-4: what Rules refuses, and what starts to refuse with this update.
     async run(_input, ctx) {
       assertOwner(ctx.caller);
       return refusalsGet(ctx);

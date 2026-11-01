@@ -15,7 +15,7 @@ import { type AccessItem, type AccessPort, type ListSubject, revokeBatchMax } fr
 import { type AlertPort, alertOnce, retryPendingAlerts } from "./alerts.ts";
 import { askRail, type OwnerDraftGetResult, type OwnerDraftsApi, proveCoreStep, readableDraft, type SliceView } from "./core-rail.ts";
 import { addStep, type CoreOp, getPlan, movePlan, moveStep, notePlan, OPEN_SQL, type Row, recordPlan, stepsOf, type Tick } from "./plan.ts";
-import { APPLYING_STUCK_MS, DRAFT_TITLE, ENDS_BY_PAUSE, FAST_WINDOW_MS, HOLD_RECHECK_MS, isFinalStep, isOpenPlan, LIST_BACKOFF_MS, MANY_PLANS, MAX_TRIES, POLL_FAST_MS, POLL_SLOW_MS, stateFromSteps, stuckStep, TICK_LEASE_MS } from "./steps.ts";
+import { APPLYING_STUCK_MS, DRAFT_TITLE, ENDS_BY_PAUSE, FAST_WINDOW_MS, HOLD_RECHECK_MS, isFinalStep, isOpenPlan, LIST_BACKOFF_MS, MANY_PLANS, MAX_TRIES, POLL_FAST_MS, POLL_SLOW_MS, ROTATE_SEEN_MS, stateFromSteps, stuckStep, TICK_LEASE_MS } from "./steps.ts";
 
 export interface PlanCtx {
   db: Db;
@@ -132,7 +132,7 @@ function applyCoreSteps(pc: PlanCtx, get: OwnerDraftGetResult, steps: readonly R
       const cfg = typeof output.configRevision === "number" ? output.configRevision : null;
       const state = proof.state === "pending" ? "pending_bridge" : proof.state;
       // A new key may pair on the agent before the slice shows the old one gone. Past the window, Core's word stays what it is: said, not seen.
-      const late = s.op === "agents.rotate" && state === "pending_bridge" && s.state === "pending_bridge" && now - Number(s.updated_at) > FAST_WINDOW_MS;
+      const late = s.op === "agents.rotate" && state === "pending_bridge" && s.state === "pending_bridge" && now - Number(s.updated_at) > ROTATE_SEEN_MS;
       if (late) moveStep(pc.db, s, "reported", { detail: `Core says removed ${Number(output.revokedConnections ?? 0)} connections. The agent may have a new key already, so Governance cannot tell.` }, now);
       else if (s.state !== state || s.code !== null) moveStep(pc.db, s, state, { output_json: JSON.stringify(output).slice(0, 2000), config_revision: cfg, detail: proof.detail, code: null, tries: 0 }, now);
     } else if (g.status === "failed") {

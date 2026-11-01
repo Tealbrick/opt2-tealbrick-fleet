@@ -1,4 +1,4 @@
-// Who is refused (C381, N2-4): the read-only list of who Rules refuses before any rule. Read it after Governance is updated and before Rules & Approvals is: then nothing here is refused yet.
+// Who is refused (C381, N2-4): the read-only list of who Rules refuses before any rule. Core needs Rules 0.7 before Fleet 0.4, so on an update this page is read with Rules already on: the list to read first is People on Fleet 0.3.2 (CHANGELOG).
 // It says apart what starts with this update, what else is refused, and the agents that keep working and need an owner.
 import { callOp } from "@opt2-tealbrick/miniapp-sdk/client";
 import { EmptyState, Notice, TextLink } from "@opt2-tealbrick/ui";
@@ -42,7 +42,7 @@ export function RefusalsPage() {
           <Notice tone={data.rules.state === "reads" ? "live" : "neutral"} role="status">{`${data.rules.text} Read ${when(data.generatedAt)}.`}</Notice>
           <section className="tb-stack" aria-label="Starts to refuse with this update">
             <h2 className="sub-head">{`${data.rules.state === "reads" ? "Refused since this update" : "Starts to refuse with this update"}: ${data.startsTotal}`}</h2>
-            <p className="tb-soft">Before this version these entries were only a record. With Rules & Approvals 0.7 and its hook on, nobody can act by, for or to them.{data.rules.state === "reads" ? " " : " Read this list before you update Rules & Approvals. "}To lift an entry, open it: Undo for a person, a new review for a blocked entry.</p>
+            <p className="tb-soft">Before this version these entries were only a record. With Rules & Approvals 0.7 and its hook on, nobody can act by, for or to them.{data.rules.state === "reads" ? " " : " Read this list before you install or update Rules & Approvals. "}To lift an entry, open it: Undo for a person, a new review for a blocked entry.</p>
             {data.startsTotal === 0 ? <EmptyState title="No entry here.">No entry is blocked, and nobody was marked as departed before this update.</EmptyState> : <Items items={data.startsWithUpdate} total={data.startsTotal} />}
           </section>
           <section className="tb-stack" aria-label="Keep working">

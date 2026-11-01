@@ -69,6 +69,11 @@ export const MANY_PLANS = 3;
 export const POLL_FAST_MS = 60_000;
 export const POLL_SLOW_MS = 15 * 60_000;
 export const FAST_WINDOW_MS = 30 * 60_000;
+/**
+ * C383 QA S3-1: Core said a new key is made, and the agent paired again before the slice showed the old one gone. The slice cannot tell old from new, and it has had time to arrive: this answer came through the same bridge
+ * that takes Core's kill path. Past this, Core's word stands as said, not seen. Before, this was the fast window, and an owner stayed withheld for up to 30 minutes.
+ */
+export const ROTATE_SEEN_MS = 2 * 60_000;
 /** "Portal stopped mid-way": a draft `applying` for longer than this. */
 export const APPLYING_STUCK_MS = 30 * 60_000;
 export const LIST_BACKOFF_MS = 15 * 60_000;

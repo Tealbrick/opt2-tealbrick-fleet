@@ -152,7 +152,7 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
                 return (
                   <li key={a.id}>
                     <span>{a.name}</span>
-                    <span className="tb-hint">{ch.choice === "stop" ? "Stops when you approve in Portal" : ch.choice === "later" ? (a.lifecycle === "suspended" ? "Stays stopped, needs an owner" : "Keeps running, needs an owner") : `Moves to ${owners?.find((o) => o.value === ch.newOwner)?.label ?? "the new owner"}${ch.newKey ? ", with a new key" : ""}`}</span>
+                    <span className="tb-hint">{ch.choice === "stop" ? "Calls refused in about 2 minutes if the Rules hook is on. Paused and removed when you approve in Portal" : ch.choice === "later" ? (a.lifecycle === "suspended" ? "Stays stopped, needs an owner" : "Keeps running, needs an owner") : `Moves to ${owners?.find((o) => o.value === ch.newOwner)?.label ?? "the new owner"}${ch.newKey ? ", with a new key" : ""}`}</span>
                   </li>
                 );
               })}

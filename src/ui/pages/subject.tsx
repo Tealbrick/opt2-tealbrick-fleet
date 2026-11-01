@@ -75,6 +75,11 @@ function Subject({ kind, id, portalHref }: { kind: SubjectKind; id: string; port
                   {f.text}
                 </Notice>
               ))}
+              {FEATURES.differences ? (
+                <span>
+                  <TextLink href="./access?view=differences">Open Access, Differences, to accept one with a reason</TextLink>
+                </span>
+              ) : null}
             </section>
           ) : null}
           {c.plan || (FEATURES.plans && (c.lifecycle === "suspended" || c.lifecycle === "leaving")) ? (
@@ -161,7 +166,7 @@ function KeyChoice({ c, onChoose, onNewKey }: { c: Colleague; onChoose: () => vo
   return (
     <div className="tb-row">
       {needsKey && !c.newKeyAsked ? <Button onClick={onNewKey}>Make a new key</Button> : null}
-      {needsKey && c.newKeyAsked ? <span className="tb-hint">A new key waits for your approval in Portal.</span> : null}
+      {needsKey && c.newKeyAsked ? <span className="tb-hint">{c.newKeyApproved ? "You approved the new key. Governance is checking that the old key is gone. This takes about 2 minutes." : "A new key waits for your approval in Portal."}</span> : null}
       {noOwner ? <ButtonLink href="./agents">Name an owner</ButtonLink> : null}
       {needsOwner && owner ? (
         <p className="tb-soft">
