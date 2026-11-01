@@ -18,6 +18,7 @@ import { Identities } from "./pages/identities.tsx";
 import { JoinPage } from "./pages/join-page.tsx";
 import { liveBanners } from "./pages/plan-poll.ts";
 import { RecordPage } from "./pages/record.tsx";
+import { RefusalsPage } from "./pages/refusals.tsx";
 import { RolesPage } from "./pages/roles.tsx";
 import { RoundsPage } from "./pages/rounds.tsx";
 import { SubjectPage } from "./pages/subject.tsx";
@@ -36,7 +37,7 @@ const OLD_ROUTES = { teams: "", topology: "topology", access: "access", reviews:
 /** With the lifecycle ops (C380): Summary is the launch page; /people and /agents stay as routes and leave the nav for one release. */
 const NEW_ROUTES = { ...OLD_ROUTES, summary: "", everyone: "people-and-agents", subject: SUBJECT_PATH, teams: "teams", join: "join" } as const;
 /** Tier 2: a route exists when the ops are there; the nav entry waits for the QA rows (features.ts). */
-const TIER2_ROUTES = { ...(FEATURES.roles ? { roles: "roles" } : {}), ...(FEATURES.exclusions ? { exclusions: "cannot-hold-both" } : {}), ...(FEATURES.rounds ? { rounds: "review-rounds" } : {}), ...(FEATURES.record ? { record: "access-record" } : {}) };
+const TIER2_ROUTES = { ...(FEATURES.refusals ? { refusals: "who-is-refused" } : {}), ...(FEATURES.roles ? { roles: "roles" } : {}), ...(FEATURES.exclusions ? { exclusions: "cannot-hold-both" } : {}), ...(FEATURES.rounds ? { rounds: "review-rounds" } : {}), ...(FEATURES.record ? { record: "access-record" } : {}) };
 const ROUTES: Readonly<Record<string, string>> = { ...(FEATURES.lifecycle ? NEW_ROUTES : OLD_ROUTES), ...TIER2_ROUTES };
 const LAUNCH = FEATURES.lifecycle ? "summary" : "teams";
 const OLD_PAGES = [
@@ -65,6 +66,7 @@ const NEW_PAGES = [
 function withTier2(pages: { id: string; label: string }[]): { id: string; label: string }[] {
   return pages.flatMap((p) => [
     p,
+    ...(p.id === "everyone" && FEATURES.refusals ? [{ id: "refusals", label: "Who is refused" }] : []),
     ...(p.id === "reviews" && FEATURES.roundsNav ? [{ id: "rounds", label: "Review rounds" }] : []),
     ...(p.id === "access" && FEATURES.recordNav ? [{ id: "record", label: "Access record" }] : []),
     ...(p.id === "teams" && FEATURES.rolesInNav ? [{ id: "roles", label: "Roles" }] : []),
@@ -126,6 +128,8 @@ export function App() {
     >
       {!signedIn ? null : nav.page === "summary" ? (
         <SummaryPage />
+      ) : nav.page === "refusals" && FEATURES.refusals ? (
+        <RefusalsPage />
       ) : nav.page === "everyone" ? (
         <EveryonePage portalHref={portalLink} />
       ) : nav.page === "subject" ? (

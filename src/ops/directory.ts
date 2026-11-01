@@ -97,7 +97,7 @@ export const directoryOps = {
   }),
   [OP.membersSet]: op<MembersSetInput, MembersSetOutput>({
     async run(input, ctx) {
-      return { team: setMembersMoved(ctx.db, input, { kind: "owner", id: ctx.caller.id }) };
+      return setMembersMoved(ctx.db, input, { kind: "owner", id: ctx.caller.id });
     },
   }),
   [OP.agentSet]: op<AgentSetInput, AgentSetOutput>({

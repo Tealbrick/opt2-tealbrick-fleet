@@ -19,7 +19,7 @@ test("migration 0011 on 0010 data: every row stays, the revision moves once, no 
   const before = dump();
   const rev = () => Number(db.prepare("SELECT value FROM fleet_meta WHERE key = 'revision'").get()?.value);
   const was = rev();
-  for (const m of migrationFiles().slice(10)) db.exec(`BEGIN;\n${m.sql}\nCOMMIT;`);
+  for (const m of migrationFiles(13).slice(10)) db.exec(`BEGIN;\n${m.sql}\nCOMMIT;`);
   assert.deepEqual(dump(), before, "no row of 0.4.0-dev.2 changed");
   assert.equal(rev(), was + 1, "readers read the feed again in full");
   assert.equal(Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_roles").get()?.n), 0);

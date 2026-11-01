@@ -98,9 +98,8 @@ test("refused and held: the backoff is written, the next look makes no call and 
   assert.equal(Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_access_items").get()?.n), 0);
 });
 
-test("effect: revocable stops; about is about; info stays; not revocable is manual; a kept agent's items stay", async () => {
+test("effect: revocable stops; about is about; info stays; not revocable is manual; an agent the owner did not choose to stop keeps its items (C381)", async () => {
   const { db, ann } = world();
-  db.prepare("UPDATE fleet_agents SET keep_running = 1 WHERE id = ?").run(AGENT_B.id);
   db.prepare("UPDATE fleet_agents SET owner_id = ? WHERE id = ?").run(ann.id, AGENT_B.id);
   const a = { kind: "agent" as const, id: AGENT_A.id };
   const f = fakeStores({
@@ -108,15 +107,16 @@ test("effect: revocable stops; about is about; info stays; not revocable is manu
     knowledge: () => answer([wire("knowledge", { id: "agent_area:a", kind: "agent_area", subject: a, level: "write", revocable: false }), wire("knowledge", { id: "team_grant:g", kind: "team_grant", subject: { kind: "person", id: ann.id }, direction: "about", level: "read" })]),
     connect: () => answer([wire("connect", { id: "account_as_itself:x", kind: "account_as_itself", subject: a, resource: "x" }), wire("connect", { id: "first_contacts:y", kind: "first_contacts", subject: a, resource: "y", level: "info", revocable: false }), wire("connect", { id: "account_as_itself:k", kind: "account_as_itself", subject: { kind: "agent", id: AGENT_B.id }, resource: "k" }), wire("connect", { id: "account_as_me:u", kind: "account_as_me", subject: { kind: "unlinked" }, resource: "u", revocable: false })]),
   });
-  const out = await planPreview(accessEnv(f.callApp), db, "person", ann.id, null, NOW);
+  // C381: only an agent the owner chose to stop has anything that stops; Agent B is not in `stopping`
+  const out = await planPreview(accessEnv(f.callApp), db, "person", ann.id, null, NOW, undefined, [AGENT_A.id]);
   validOut("plan_preview", out);
   const effects = Object.fromEntries(out.stores.flatMap((s) => s.items).map((i) => [i.id, [i.effect, i.label]]));
   assert.deepEqual(effects["agent_area:a"], ["manual", `${AGENT_A.name}: A thing`], "the words name the agent");
   assert.deepEqual(effects["team_grant:g"], ["about", "A thing"]);
   assert.deepEqual(effects["account_as_itself:x"], ["stops", `${AGENT_A.name}: A thing`]);
   assert.deepEqual(effects["first_contacts:y"], ["stays", `${AGENT_A.name}: A thing`]);
-  assert.deepEqual(effects["account_as_itself:k"], ["stays", `${AGENT_B.name}: A thing`], "keep running");
-  assert.equal(effects["runtime:" + AGENT_B.id]?.[0], "stays", "keep running: Portal too");
+  assert.deepEqual(effects["account_as_itself:k"], ["stays", `${AGENT_B.name}: A thing`], "not chosen to stop");
+  assert.equal(effects[`runtime:${AGENT_B.id}`]?.[0], "stays", "not chosen to stop: Portal too");
   assert.equal(out.unlinkedAccounts, 1);
   assert.equal(effects["account_as_me:u"], undefined, "an account with no person is a count, not an item of this person");
 });

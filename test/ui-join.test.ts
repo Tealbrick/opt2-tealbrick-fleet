@@ -156,7 +156,7 @@ describe("Join: one person", () => {
     await next();
     const text = dialog().textContent ?? "";
     assert.match(text, /This adds directory entries\. It gives no access in any app and changes nothing in Portal\./);
-    assert.match(text, /At the end of 2099-12-31 \(UTC\), Governance marks this person as stopped\./);
+    assert.match(text, /At the end of 2099-12-31 \(UTC\), Governance stops the access of this person\. Their agents keep working, and Governance shows that each needs an owner\./);
     assert.match(text, /does not end their own logins/);
     assert.deepEqual(ops(), ["overview_get"], "nothing is sent before Confirm");
     await next("Add person");

@@ -29,7 +29,7 @@ test("the role ops are person ops, appended last; the agent surface did not chan
   // the block is whole, and after it come only the ops of the Tier 2 lanes merged after it (T2-b, then "Cannot hold both", T2-c)
   const at = ids.indexOf("roles_list");
   assert.deepEqual(ids.slice(at, at + ROLE_OPS.length), ROLE_OPS, "appended after every op of the lanes before");
-  assert.deepEqual(ids.slice(at + ROLE_OPS.length), ["round_create", "round_get", "round_verdict", "round_set", "record_export", "exclusions_list", "exclusion_set"]);
+  assert.deepEqual(ids.slice(at + ROLE_OPS.length), ["round_create", "round_get", "round_verdict", "round_set", "record_export", "exclusions_list", "exclusion_set", "refusals_get"]);
   for (const id of ROLE_OPS) assert.equal(specOf(id).audience, "person", id);
   assert.deepEqual(manifest.operations.filter((o) => (o as { audience?: string }).audience !== "person").map((o) => o.id), ["teams_list", "team_get", "directory_get", "resolve_sender", "review_request", "directory_feed"]);
   assert.equal(specOf("role_assign").idempotency, "required");

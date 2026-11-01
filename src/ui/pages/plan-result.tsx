@@ -5,7 +5,7 @@ import { ButtonLink, Notice, Tag } from "@opt2-tealbrick/ui";
 import type { LifecycleSetOutput } from "#kit";
 import { FEATURES } from "./features.ts";
 import { PlanLive } from "./plan-live.tsx";
-import { afterChangeText, floorTone, NOT_CHANGED } from "./words.ts";
+import { afterChangeText, floorTone, NOT_CHANGED, notChangedOf } from "./words.ts";
 
 export function NotChanged({ items = NOT_CHANGED }: { items?: readonly string[] }) {
   return (
@@ -32,7 +32,7 @@ export function PlanResult({ colleague, portalHref, showLine = true, showNotChan
       <div className="tb-stack">
         {showLine ? <p>{colleague.line}</p> : null}
         <Notice tone={floorTone(floor)} role="status">
-          {afterChangeText(floor)}
+          {afterChangeText(floor, colleague.kind)}
         </Notice>
         {notices.map((n) => (
           <Notice key={n} tone="neutral">
@@ -46,7 +46,7 @@ export function PlanResult({ colleague, portalHref, showLine = true, showNotChan
     <div className="tb-stack">
       {showLine ? <p>{colleague.line}</p> : null}
       <Notice tone={floorTone(floor)} role="status">
-        {afterChangeText(floor)}
+        {afterChangeText(floor, colleague.kind)}
       </Notice>
       {notices.map((n) => (
         <Notice key={n} tone="neutral">
@@ -76,7 +76,7 @@ export function PlanResult({ colleague, portalHref, showLine = true, showNotChan
           ) : null}
         </section>
       ) : null}
-      {showNotChanged ? <NotChanged items={plan?.notChanged.length ? plan.notChanged : NOT_CHANGED} /> : null}
+      {showNotChanged ? <NotChanged items={notChangedOf(colleague.kind)} /> : null}
     </div>
   );
 }

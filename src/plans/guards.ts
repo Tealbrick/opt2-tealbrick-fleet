@@ -57,14 +57,13 @@ export function keyEndedAt(db: Db): Map<string, number> {
   return new Map(db.prepare(`SELECT s.agent_id AS id, MAX(s.updated_at) AS at FROM fleet_plan_steps s WHERE ${KEY_STEP} GROUP BY s.agent_id`).all().map((r) => [String(r.id), Number(r.at)]));
 }
 
-/** The paused agents of this entry with no choice made: the words of the plan come from this, what is true now, not from what the plan held when it ran. */
+/** Agents with their own stop, paused, whose key still exists: the words of the plan come from this, what is true now, not from what the plan held when it ran. C381: an owner's stop does not count. */
 export function undecidedKeys(db: Db, kind: string, id: string): Set<string> {
   const rows = db
     .prepare(
-      `SELECT a.id FROM fleet_agents a LEFT JOIN fleet_people p ON p.id = a.owner_id
-       WHERE ${kind === "agent" ? "a.id" : "a.owner_id"} = ? AND a.status = 'paused' AND a.keep_running = 0 AND a.lifecycle IN ('active', 'proposed', 'suspended')
-         AND (a.lifecycle = 'suspended' OR p.lifecycle IN ('suspended', 'leaving', 'archived'))
-         AND NOT EXISTS (SELECT 1 FROM fleet_plan_steps s WHERE s.agent_id = a.id AND ${KEY_STEP} AND s.updated_at >= MAX(a.lifecycle_at, COALESCE(p.lifecycle_at, 0)))`,
+      `SELECT a.id FROM fleet_agents a
+       WHERE ${kind === "agent" ? "a.id" : "a.owner_id"} = ? AND a.status = 'paused' AND a.lifecycle = 'suspended'
+         AND NOT EXISTS (SELECT 1 FROM fleet_plan_steps s WHERE s.agent_id = a.id AND ${KEY_STEP} AND s.updated_at >= a.lifecycle_at)`,
     )
     .all(id);
   return new Set(rows.map((r) => String(r.id)));

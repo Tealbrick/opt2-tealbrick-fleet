@@ -10,13 +10,16 @@ import {
   type LifecycleSetOutput,
   OP,
   type OpId,
+  type RefusalsGetInput,
+  type RefusalsGetOutput,
   type SettingsSetInput,
   type SettingsSetOutput,
   type SummaryGetInput,
   type SummaryGetOutput,
 } from "#kit";
+import { refusalsGet } from "../lifecycle/refusals.ts";
 import { setSettings } from "../lifecycle/settings.ts";
-import { type Actor, assertCap, loadSubject, setDates, setKeepRunning, transition } from "../lifecycle/transitions.ts";
+import { type Actor, assertCap, loadSubject, setDates, transition } from "../lifecycle/transitions.ts";
 import { colleagueDetail, colleaguesList, grantsOf, readTopology, summaryGet } from "../lifecycle/view.ts";
 import { fail } from "../meta.ts";
 import { planCtxOf } from "../plans/context.ts";
@@ -69,8 +72,7 @@ export const lifecycleOps = {
           for (const d of input.decisions ?? []) {
             if (input.kind !== "person") fail("input_invalid", "Decisions belong to a person's change.", 400);
             if (!db.prepare("SELECT 1 FROM fleet_agents WHERE id = ? AND owner_id = ?").get(d.agent, input.id)) fail("agent_not_owned", "This agent does not belong to this person.", 409);
-            if (d.decision === "keep") setKeepRunning(db, d.agent, d.reason ?? "", actor, now);
-            else transition(db, { kind: "agent", id: d.agent, to: "leaving", reason: input.reason ?? "other", actor, noCap: true, grants: grantsOf(db, topology, "agent", d.agent) }, now);
+            transition(db, { kind: "agent", id: d.agent, to: "leaving", reason: input.reason ?? "other", actor, noCap: true, grants: grantsOf(db, topology, "agent", d.agent) }, now);
           }
         };
         const dates = () => {
@@ -119,6 +121,13 @@ export const lifecycleOps = {
       }
       if (input.kind === "person" && input.to === "leaving") kickBarRun(ctx as never, now);
       return { colleague: await colleagueDetail(ctx, input.kind, input.id), transition: made ? { from: made.from, to: made.to, event: made.event } : null };
+    },
+  }),
+  [OP.refusalsGet]: op<RefusalsGetInput, RefusalsGetOutput>({
+    // Read only. N2-4: what Rules refuses, and what starts to refuse with this update, read before Rules is updated.
+    async run(_input, ctx) {
+      assertOwner(ctx.caller);
+      return refusalsGet(ctx);
     },
   }),
   [OP.settingsSet]: op<SettingsSetInput, SettingsSetOutput>({

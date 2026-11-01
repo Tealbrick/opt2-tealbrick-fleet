@@ -275,7 +275,7 @@ describe("a refused role shows both roles in one plain sentence on the Roles pag
     stub.answers.overview_get = ok({
       revision: 1,
       teams: [],
-      people: [{ id: "per_1", name: "Marco", kind: "person", status: "active", trust: "trusted", email: null, title: "", tags: [], handles: [], teams: [], updatedAt: "2026-10-30T09:00:00Z", org: "", relationship: "" }],
+      people: [{ id: "per_1", name: "Marco", kind: "person", status: "active", lifecycle: "active", trust: "trusted", email: null, title: "", tags: [], handles: [], teams: [], updatedAt: "2026-10-30T09:00:00Z", org: "", relationship: "" }],
       agents: [],
     });
     const sentence = "Marco already has Approver (with no end date). A rule says no one may have both Approver and Payer. Choose dates that do not overlap, or end the other role first.";

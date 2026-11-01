@@ -1,13 +1,13 @@
-// "Stop this person's agents and access in Teal Brick" (DESIGN-C380 §10, C126 StepFlow): one step at a time. The first step holds the reason and the
-// choice for each agent (C380 D2): the default is no choice, which only pauses, because offboarding has no quick undo. It says what it does not change
+// A person leaves, or an agent is stopped and removed (DESIGN-C380 §10, C126 StepFlow, C381): one step at a time. A person's change bars that person; their agents keep working.
+// The first step holds the reason and, for a person, the choice for each agent: move to a new owner by default, or an explicit stop. It says what it does not change
 // before the Confirm, has no last-day field, and the last step reads back what the server knows. For one agent there is no choice to make.
 import { callOp } from "@opt2-tealbrick/miniapp-sdk/client";
 import { Field, type FlowStep, Notice, Select, StepFlow, Textarea } from "@opt2-tealbrick/ui";
 import { useRef, useState } from "react";
 import type { ColleagueGetOutput, LifecycleSetInput, LifecycleSetOutput, PlanSendInput } from "#kit";
 import { changeError } from "../common.tsx";
-import { type Choices, canChoose, choiceSummary, choicesReady, decisionsOf } from "./agent-choice.ts";
-import { AgentChoices, useOwners } from "./agent-choices.tsx";
+import { type Choices, canChoose, choiceSummary, choicesReady, decisionsOf, newKeyEffect, stoppingOf } from "./agent-choice.ts";
+import { AgentChoices, defaultsOf, useOwners } from "./agent-choices.tsx";
 import { capButton, useCapConfirm } from "./cap-confirm.ts";
 import { FEATURES } from "./features.ts";
 import { lifecycleError } from "./lifecycle-errors.ts";
@@ -33,6 +33,10 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
   const cap = useCapConfirm();
   const person = c.kind === "person";
   const agents = person ? c.agents.filter(canChoose) : [];
+  const defaults = defaultsOf(c, true);
+  const canMove = owners === null || owners.length > 0;
+  const key = newKeyEffect(agents, choices, defaults, canMove);
+  const stopping = stoppingOf(agents, choices, defaults, canMove);
 
   const send = async (): Promise<boolean | undefined> => {
     if (sent.current || !reason) return undefined;
@@ -48,7 +52,7 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
       if (!mark.current) mark.current = (await callOp<LifecycleSetOutput>("lifecycle_set", input)).colleague;
       if (FEATURES.plans) {
         const plan: PlanSendInput = { kind: c.kind, id: c.id };
-        const decisions = decisionsOf(agents, choices);
+        const decisions = decisionsOf(agents, choices, defaults, canMove);
         if (decisions.length) plan.decisions = decisions;
         if (selected) plan.items = selected;
         if (confirm !== null && markedBefore) plan.confirmCount = confirm;
@@ -90,10 +94,10 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
   const steps: FlowStep[] = result ? [resultStep] : [
     {
       name: "Why",
-      canNext: Boolean(reason) && choicesReady(agents, choices),
+      canNext: Boolean(reason) && choicesReady(agents, choices, defaults, canMove),
       render: () => (
         <div className="tb-stack">
-          <p className="tb-soft">{person ? `This marks ${c.name}'s agents to stop, and lists what to do in Portal to stop them and remove their access in Teal Brick. It does not end their employment or their own logins.` : `This marks ${c.name} to stop, and lists what to do in Portal to stop it and remove its access in Teal Brick.`}</p>
+          <p className="tb-soft">{person ? `This bars ${c.name} from your agents and ends their own access in Teal Brick. ${agents.length > 0 ? "Their agents keep working: choose a new owner for each. " : ""}It does not end their employment or their own logins.` : `This marks ${c.name} to stop, and lists what to do in Portal to stop it and remove its access in Teal Brick.`}</p>
           <Field label="Reason">
             <Select placeholder="Choose a reason" disabled={Boolean(mark.current)} options={reasonOptions("leaving")} value={reason} onValueChange={(v) => { setReason(v as Reason); cap.clear(); }} />
           </Field>
@@ -102,21 +106,21 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
           </Field>
           <Notice tone="neutral">The mark takes effect now. There is no last-day date.</Notice>
           {person && agents.length === 0 ? <p>This person owns no agents.</p> : null}
-          {agents.length && FEATURES.plans ? <AgentChoices agents={agents} choices={choices} onChange={(next) => { setChoices(next); cap.clear(); }} owners={owners} /> : null}
+          {agents.length && FEATURES.plans ? <AgentChoices agents={agents} choices={choices} onChange={(next) => { setChoices(next); cap.clear(); }} owners={owners} defaults={defaults} /> : null}
         </div>
       ),
     },
     ...(FEATURES.preview
       ? [
           {
-            name: "What stops",
-            render: () => <WhatStopsStep kind={c.kind} id={c.id} name={c.name} onChange={setSelected} />,
+            name: person ? "What ends" : "What stops",
+            render: () => <WhatStopsStep kind={c.kind} id={c.id} name={c.name} stopping={stopping} onChange={setSelected} />,
           },
         ]
       : []),
     {
       name: "Confirm",
-      nextLabel: cap.count !== null ? capButton(cap.count) : mark.current ? "Send again" : "Stop",
+      nextLabel: cap.count !== null ? capButton(cap.count) : mark.current ? "Send again" : person ? "Mark as leaving" : "Stop",
       onNext: send,
       render: () => (
         <div className="tb-stack">
@@ -137,11 +141,12 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
             {person ? (
               <div className="kv-row">
                 <dt>Their agents</dt>
-                <dd>{agents.length === 0 ? "None" : FEATURES.plans ? choiceSummary(agents, choices) : `${agents.length}`}</dd>
+                <dd>{agents.length === 0 ? "None" : FEATURES.plans ? choiceSummary(agents, choices, defaults, canMove) : `${agents.length}`}</dd>
               </div>
             ) : null}
           </dl>
-          <Notice tone={beforeChangeTone(c.floor)}>{beforeChangeText(c.floor)}</Notice>
+          {key ? <Notice tone="needs-you">{key}</Notice> : null}
+          <Notice tone={beforeChangeTone(c.floor)}>{beforeChangeText(c.floor, c.kind)}</Notice>
           <NotChanged />
         </div>
       ),
@@ -149,5 +154,5 @@ export function LeaveFlow({ c, portalHref, onClose, onChanged }: { c: Colleague;
     resultStep,
   ];
 
-  return <StepFlow open size="lg" step={Math.min(step, steps.length - 1)} onStepChange={setStep} title={person ? `Stop ${c.name}'s agents and access` : `Stop and remove ${c.name}`} steps={steps} busy={busy} onClose={onClose} onFinish={onClose} />;
+  return <StepFlow open size="lg" step={Math.min(step, steps.length - 1)} onStepChange={setStep} title={person ? `${c.name} leaves` : `Stop and remove ${c.name}`} steps={steps} busy={busy} onClose={onClose} onFinish={onClose} />;
 }

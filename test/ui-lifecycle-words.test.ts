@@ -4,56 +4,77 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { NOT_CHANGED as SERVER_NOT_CHANGED } from "../src/plans/portal-link.ts";
 import { nextInLoop } from "../src/ui/dialog-focus.ts";
-import { canChoose, choiceSummary, choicesReady, decisionsOf, hasOwnStop } from "../src/ui/pages/agent-choice.ts";
+import { type AgentChoice, type Choices, canChoose, choiceOf, choiceSummary, choicesReady, decisionsOf, newKeyEffect, stoppingOf } from "../src/ui/pages/agent-choice.ts";
 import { featuresOf } from "../src/ui/pages/features.ts";
 import { lifecycleError, stopCapOf } from "../src/ui/pages/lifecycle-errors.ts";
 import { currentPlans, liveBanners, pollDelay } from "../src/ui/pages/plan-poll.ts";
 import { subjectFromUrl, subjectHref } from "../src/ui/pages/subject-link.ts";
-import { afterChangeText, age, beforeChangeText, beforeChangeTone, floorTone, NOT_CHANGED, REASONS, reasonLabel, when } from "../src/ui/pages/words.ts";
+import { afterChangeText, age, beforeChangeText, beforeChangeTone, floorTone, NOT_CHANGED, notChangedOf, REASONS, reasonLabel, when } from "../src/ui/pages/words.ts";
 import { withoutIds } from "../src/ui/rule-text.ts";
 import { followSystemTheme } from "../src/ui/theme.ts";
 
 describe("features come from the ops of this build", () => {
   it("on when every op is there", () => {
-    assert.deepEqual(featuresOf(["summary_get", "colleagues_list", "colleague_get", "lifecycle_set", "plan_preview", "findings_list"]), { lifecycle: true, preview: true, differences: true, plans: false, roles: false, rolesInNav: false, exclusions: false, exclusionsInNav: false, rounds: false, record: false, roundsNav: false, recordNav: false, join: false, joinInNav: false });
+    assert.deepEqual(featuresOf(["summary_get", "colleagues_list", "colleague_get", "lifecycle_set", "plan_preview", "findings_list"]), { lifecycle: true, preview: true, refusals: false, differences: true, plans: false, roles: false, rolesInNav: false, exclusions: false, exclusionsInNav: false, rounds: false, record: false, roundsNav: false, recordNav: false, join: false, joinInNav: false });
   });
   it("off when one op is missing", () => {
     assert.equal(featuresOf(["summary_get", "colleagues_list", "colleague_get"]).lifecycle, false);
     assert.equal(featuresOf(["summary_get"]).preview, false);
     assert.equal(featuresOf(["summary_get"]).differences, false);
+    assert.equal(featuresOf(["summary_get"]).refusals, false);
+    assert.equal(featuresOf(["refusals_get"]).refusals, true, "the page of who is refused needs refusals_get (C381)");
     assert.equal(featuresOf(["plan_send", "plan_get", "plan_retry"]).plans, false);
     assert.equal(featuresOf(["plan_send", "plan_get", "plan_retry", "plan_cancel"]).plans, true);
   });
 });
 
-describe("the choice for each agent (D2)", () => {
+describe("the choice for each agent (D2, C381)", () => {
   const agents = [{ id: "a", lifecycle: "active" }, { id: "b", lifecycle: "active" }, { id: "c", lifecycle: "active" }, { id: "d", lifecycle: "active" }];
-  const later = { choice: "later", reason: "", newOwner: "" } as const;
-  it("the default is no choice: nothing goes to plan_send, so the agents are only paused", () => {
-    assert.deepEqual(decisionsOf(agents, {}), []);
-    assert.deepEqual(decisionsOf(agents, { a: later }), []);
-    assert.equal(choicesReady(agents, {}), true);
-    assert.equal(choiceSummary(agents, {}), "4 decided later, 0 stop and remove, 0 move to a new owner, 0 keep running");
+  const named = agents.map((x) => ({ ...x, name: x.id.toUpperCase() }));
+  const D = { owner: "per_def", newKey: true };
+  const pick = (over: Partial<AgentChoice>): AgentChoice => ({ choice: "move", newOwner: "", newKey: true, ...over });
+  it("the default is Move to the default owner with a new key: nothing was chosen yet, and plan_send carries the transfers", () => {
+    assert.deepEqual(choiceOf({}, "a", D), { choice: "move", newOwner: "per_def", newKey: true });
+    assert.deepEqual(decisionsOf(agents, {}, D), agents.map((x) => ({ agent: x.id, decision: "transfer", newOwner: "per_def", newKey: true })));
+    assert.equal(choicesReady(agents, {}, D), true);
+    assert.deepEqual(stoppingOf(agents, {}, D), []);
   });
-  it("sends only what was chosen, in the shape of the op", () => {
-    assert.deepEqual(decisionsOf(agents, { a: { ...later, choice: "stop" }, b: { ...later, choice: "keep", reason: " on call " }, c: { ...later, choice: "transfer", newOwner: "per_2" } }), [
+  it("with no owner to move to, the only starting point is to name one later: nothing goes to plan_send and each agent keeps running", () => {
+    const none = { owner: "", newKey: true };
+    assert.equal(choiceOf({}, "a", none, false).choice, "later");
+    assert.deepEqual(decisionsOf(agents, {}, none, false), []);
+    assert.equal(choicesReady(agents, {}, none, false), true);
+    assert.equal(choiceSummary(agents, {}, none, false), "0 move to a new owner, 0 stop and remove, 4 keep this owner for now");
+  });
+  it("sends only what was chosen, in the shape of the op; a later is left out", () => {
+    const all: Choices = { a: pick({ choice: "stop" }), b: pick({ choice: "move", newOwner: "per_2", newKey: false }), c: pick({ choice: "later" }), d: pick({ choice: "move", newOwner: "per_3" }) };
+    assert.deepEqual(decisionsOf(agents, all, D), [
       { agent: "a", decision: "stop" },
-      { agent: "b", decision: "keep", reason: "on call" },
-      { agent: "c", decision: "transfer", newOwner: "per_2" },
+      { agent: "b", decision: "transfer", newOwner: "per_2", newKey: false },
+      { agent: "d", decision: "transfer", newOwner: "per_3", newKey: true },
     ]);
+    assert.deepEqual(stoppingOf(agents, all, D), ["a"]);
+    assert.equal(choiceSummary(agents, all, D), "2 move to a new owner, 1 of them with a new key, 1 stop and remove, 1 keep this owner for now");
   });
-  it("a keep needs a reason and a transfer a new owner", () => {
-    assert.equal(choicesReady(agents, { a: { ...later, choice: "keep" } }), false);
-    assert.equal(choicesReady(agents, { a: { ...later, choice: "keep", reason: "  " } }), false);
-    assert.equal(choicesReady(agents, { a: { ...later, choice: "transfer" } }), false);
-    assert.equal(choicesReady(agents, { a: { ...later, choice: "transfer", newOwner: "p" } }), true);
+  it("a move needs a new owner; a stop or a later does not", () => {
+    assert.equal(choicesReady(agents, { a: pick({ choice: "move", newOwner: "" }) }, { owner: "", newKey: true }), false);
+    assert.equal(choicesReady(agents, { a: pick({ choice: "move", newOwner: "p" }) }, { owner: "", newKey: true }), false, "the others still have none");
+    assert.equal(choicesReady(agents.slice(0, 1), { a: pick({ choice: "move", newOwner: "p" }) }, { owner: "", newKey: true }), true);
+    assert.equal(choicesReady(agents.slice(0, 1), { a: pick({ choice: "stop" }) }, { owner: "", newKey: true }), true);
+    assert.equal(choicesReady(agents.slice(0, 1), { a: pick({ choice: "later" }) }, { owner: "", newKey: true }), true);
+  });
+  it("the new-key sentence: it names the agents, says they keep working until Portal, and is null with no new key", () => {
+    const text = newKeyEffect(named, {}, D) ?? "";
+    assert.match(text, /^New key: A, B, C, D\. They keep working until you approve in Portal\. Then the old keys stop, and they cannot work until you connect them again\.$/);
+    assert.match(newKeyEffect(named.slice(0, 1), {}, D) ?? "", /^New key: A\. It keeps working until you approve in Portal\./);
+    assert.equal(newKeyEffect(named, {}, { owner: "per_def", newKey: false }), null);
+    assert.equal(newKeyEffect(named, { a: pick({ choice: "stop" }), b: pick({ choice: "later" }), c: pick({ newKey: false }), d: pick({ choice: "stop" }) }, D), null);
   });
   it("who can choose", () => {
     assert.equal(canChoose({ lifecycle: "leaving" }), false);
     assert.equal(canChoose({ lifecycle: "archived" }), false);
     assert.equal(canChoose({ lifecycle: "suspended" }), true);
-    assert.equal(hasOwnStop({ lifecycle: "suspended" }), true);
-    assert.equal(hasOwnStop({ lifecycle: "active" }), false);
+    assert.equal(canChoose({ lifecycle: "active" }), true);
   });
 });
 
@@ -107,10 +128,41 @@ describe("words before a change", () => {
   it("the page's Not changed block is the server's, word for word (the browser cannot import server code)", () => {
     assert.deepEqual([...NOT_CHANGED], [...SERVER_NOT_CHANGED]);
   });
+  it("the first line says that agents keep working; an agent's own block has no such line (C381)", () => {
+    assert.match(NOT_CHANGED[0] ?? "", /^Their agents\. Agents keep working when a person leaves/);
+    assert.deepEqual([...notChangedOf("person")], [...NOT_CHANGED]);
+    assert.deepEqual([...notChangedOf("agent")], NOT_CHANGED.slice(1));
+    assert.ok(notChangedOf("agent").every((t) => !/^Their agents\./.test(t)));
+  });
   it("the Not changed block names the owner's limits", () => {
     assert.ok(NOT_CHANGED.some((t) => /own logins/.test(t)));
     assert.ok(NOT_CHANGED.some((t) => /machine/.test(t)));
     assert.ok(NOT_CHANGED.some((t) => /shared Portal login/.test(t)));
+  });
+});
+
+describe("words before and after a person's change (C381)", () => {
+  const STATES = ["confirmed", "not_confirmed", "not_installed", "older", "not_read"] as const;
+  it("no approval in Portal bars a person: the words never ask for one, and never say that anything stopped", () => {
+    for (const state of STATES) {
+      const t = beforeChangeText({ state }, "person");
+      assert.doesNotMatch(t, /approve/i, state);
+      assert.doesNotMatch(t, /\bstopped\b/i, state);
+    }
+  });
+  it("without Rules working, the sender bar in Connect is what still holds; with Rules, the refusal is by, for and to the person", () => {
+    for (const state of ["not_installed", "older", "not_read"] as const) assert.match(beforeChangeText({ state }, "person"), /sender bar in Connect still drops their messages/);
+    for (const state of ["confirmed", "not_confirmed"] as const) assert.match(beforeChangeText({ state }, "person"), /calls by, for and to this person are refused/);
+  });
+  it("an agent's words are the old ones by default", () => {
+    assert.equal(beforeChangeText({ state: "confirmed" }), beforeChangeText({ state: "confirmed" }, "agent"));
+    assert.match(beforeChangeText({ state: "not_installed" }), /nothing stops until you approve in Portal/);
+  });
+  it("after a confirmed change the person's sentence says by, for and to; the agent's says calls stop", () => {
+    const floor = { state: "confirmed", text: "Rules has this change.", version: "0.7.0", feedRevision: 2, entries: 1, lastGateAt: null, gateNote: null } as Parameters<typeof afterChangeText>[0];
+    assert.match(afterChangeText(floor, "person"), /calls by, for and to this person are refused in about 2 minutes/);
+    assert.match(afterChangeText(floor, "agent"), /calls stop in about 2 minutes/);
+    assert.match(afterChangeText(floor), /calls stop in about 2 minutes/);
   });
 });
 
@@ -150,7 +202,8 @@ describe("refusals of lifecycle_set", () => {
     const e = { code: "stop_cap_reached", details: { count: 6 } };
     assert.equal(stopCapOf(e), 6);
     assert.match(lifecycleError(e, fallback).message, /^This makes 6 people and agents stopped in the last 10 minutes/);
-    assert.doesNotMatch(lifecycleError(e, fallback).message, /You stopped/, "the count holds cascades and verdicts, not only what this owner pressed");
+    assert.match(lifecycleError(e, fallback).message, /This limit catches mistakes\. It does not stop a program that runs in this browser\.$/);
+    assert.doesNotMatch(lifecycleError(e, fallback).message, /You stopped/, "the count holds explicit stops and verdicts, not only what this owner pressed");
   });
   it("a cap with no count (the old People form) shows the server's sentence and offers no number", () => {
     const e = { code: "stop_cap_reached", message: "5 were stopped in the last 10 minutes. Open this person's page to confirm this stop." };
@@ -160,6 +213,10 @@ describe("refusals of lifecycle_set", () => {
   it("another error is no cap and gets the shared wording", () => {
     assert.equal(stopCapOf({ code: "internal" }), null);
     assert.equal(lifecycleError({ code: "internal" }, fallback).message, "Something went wrong.");
+  });
+  it("the codes of the owner cascade are gone: they get the shared wording (C381)", () => {
+    for (const code of ["owner_stopped", "use_transfer", "agent_stopped_itself"]) assert.equal(lifecycleError({ code, message: "old sentence" }, fallback).message, "Something went wrong.", code);
+    assert.equal(lifecycleError({ code: "agents_undecided", message: "Name a new owner for these agents first, or stop them: Henry." }, fallback).message, "Name a new owner for these agents first, or stop them: Henry.");
   });
   it("a guard shows the server's sentence; an unknown code never shows its own text", () => {
     assert.equal(lifecycleError({ code: "lifecycle_stale", message: "This entry changed since you looked. Open it again." }, fallback).message, "This entry changed since you looked. Open it again.");

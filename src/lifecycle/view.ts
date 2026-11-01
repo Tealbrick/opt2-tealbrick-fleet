@@ -14,7 +14,8 @@ import { cleanTopology, type DecodedTopology, decodeTopology } from "../topology
 import type { Trust } from "../trust.ts";
 import { lastLeavingSnapshot, stopsSince, subjectEvents } from "./events.ts";
 import { type FloorContext, type FloorView, floorView, readFloorStatus } from "./floor.ts";
-import { getSettings } from "./settings.ts";
+import { reachOf } from "./moved.ts";
+import { activeDefaultOwner, getSettings } from "./settings.ts";
 import { type Effective, effectiveAgent, effectivePerson, type Lifecycle, NEXT, type SubjectKind } from "./states.ts";
 import { CAP_WINDOW_MS, capState, coolingEnd, DAY_MS, type Grant, guardOf, loadSubject } from "./transitions.ts";
 
@@ -28,7 +29,7 @@ const runtimeOf = (status: unknown): "running" | "paused" | "gone" => (status ==
 function lineOf(kind: SubjectKind, lifecycle: Lifecycle, effective: Effective, runtime: Row["runtime"], validFrom: unknown, keyEnded = false): string {
   if (effective === "not_started") return `Starts on ${String(isoOf(validFrom)).slice(0, 10)}`;
   if (kind === "person") {
-    return { proposed: "New, not reviewed", active: "Active", suspended: "Stop asked", leaving: "Leaving", archived: "Closed" }[effective];
+    return { proposed: "New, not reviewed", active: "Active", suspended: "Access stopped", leaving: "Leaving", archived: "Closed" }[effective];
   }
   if (runtime === "gone") return lifecycle === "archived" ? "Closed" : "Not listed in Portal";
   if (lifecycle === "archived") return "Closed, but Portal lists it again";
@@ -49,7 +50,7 @@ export function loadColleagues(db: Db, now: number): Loaded {
   const plans = latestPlanStates(db);
   const keysGone = keyEndedAt(db);
   const moved = ownerChangedAt(db);
-  const owners = new Map<string, { name: string; lifecycle: string | null; at: number }>();
+  const owners = new Map<string, { name: string; lifecycle: string | null }>();
   const rows: Row[] = [];
   const person = (p: Db_): Row => {
     const lifecycle = p.lifecycle as Lifecycle;
@@ -67,22 +68,20 @@ export function loadColleagues(db: Db, now: number): Loaded {
       findings: findingsOf({ kind: "person", lifecycle, effective, runtime: null, hasOwner: false, ownerLifecycle: null, reason: p.lifecycle_reason === null ? null : String(p.lifecycle_reason), at: Number(p.lifecycle_at), validUntil: p.valid_until === null ? null : Number(p.valid_until), noCard: false, handleConflict: false, senderBarOpen: lifecycle === "leaving" && senderBarOpen(db, String(p.id)), planState: plans.get(`person:${String(p.id)}`) ?? null, unnamedAccounts: lifecycle === "leaving" ? unnamedAccounts(db, String(p.id), now) : 0 }, now),
       validFrom: isoOf(p.valid_from),
       validUntil: isoOf(p.valid_until),
-      keepRunning: false,
       at: isoOf(p.lifecycle_at),
     };
   };
   for (const p of db.prepare("SELECT id, name, kind, lifecycle, lifecycle_reason, lifecycle_at, valid_from, valid_until, trust FROM fleet_people").all()) {
-    owners.set(String(p.id), { name: String(p.name), lifecycle: p.lifecycle === null ? null : String(p.lifecycle), at: Number(p.lifecycle_at) });
+    owners.set(String(p.id), { name: String(p.name), lifecycle: p.lifecycle === null ? null : String(p.lifecycle) });
     if (p.kind === "person" && p.lifecycle !== null) rows.push(person(p));
   }
-  for (const a of db.prepare("SELECT id, name, status, trust, owner_id, lifecycle, lifecycle_reason, lifecycle_at, valid_from, valid_until, keep_running, migrated_note FROM fleet_agents").all()) {
+  for (const a of db.prepare("SELECT id, name, status, trust, owner_id, lifecycle, lifecycle_reason, lifecycle_at, valid_from, valid_until, migrated_note FROM fleet_agents").all()) {
     const lifecycle = a.lifecycle as Lifecycle;
     const owner = a.owner_id === null ? undefined : owners.get(String(a.owner_id));
-    const keepRunning = Number(a.keep_running) === 1;
-    const effective = effectiveAgent({ lifecycle, validFrom: a.valid_from === null ? null : Number(a.valid_from), keepRunning }, owner?.lifecycle ?? null);
+    const effective = effectiveAgent({ lifecycle, validFrom: a.valid_from === null ? null : Number(a.valid_from) });
     const runtime = runtimeOf(a.status);
     // Only after this stop began: an agent brought back has a new key.
-    const keyEnded = (keysGone.get(String(a.id)) ?? -1) >= Math.max(Number(a.lifecycle_at), owner?.at ?? 0);
+    const keyEnded = (keysGone.get(String(a.id)) ?? -1) >= Number(a.lifecycle_at);
     const findings = findingsOf(
       { kind: "agent", lifecycle, effective, runtime, hasOwner: owner !== undefined, ownerLifecycle: owner?.lifecycle ?? null, reason: a.lifecycle_reason === null ? null : String(a.lifecycle_reason), at: Number(a.lifecycle_at), validUntil: a.valid_until === null ? null : Number(a.valid_until), noCard: a.migrated_note === "no_card", handleConflict: conflicts.has(String(a.id)), planState: plans.get(`agent:${String(a.id)}`) ?? null, keyEnded, keyAfterTransfer: moved.has(String(a.id)) && (keysGone.get(String(a.id)) ?? -1) < (moved.get(String(a.id)) as number) },
       now,
@@ -100,7 +99,6 @@ export function loadColleagues(db: Db, now: number): Loaded {
       findings,
       validFrom: isoOf(a.valid_from),
       validUntil: isoOf(a.valid_until),
-      keepRunning,
       at: isoOf(a.lifecycle_at),
     });
   }
@@ -161,10 +159,19 @@ function portalUrl(ctx: OpContext): string | null {
   return link && at > 0 ? link.slice(0, at) : null;
 }
 
-const LABELS: Readonly<Record<Lifecycle, Partial<Record<Lifecycle, string>>>> = {
+type Labels = Readonly<Record<Lifecycle, Partial<Record<Lifecycle, string>>>>;
+const AGENT_LABELS: Labels = {
   proposed: { active: "Mark as reviewed", suspended: "Stop now", leaving: "Stop and remove access" },
   active: { suspended: "Stop now", leaving: "Stop and remove access" },
   suspended: { active: "Resume", leaving: "Stop and remove access" },
+  leaving: { active: "Undo", proposed: "Bring back", archived: "Close" },
+  archived: { proposed: "Bring back" },
+};
+/** C381: a person's change bars that person. Their agents keep working, so no word here says stop for them. */
+const PERSON_LABELS: Labels = {
+  proposed: { active: "Mark as reviewed", suspended: "Stop their access for now", leaving: "Mark as leaving" },
+  active: { suspended: "Stop their access for now", leaving: "Mark as leaving" },
+  suspended: { active: "Give their access back", leaving: "Mark as leaving" },
   leaving: { active: "Undo", proposed: "Bring back", archived: "Close" },
   archived: { proposed: "Bring back" },
 };
@@ -175,7 +182,7 @@ export async function colleagueDetail(ctx: OpContext, kind: SubjectKind, id: str
   const row = loaded.byId.get(`${kind}:${id}`);
   const s = loadSubject(db, kind, id);
   if (!row || !s) return fail(kind === "agent" ? "agent_not_found" : "person_not_found", "No such entry.", 404);
-  const extra = db.prepare(kind === "agent" ? "SELECT role AS title, lifecycle_reason, lifecycle_note, keep_reason FROM fleet_agents WHERE id = ?" : "SELECT title, lifecycle_reason, lifecycle_note, NULL AS keep_reason FROM fleet_people WHERE id = ?").get(id) as Db_;
+  const extra = db.prepare(kind === "agent" ? "SELECT role AS title, lifecycle_reason, lifecycle_note FROM fleet_agents WHERE id = ?" : "SELECT title, lifecycle_reason, lifecycle_note FROM fleet_people WHERE id = ?").get(id) as Db_;
   const teams = db
     .prepare("SELECT t.id, t.name, m.role FROM fleet_members m JOIN fleet_teams t ON t.id = m.team_id WHERE m.kind = ? AND m.subject_id = ? ORDER BY t.name COLLATE NOCASE, t.id LIMIT 50")
     .all(kind, id)
@@ -188,7 +195,7 @@ export async function colleagueDetail(ctx: OpContext, kind: SubjectKind, id: str
   const plan = built.steps.length > 0 || s.lifecycle === "suspended" || s.lifecycle === "leaving" ? built : null;
   const actions = NEXT[s.lifecycle]
     .map((to) => {
-      const label = LABELS[s.lifecycle][to];
+      const label = (s.kind === "person" ? PERSON_LABELS : AGENT_LABELS)[s.lifecycle][to];
       if (!label) return null;
       const blocked = guardOf(db, s, to, { waive: "x" }, now);
       return { to, label, blocked: blocked?.message ?? null, needsWaive: to === "archived" && guardOf(db, s, to, {}, now)?.code === "cooling_not_over" };
@@ -198,7 +205,6 @@ export async function colleagueDetail(ctx: OpContext, kind: SubjectKind, id: str
   const days = getSettings(db).coolingDays;
   const close = s.lifecycle === "leaving" ? { coolingDays: days, coolingEndsAt: isoOf(coolingEnd(s, days)), coolingOver: coolingEnd(s, days) <= now, limits: ["Stores that were not read, and access no version can list, are not checked by this close."] } : null;
   const notices: string[] = [];
-  if (row.keepRunning) notices.push("The person who left may still hold this agent's key.");
   // N3-9: bringing someone back does not lift the bar.
   if (kind === "person" && (row.lifecycle === "active" || row.lifecycle === "proposed") && db.prepare("SELECT 1 FROM fleet_plan_steps s JOIN fleet_plans p ON p.id = s.plan_id WHERE p.subject_kind = 'person' AND p.subject_id = ? AND s.item_kind = 'channel_sender' AND s.state = 'done' LIMIT 1").get(id)) notices.push("Messages from this person may still be dropped. Remove the sender bar in Connect, on the Accounts page.");
   if (kind === "agent" && row.lifecycle === "archived" && row.runtime === "gone") notices.push("A closed agent stays closed. New work needs a new agent.");
@@ -210,7 +216,8 @@ export async function colleagueDetail(ctx: OpContext, kind: SubjectKind, id: str
     rev: s.rev,
     reason: extra.lifecycle_reason === null ? null : String(extra.lifecycle_reason),
     note: extra.lifecycle_note === null ? null : String(extra.lifecycle_note),
-    keepReason: extra.keep_reason === null || extra.keep_reason === undefined ? null : String(extra.keep_reason),
+    defaultOwner: kind === "person" ? ((d) => (d && d.id !== id ? d : null))(activeDefaultOwner(db)) : null,
+    reach: kind === "person" ? reachOf(db, id) : [],
     teams,
     agents: owned.slice(0, 400),
     actions,
@@ -223,6 +230,12 @@ export async function colleagueDetail(ctx: OpContext, kind: SubjectKind, id: str
   };
 }
 
+/** QA D6: the line says what really happens. An alert goes to Inbox when Inbox is there. A banner is the way when it is not. */
+const alertsReadiness = (inbox: boolean) =>
+  inbox
+    ? ({ id: "alerts", state: "ok", text: "Alerts go to Inbox. If Inbox does not take one, it shows as a banner in Governance.", path: null } as const)
+    : ({ id: "alerts", state: "fallback", text: "Inbox is not installed, so alerts show as a banner in Governance. No message is sent.", path: null } as const);
+
 export async function summaryGet(ctx: OpContext, now = Date.now()): Promise<SummaryGetOutput> {
   const db = ctx.db;
   const { rows } = loadColleagues(db, now);
@@ -232,7 +245,8 @@ export async function summaryGet(ctx: OpContext, now = Date.now()): Promise<Summ
   const topology = readTopology(ctx);
   const maxRev = Number(db.prepare("SELECT MAX(lifecycle_rev) AS r FROM (SELECT lifecycle_rev FROM fleet_agents WHERE lifecycle IN ('suspended', 'leaving') OR valid_from IS NOT NULL UNION ALL SELECT lifecycle_rev FROM fleet_people WHERE lifecycle IN ('suspended', 'leaving') OR valid_from IS NOT NULL)").get()?.r ?? 0);
   const floor = await floorFor(ctx, maxRev, running > 0, now);
-  const noOwner = agents.filter((r) => r.findings.some((f: Finding) => f.code === "no_owner")).length;
+  // C381: an owner who is not active counts here too: the agent works on and needs an owner.
+  const noOwner = agents.filter((r) => r.findings.some((f: Finding) => f.code === "no_owner" || f.code === "owner_inactive")).length;
   const rulesOn = floor.state === "confirmed" || floor.state === "not_confirmed";
   const { used, limit } = capState(db, now);
   return {
@@ -259,8 +273,8 @@ export async function summaryGet(ctx: OpContext, now = Date.now()): Promise<Summ
     readiness: [
       { id: "rules", state: rulesOn ? "ok" : "missing", text: rulesOn ? "Rules & Approvals can stop a call early." : floor.text, path: null },
       { id: "consent", state: topology ? "ok" : "missing", text: topology ? "Governance can see who has access." : "Turn on 'See who has access' for Governance in Portal.", path: null },
-      { id: "owners", state: noOwner === 0 ? "ok" : "missing", text: noOwner === 0 ? "Every agent has an owner." : noOwner === 1 ? "1 agent has no owner." : `${noOwner} agents have no owner.`, path: "/people-and-agents" },
-      { id: "alerts", state: "fallback", text: "Alerts show as a banner in Governance. No message is sent.", path: null },
+      { id: "owners", state: noOwner === 0 ? "ok" : "missing", text: noOwner === 0 ? "Every agent has an active owner." : noOwner === 1 ? "1 agent needs an owner. It keeps working." : `${noOwner} agents need an owner. They keep working.`, path: "/people-and-agents" },
+      alertsReadiness(floorCtx(ctx).companionTargets().includes("inbox")),
     ],
     stoppedToday: stopsSince(db, now - DAY_MS),
     stopCap: { limit, windowMinutes: CAP_WINDOW_MS / 60_000, used },

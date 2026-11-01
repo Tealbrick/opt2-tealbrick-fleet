@@ -120,18 +120,16 @@ export function lastLeavingSnapshot(db: Db, kind: string, id: string): Record<st
 const STOP_EVENT = "((kind = 'transition' AND to_state IN ('suspended', 'leaving')) OR (kind = 'changed' AND to_state = 'not_started'))";
 
 /**
- * Who was stopped since `since` (ms): each entry once. N2-3: a stop on a person counts the agents it stops with them, and a `blocked` verdict counts: it is a stop in the floor.
+ * Who was stopped since `since` (ms): each entry once. C381: a stop on a person counts that person. N2-3: an explicit stop of an agent counts, and a `blocked` verdict counts: it is a stop in the floor.
  * The one count behind the cap and the "stopped today" banner. It limits accidents. A script that can call these ops can also send the confirm.
  */
 export function stoppedSince(db: Db, since: number): Set<string> {
   const rows = db
     .prepare(
       `SELECT subject_kind || ':' || subject_id AS k FROM fleet_lifecycle_events WHERE ${STOP_EVENT} AND at > ?
-       UNION SELECT 'agent:' || a.id FROM fleet_lifecycle_events e JOIN fleet_agents a ON a.owner_id = e.subject_id
-         WHERE e.subject_kind = 'person' AND e.kind = 'transition' AND e.to_state IN ('suspended', 'leaving') AND e.at > ? AND a.status <> 'removed' AND a.keep_running = 0 AND a.lifecycle <> 'archived'
        UNION SELECT subject_kind || ':' || subject_id FROM fleet_reviews WHERE verdict = 'blocked' AND subject_id <> '' AND COALESCE(decided_at, created_at) > ?`,
     )
-    .all(since, since, since);
+    .all(since, since);
   return new Set(rows.map((r) => String(r.k)));
 }
 export const stopsSince = (db: Db, since: number): number => stoppedSince(db, since).size;

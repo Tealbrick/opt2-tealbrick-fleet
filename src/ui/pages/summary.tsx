@@ -123,7 +123,7 @@ function SummaryBody({ data, onRead }: { data: SummaryGetOutput; onRead: () => v
       ) : null}
       <div className="cards stats">
         <Stat label="Agents" value={String(data.agents.total)} note={`${data.agents.running} running, ${data.agents.paused} paused, ${data.agents.notReviewed} not reviewed`} href="./people-and-agents" />
-        <Stat label="No owner" value={String(data.noOwner)} note={data.settings.defaultOwner ? `Default owner: ${data.settings.defaultOwner.name}` : "No default owner"} />
+        <Stat label="Need an owner" value={String(data.noOwner)} note={data.settings.defaultOwner ? `Default owner: ${data.settings.defaultOwner.name}` : "No default owner"} />
         <Stat label="Can write or send" value={data.canWriteOrSend === null ? "Not known" : String(data.canWriteOrSend)} note={data.canWriteOrSend === null ? "Turn on See who has access for Governance in Portal." : undefined} />
         <Stat label="Differences" value={String(data.differences)} note="From what Governance read." />
       </div>

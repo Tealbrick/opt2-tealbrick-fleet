@@ -7,6 +7,8 @@ export type Features = {
   lifecycle: boolean;
   /** "See what would stop" */
   preview: boolean;
+  /** Who is refused (C381, N2-4) */
+  refusals: boolean;
   /** Access > Differences */
   differences: boolean;
   /** The Roles page has a route (C380 T2-a): the role ops are in this build. */
@@ -67,6 +69,7 @@ export function featuresOf(ops: readonly string[], rolesRowsPassed: boolean = RO
   return {
     lifecycle: has("summary_get", "colleagues_list", "colleague_get", "lifecycle_set"),
     preview: has("plan_preview"),
+    refusals: has("refusals_get"),
     differences: has("findings_list"),
     roles: has(...ROLE_OPS),
     rolesInNav: has(...ROLE_OPS) && rolesRowsPassed,

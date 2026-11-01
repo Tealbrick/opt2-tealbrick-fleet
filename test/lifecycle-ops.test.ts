@@ -7,7 +7,7 @@ import { handlers, manifest } from "../src/app.ts";
 import { type DirectoryFeed, directoryFeed } from "../src/feed.ts";
 import { leanDirectory, leanResolveSender } from "../src/lean.ts";
 import { assignDefaultOwner, setSettings } from "../src/lifecycle/settings.ts";
-import { DAY_MS, setDates, setKeepRunning } from "../src/lifecycle/transitions.ts";
+import { DAY_MS, setDates } from "../src/lifecycle/transitions.ts";
 import { tickDates } from "../src/lifecycle/validity.ts";
 import { colleaguesList, loadColleagues } from "../src/lifecycle/view.ts";
 import { NOT_APPLIED } from "../src/plans/portal-link.ts";
@@ -121,7 +121,7 @@ test("A42: during a leaving, an agent reads nothing new: directory_get and resol
   // the hook facts and the feed keep the real status: they narrow what Rules allows
   assert.deepEqual(store.resolveSender(db, "slack:UANN00001").teams, []);
   assert.equal(feedOf(db).contacts.find((c) => c.id === ann.id)?.status, "departed");
-  setKeepRunning(db, AGENT_A.id, "x", OWNER, T0);
+  store.setAgent(db, { agent: AGENT_A.id, owner: store.setPerson(db, { name: "Bea" }, T0).id }, T0);
   set(db, "person", ann.id, "archived", { waive: WAIVE });
   assert.equal(look().lean, "departed");
   assert.equal(look().res.contact?.status, "departed");
@@ -184,9 +184,13 @@ test("A1b: colleague_get carries actions with the guard's words, the plan, the f
   assert.equal(person.floor.state, "not_installed");
   assert.equal(stateOf(db, "agent", AGENT_A.id), "leaving");
   assert.ok(person.history.some((h: { to: string }) => h.to === "leaving"));
-  // the person decision: keep needs a reason; not owned is refused
+  // the person decision (C381): only `stop` is a decision of lifecycle_set; keep is gone from the schema; not owned is refused
   const pat = store.setPerson(db, { name: "Pat" }, T0);
-  await assert.rejects(run("lifecycle_set", { kind: "person", id: pat.id, decisions: [{ agent: AGENT_A.id, decision: "keep", reason: "x" }] }, c), refused("agent_not_owned", 409));
+  const decide = (decision: string) => ({ kind: "person", id: pat.id, decisions: [{ agent: AGENT_A.id, decision }] });
+  assert.equal(validateAgainstSchema(specOf("lifecycle_set").input, decide("stop") as Json).ok, true);
+  assert.equal(validateAgainstSchema(specOf("lifecycle_set").input, decide("keep") as Json).ok, false, "keep is not a decision any more");
+  assert.equal(validateAgainstSchema(specOf("lifecycle_set").input, decide("transfer") as Json).ok, false, "transfer goes in plan_send");
+  await assert.rejects(run("lifecycle_set", decide("stop"), c), refused("agent_not_owned", 409));
   await assert.rejects(run("lifecycle_set", { kind: "person", id: pat.id }, c), refused("input_invalid", 400));
   await assert.rejects(run("lifecycle_set", { kind: "person", id: pat.id, to: "suspended" }, c), refused("reason_required", 400));
   await assert.rejects(run("colleague_get", { kind: "person", id: "psn_x" }, c), refused("person_not_found", 404));
@@ -239,7 +243,7 @@ test("A4 + summary: the owner's ops run in every state; the summary is schema va
   assert.equal(off.readiness.find((r: { id: string }) => r.id === "consent").state, "missing");
   assert.equal(off.canWriteOrSend, null);
   assert.equal(off.stores.find((r: { product: string }) => r.product === "rules").state, "not_installed");
-  assert.equal(off.noOwner, 1);
+  assert.equal(off.noOwner, 2, "C381: counts both codes: B has no owner, and A's owner is stopped (owner_inactive)");
 });
 
 test("S2-7: the summary shows the limit and the stops of today", async () => {
@@ -293,7 +297,7 @@ test("a person's handle stays the person's: the agent shows a finding (S3-15)", 
   assert.ok(loadColleagues(db, T0).byId.get(`agent:${AGENT_A.id}`)?.findings.some((f) => f.code === "agent_handle_conflict"));
 });
 
-test("S2-7: stop decisions with no stop of their own pass the cap; a date and a stop in one call pass it once", async () => {
+test("S2-7: an explicit stop decision counts in the cap (C381); a date and a stop in one call pass it once", async () => {
   const { db, ann } = world();
   const c = ctxOf(db, PERSON_CALLER);
   store.setAgent(db, { agent: AGENT_B.id, owner: ann.id }, T0);
@@ -325,12 +329,12 @@ test("lifecycle_set: a stale revision and a refusal late in the call leave nothi
   assert.deepEqual([stateOf(b.db, "person", b.ann.id), stateOf(b.db, "agent", AGENT_A.id), events(), store.revision(b.db)], ["active", "active", n, rev]);
 });
 
-test("A42: stop and keep decisions show nothing to an agent either", async () => {
+test("A42: stop decisions show nothing to an agent either", async () => {
   const { db, ann } = world();
   store.setAgent(db, { agent: AGENT_B.id, owner: ann.id }, T0);
   const look = () => JSON.stringify(leanDirectory(db));
   const open = look();
-  await run("lifecycle_set", { kind: "person", id: ann.id, to: "leaving", reason: "security", decisions: [{ agent: AGENT_A.id, decision: "stop" }, { agent: AGENT_B.id, decision: "keep", reason: "Runs payroll" }] }, ctxOf(db, PERSON_CALLER));
+  await run("lifecycle_set", { kind: "person", id: ann.id, to: "leaving", reason: "security", decisions: [{ agent: AGENT_A.id, decision: "stop" }] }, ctxOf(db, PERSON_CALLER));
   assert.equal(JSON.parse(look()).revision > JSON.parse(open).revision, true);
   const strip = (t: string) => ({ ...JSON.parse(t), revision: 0 });
   assert.deepEqual(strip(look()), strip(open), "the same answer apart from the revision");

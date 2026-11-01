@@ -34,8 +34,8 @@ export interface FindingInput {
   keyAfterTransfer?: boolean | undefined;
 }
 
-/** D2: one approval stops access, and a paused agent's key is refused. The key itself stays until the owner chooses. Said the same on the row, the plan and the finding. */
-export const KEY_STILL_EXISTS = "Paused. The key still exists until you choose.";
+/** An agent with its own stop: a paused agent's key is refused, and the key itself stays until the owner chooses. Said the same on the row, the plan and the finding. */
+export const KEY_STILL_EXISTS = "Paused. The key still exists. Resume this agent, or use Stop and remove access.";
 
 const f = (code: string, text: string): Finding => ({ code, text });
 
@@ -55,13 +55,13 @@ export function findingsOf(r: FindingInput, now: number): Finding[] {
   if (agent && (r.lifecycle === "active" || (r.lifecycle === "proposed" && r.reason !== null)) && !stoppedIntent && r.runtime === "paused") out.push(f("paused_outside", "This agent is paused in Portal, but Governance does not say stop."));
   if (agent && r.lifecycle === "proposed" && r.runtime === "running") out.push(f("running_unapproved", "This agent works and is not reviewed."));
   if (agent && (r.lifecycle === "active" || r.lifecycle === "proposed") && r.runtime === "gone") out.push(f("card_gone", "Portal no longer lists this agent."));
-  if (agent && r.lifecycle !== "archived" && r.runtime !== "gone" && !r.hasOwner) out.push(f("no_owner", "This agent has no owner. Name an owner."));
-  if (agent && r.hasOwner && r.lifecycle !== "archived" && r.ownerLifecycle !== null && r.ownerLifecycle !== "active") out.push(f("owner_inactive", "The owner of this agent is not active. Name another owner."));
+  if (agent && r.lifecycle !== "archived" && r.runtime !== "gone" && !r.hasOwner) out.push(f("no_owner", "This agent has no owner. It keeps working. Name an owner."));
+  if (agent && r.hasOwner && r.lifecycle !== "archived" && r.ownerLifecycle !== null && r.ownerLifecycle !== "active") out.push(f("owner_inactive", "This agent needs an owner: its owner is not active. It keeps working. Name a new owner."));
   if (r.lifecycle === "leaving" && !r.planState) out.push(f("leaving_no_plan", r.reason === "migrated" ? "This entry was marked as departed before plans existed. Open it and make a plan." : "This entry is leaving, and no plan was made. Open it and make a plan."));
   if (r.kind === "person" && r.lifecycle === "leaving" && (r.unnamedAccounts ?? 0) > 0) out.push(f("unlinked_account", `${r.unnamedAccounts} accounts in Connect have no person. Check them. If none is this person's, accept this with a reason.`));
   if (agent && r.effective === "suspended" && r.runtime === "paused" && !r.keyEnded) out.push(f("key_not_decided", KEY_STILL_EXISTS));
   if (r.senderBarOpen) out.push(f("sender_bar_open", "Messages from this person can still reach agents. Connect has not shown the bar yet."));
-  if (agent && r.keyAfterTransfer && r.lifecycle !== "archived" && r.runtime !== "gone") out.push(f("key_after_transfer", "The owner changed. The old owner may still hold this agent's key until a plan with a new key is approved in Portal."));
+  if (agent && r.keyAfterTransfer && r.lifecycle !== "archived" && r.runtime !== "gone") out.push(f("key_after_transfer", "The owner changed, and the old owner may still hold this agent's key. Make a new key. The agent must then be connected again."));
   if (r.planState === "expired" && (r.lifecycle === "suspended" || r.lifecycle === "leaving")) out.push(f("plan_expired", "A stop request ran out of time before you approved it. Nothing in it was applied. Ask again."));
   if (r.lifecycle === "suspended" && r.at + SUSPENDED_TOO_LONG_MS < now) out.push(f("suspended_too_long", "This entry has been stopped for more than 30 days. Decide what comes next."));
   if ((r.lifecycle === "active" || r.lifecycle === "proposed") && r.validUntil !== null && r.validUntil <= now) out.push(f("date_passed", "The end date has passed. The stop waits for the next check, or for the limit on stops to clear."));

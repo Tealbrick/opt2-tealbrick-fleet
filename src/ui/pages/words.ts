@@ -29,12 +29,12 @@ export const NOTE_HINT = "Optional. Do not write health, pay or disciplinary det
 
 /** What a stop does not change (§9 "Not true"). It goes on each Confirm, not only in docs. */
 export const NOT_CHANGED: readonly string[] = [
+  "Their agents. Agents keep working when a person leaves, unless you choose Stop this agent for one.",
   "Their own logins, such as Slack, Google or a bank.",
-  "The agent's machine and its native tools.",
+  "An agent's machine and its native tools.",
   "Copies of data that were already made.",
   "Other people with the shared Portal login. Change the Portal login if they had it.",
-  "Engine steps after an agent step.",
-  "Scheduled posts before you approve.",
+  "For an agent you stop: engine steps after an agent step, and scheduled posts before you approve.",
   "An agent can still send to a Slack direct message id it already knows. Governance bars what comes in from that person, not this.",
   "Channels or groups the person is still in. The sender bar does not cover them.",
   "Messages read through tool accounts.",
@@ -44,11 +44,27 @@ export const NOT_CHANGED: readonly string[] = [
   "Email, Teams and Discord. Governance bars Buzz, Slack and Telegram handles only. Use the Accounts page in Connect for the others.",
 ];
 
+/** The block for one entry: the line about a person's agents is for a person. */
+export const notChangedOf = (kind: "person" | "agent"): readonly string[] => (kind === "person" ? NOT_CHANGED : NOT_CHANGED.slice(1));
+
 /**
  * What may be said BEFORE a change, from what Governance can read. Rules can have confirmed only a change already made,
  * and Governance cannot read the hook switch, so this never says that anything stopped.
  */
-export function beforeChangeText(floor: Pick<Floor, "state">): string {
+export function beforeChangeText(floor: Pick<Floor, "state">, kind: "person" | "agent" = "agent"): string {
+  // C381: a person is barred by Rules and by the sender bar in Connect. No approval in Portal bars a person.
+  if (kind === "person") {
+    switch (floor.state) {
+      case "not_installed":
+        return "Rules & Approvals is not installed, so it does not refuse calls for this person. The sender bar in Connect still drops their messages.";
+      case "older":
+        return "Rules & Approvals is too old to refuse calls for this person. Update it. The sender bar in Connect still drops their messages.";
+      case "not_read":
+        return "Governance could not read Rules & Approvals, so calls for this person may go on. The sender bar in Connect still drops their messages.";
+      default:
+        return "If the Rules hook is on, calls by, for and to this person are refused in about 2 minutes. Governance cannot see that switch: check it in Portal. The next screen says if Rules has this change.";
+    }
+  }
   switch (floor.state) {
     case "not_installed":
       return "Rules & Approvals adds an early stop. It is not installed, so nothing stops until you approve in Portal.";
@@ -65,9 +81,9 @@ export function beforeChangeText(floor: Pick<Floor, "state">): string {
 export const beforeChangeTone = (floor: Pick<Floor, "state">): "needs-you" | "neutral" => (floor.state === "older" || floor.state === "not_read" ? "needs-you" : "neutral");
 
 /** After a change: what the server says Rules has, plus what Governance cannot see. The gate note gets a readable time. */
-export function afterChangeText(floor: Floor): string {
+export function afterChangeText(floor: Floor, kind: "person" | "agent" = "agent"): string {
   const parts = [floor.text];
-  if (floor.state === "confirmed") parts.push("If its hook is on, calls stop in about 2 minutes. Governance cannot see that switch: check it in Portal.");
+  if (floor.state === "confirmed") parts.push(kind === "person" ? "If its hook is on, calls by, for and to this person are refused in about 2 minutes. Governance cannot see that switch: check it in Portal." : "If its hook is on, calls stop in about 2 minutes. Governance cannot see that switch: check it in Portal.");
   if (floor.rulesHolds) parts.push(floor.rulesHolds);
   if (floor.gateNote && floor.lastGateAt) parts.push(`Rules has not checked a call since ${when(floor.lastGateAt)}.`);
   return parts.join(" ");

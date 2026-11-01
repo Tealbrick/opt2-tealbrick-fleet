@@ -53,6 +53,8 @@ export interface Person {
   org: string;
   relationship: string;
   status: PersonStatus;
+  /** owner side only: no agent op reads a Person. Null for an outside agent. */
+  lifecycle: "proposed" | "active" | "suspended" | "leaving" | "archived" | null;
   tags: string[];
   handles: string[];
   teams: TeamRef[];
@@ -149,6 +151,7 @@ function toPerson(db: Db, r: Row): Person {
     org: r.org === undefined ? "" : String(r.org),
     relationship: r.relationship === undefined ? "" : String(r.relationship),
     status: r.status as PersonStatus,
+    lifecycle: (r.lifecycle ?? null) as Person["lifecycle"],
     tags: tags(r.tags),
     handles: handlesOf(db, id),
     teams: teamsOf(db, "person", id),
@@ -332,6 +335,8 @@ export interface PersonInput {
   status?: PersonStatus;
   tags?: string[];
   handles?: string[];
+  /** QA D11: the owner read that this name is in the directory, and this is another person. */
+  sameName?: boolean;
   /** A person's end date (C380 T2-d, a contractor). Saved in the same transaction as the person. A date that has passed is refused; null clears it. Not for an outside agent. */
   validUntil?: string | null;
 }
@@ -376,6 +381,14 @@ export function setPerson(db: Db, input: PersonInput, now = Date.now()): Person 
     } else {
       const count = Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_people").get()?.n);
       if (count >= LIMITS.people) fail("limit_reached", `a workspace has at most ${LIMITS.people} people`, 409);
+      // QA D11: the same name twice made a second person with no word. Two people may share a name, as in Join: different emails say so, or the owner does.
+      if ((input.kind ?? "person") === "person" && !input.sameName) {
+        const email = input.email?.toLowerCase() ?? null;
+        for (const o of db.prepare("SELECT email FROM fleet_people WHERE kind = 'person' AND lower(name) = lower(?)").all(name)) {
+          const other = o.email === null ? null : String(o.email).toLowerCase();
+          if (email === null || other === null || email === other) fail("person_name_taken", `A person named ${name} is in the directory. To add another person with this name, press Add a second person.`, 409);
+        }
+      }
       id = `psn_${ulid(now)}`;
       const source = input.source ?? "owner";
       const extra = input.org !== undefined || input.relationship !== undefined;

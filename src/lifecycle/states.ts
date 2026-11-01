@@ -26,7 +26,6 @@ export const NEXT: Readonly<Record<Lifecycle, readonly Lifecycle[]>> = {
 };
 
 export const STOP_STATES: readonly Lifecycle[] = ["suspended", "leaving"];
-const OWNER_STOPS: readonly (string | null)[] = ["suspended", "leaving", "archived"];
 
 /** A person's directory status (the 0.3.2 field) is derived from the lifecycle. */
 export const personStatusOf = (l: Lifecycle): "active" | "departed" => (l === "active" || l === "suspended" ? "active" : "departed");
@@ -40,10 +39,12 @@ export function effectivePerson(p: { lifecycle: Lifecycle; validFrom: number | n
   return p.lifecycle;
 }
 
-/** An agent whose owner is stopped is effectively `suspended` unless its keep-running tick is set. Lifts by itself when the owner's state lifts. */
-export function effectiveAgent(a: { lifecycle: Lifecycle; validFrom: number | null; keepRunning: boolean }, ownerLifecycle: string | null): Effective {
+/**
+ * C381: an agent's state is its own. A person's change bars that person; it never changes what their agents may do. So the owner is not an input here:
+ * only the agent's own stop, and a start date that has not come.
+ */
+export function effectiveAgent(a: { lifecycle: Lifecycle; validFrom: number | null }): Effective {
   if (a.lifecycle === "suspended" || a.lifecycle === "leaving" || a.lifecycle === "archived") return a.lifecycle;
-  if (OWNER_STOPS.includes(ownerLifecycle) && !a.keepRunning) return "suspended";
   if (a.validFrom !== null) return "not_started";
   return a.lifecycle;
 }

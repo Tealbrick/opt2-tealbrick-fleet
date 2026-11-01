@@ -2,6 +2,27 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
+## 0.4.0-dev.101 - 2026-11-01
+
+C381 and C383: a person's change bars that person. Their agents keep working. DEV only until the release lead promotes it.
+
+Behaviour:
+- An owner's state no longer changes an agent's effective state or its floor. Agents have only their own stop and their own start date. Rules' feed contract is unchanged; `agents[].lifecycle` and `agents[].floor` no longer follow the owner. The cap counts a person as one entry.
+- A person who leaves is barred: sender bar, Rules refusal by, for and to them, their own accounts. Nothing in Portal is needed for this.
+- Leave: per owned agent, the default is Move to a new owner, set to the workspace default owner when one is set. Stop this agent stays an explicit choice. Name a new owner later keeps the agent running, with a finding that it needs an owner. The old "no choice = pause", the first approval that paused agents, and Keep running are gone.
+- New key (D16, N2-1): offered in the move step, on by default for a person leaving. The agent runs until the owner approves in Portal. Then the old key stops and the agent must be connected again. The owner reads this before any approval. With the key off, finding key_after_transfer stays until a new key exists. Agent page: Make a new key.
+- A plain owner change is no longer refused when the old owner is stopped: it lifts nothing now. The same finding shows the key.
+- Resuming an agent is no longer tied to its owner. Mark as reviewed still needs an active owner: a review names who answers for the agent. Close of a person still needs each agent moved or stopped.
+- Members: a person's change says what they gain and lose, in the page and in History. A person's page lists what their teams and roles reach. Give says the same for a role.
+- Words: the leave page, See what would change, Stop their access for now, the Not changed block.
+
+Upgrade: read before Rules & Approvals 0.7 is updated (N2-4):
+- With this version nobody's agent stops because its owner left, through the migration or later. Migration 0014 states this, corrects the header of 0008, and moves the revision. A Core pause approved earlier stays: finding paused_outside.
+- What starts to refuse once Rules 0.7 reads the feed, as D3 A: each blocked entry, and each person who was marked departed before 0.4 (now `leaving`, reason `migrated`).
+- How to read it first: (1) on Governance 0.3.2, read People: the rows with `departed`, and each Blocked trust tag on People and Agents. This is the whole list. (2) After the Governance update and before the Rules update, open the new page Who is refused: section "Starts to refuse with this update". Rules 0.6 does not read the floor, so nothing there is refused yet. Update Governance first, Rules second. Rules 0.7 on Governance 0.3.2 already refuses blocked and departed contacts.
+
+Defects closed: QA D5 (the cap says it limits mistakes, not a program), D6 (the alert line says what happens with and without Inbox), D7 (the key is offered at each move), D11 (the same name twice asks first, Add a second person; different emails pass, as in Join), D12 (Tab stays in a dialog with radio groups). C382 S3: Back to teams waits for a write; owner choices read the lifecycle, not the old `status`.
+
 ## 0.4.0-dev.100 - 2026-11-01
 
 C382 batch 4, DEV only. No function or CLI change; ui 0.7.1.

@@ -81,7 +81,7 @@ function GiveMany({ role, onClose, reload }: { role: Role; onClose: () => void; 
   const agents = directory.data?.agents;
   const who = useMemo(
     () => [
-      ...(people ?? []).filter((p) => p.kind === "person" && p.status === "active").map((p) => ({ id: subjectKey("person", p.id), name: p.name, note: "Person" })),
+      ...(people ?? []).filter((p) => p.kind === "person" && p.lifecycle === "active").map((p) => ({ id: subjectKey("person", p.id), name: p.name, note: "Person" })),
       ...(agents ?? []).filter((a) => a.status !== "removed").map((a) => ({ id: subjectKey("agent", a.id), name: a.name, note: "Agent" })),
     ],
     [people, agents],
@@ -139,6 +139,7 @@ function GiveMany({ role, onClose, reload }: { role: Role; onClose: () => void; 
       panel={
         <>
           <Notice tone="neutral">{GRANT_LINE}</Notice>
+          <p className="tb-hint">A person gains what Rules allows this role, and an agent that works with many people can treat them by it. When the role ends they lose this. Their agents do not change.</p>
           <Field label="Why">
             <Select options={REASONS} value={reason} onValueChange={(v) => setReason(v as Reason)} placeholder="Choose a reason" />
           </Field>

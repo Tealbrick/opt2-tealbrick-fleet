@@ -253,23 +253,31 @@ test("every step of a round is in the chain; the accessOf view is the shadow cop
   assert.equal(w.db.prepare("SELECT requested_why FROM fleet_reviews WHERE requested_by_kind = 'owner'").get()?.requested_why, "Review round.", "nor into the request");
 });
 
-test("a verdict plan has no Portal step: an entry that is stopped, or whose owner leaves, is refused with its verdict undone; a queued removal is dropped when the entry is stopped later", () => {
+test("a verdict plan has no Portal step: an entry that is stopped, or whose agent has its own stop, is refused with its verdict undone; an owner who leaves is not a stop of the agent (C381); a queued removal is dropped when the entry is stopped later", () => {
   const w = makeWorld();
   w.connect.add(personItem(w, "channel_sender:s1", "channel_sender"));
   listed(w, w.connect, "connect", { kind: "person", id: w.ann.id });
   const r = createRound(w.db, OWNER, { title: "Ann", scope: "chosen", subjects: [{ kind: "person", id: w.ann.id }] }, w.clock.t);
   const v = viewOf(w, r.id, "person", w.ann.id);
   const tick = [{ product: "connect", id: "channel_sender:s1", digest: v.access[0]?.digest }];
-  // Ann owns Henry, and Ann is leaving: Henry is effectively stopped, so a plan for Ann would have a Portal step
-  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  // Ann owns Henry, and Henry has its own stop: a plan for Ann would have a Portal step (C381: Ann leaving alone has none, see below)
+  set(w.db, "agent", HENRY, "leaving", {}, w.clock.t);
   const stale = viewOf(w, r.id, "person", w.ann.id);
   assert.throws(() => decide(w.db, OWNER, verdict(w, r.id, "person", w.ann.id, { remove: [{ product: "connect", id: "channel_sender:s1", digest: stale.access[0]?.digest }], snapshotDigest: stale.snapshotDigest, accessDigest: stale.accessDigest }), w.clock.t), refused("plan_needs_portal", 409));
   assert.deepEqual([countsOf(w.db, r.id).open, w.db.prepare("SELECT COUNT(*) AS n FROM fleet_plans").get()?.n, w.db.prepare("SELECT COUNT(*) AS n FROM fleet_reviews WHERE status = 'done'").get()?.n], [1, 0, 0], "no verdict, no plan");
   void tick;
-  // quiet on good: without the stop the same call passes (Ann comes back)
-  set(w.db, "person", w.ann.id, "active", {}, w.clock.t + 1);
+  // quiet on good: without the stop the same call passes (Henry comes back)
+  set(w.db, "agent", HENRY, "active", {}, w.clock.t + 1);
   const again = viewOf(w, r.id, "person", w.ann.id);
   assert.ok(decide(w.db, OWNER, verdict(w, r.id, "person", w.ann.id, { remove: [{ product: "connect", id: "channel_sender:s1", digest: again.access[0]?.digest }] }), w.clock.t).plan);
+  // C381: the owner leaving is no stop of Henry, so it adds no Portal step: the same call passes while Ann is leaving
+  const x = makeWorld();
+  x.connect.add(personItem(x, "channel_sender:s1", "channel_sender"));
+  listed(x, x.connect, "connect", { kind: "person", id: x.ann.id });
+  const rx = createRound(x.db, OWNER, { title: "Ann", scope: "chosen", subjects: [{ kind: "person", id: x.ann.id }] }, x.clock.t);
+  set(x.db, "person", x.ann.id, "leaving", {}, x.clock.t);
+  const vx = viewOf(x, rx.id, "person", x.ann.id);
+  assert.ok(decide(x.db, OWNER, verdict(x, rx.id, "person", x.ann.id, { remove: [{ product: "connect", id: "channel_sender:s1", digest: vx.access[0]?.digest }], snapshotDigest: vx.snapshotDigest, accessDigest: vx.accessDigest }), x.clock.t).plan, "no Core step for a person marked leaving");
 });
 
 test("a queued removal whose entry is stopped by the time it is sent is dropped, and says so", () => {
@@ -282,7 +290,7 @@ test("a queued removal whose entry is stopped by the time it is sent is dropped,
   decide(w.db, OWNER, verdict(w, r.id, "person", w.ann.id, { remove: [{ product: "connect", id: "channel_sender:s1", digest: v.access[0]?.digest }] }), w.clock.t);
   assert.equal(countsOf(w.db, r.id).removalQueued, 1);
   w.db.prepare("UPDATE fleet_plans SET state = 'cancelled', closed_at = 1 WHERE id = ?").run(blocker);
-  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t + 1);
+  set(w.db, "agent", HENRY, "leaving", {}, w.clock.t + 1);
   assert.deepEqual(sendQueued(w.db, OWNER, r.id, w.clock.t), { planned: 0, queued: 0 });
   const item = roundDetail(w.db, r.id, w.clock.t).items[0];
   assert.equal(item?.removal?.state, "dropped");
