@@ -5,9 +5,9 @@ import type { ColleagueGetOutput, ColleaguesListOutput, SummaryGetOutput } from 
 import { readStates } from "../access/client.ts";
 import { ACCESS_AFTER_LEAVE, accessAfterLeave, openDifferences } from "../access/differences.ts";
 import { type AccessTarget, TARGET_NAMES } from "../access/items.ts";
-import { CONNECT_UNSEEN_MS, type Finding, findingsOf, KEY_STILL_EXISTS, stampFinding } from "../findings.ts";
+import { ACCESS_REMOVED, CONNECT_UNSEEN_MS, type Finding, findingsOf, KEY_STILL_EXISTS, stampFinding } from "../findings.ts";
 import { fail, revision } from "../meta.ts";
-import { keyEndedAt, keyReplacedAt, latestPlanStates, newKeyAsked, ownerChangedAt, ownerWithheld, senderBarOpen, unnamedAccounts } from "../plans/guards.ts";
+import { accessRemovedAt, keyEndedAt, keyReplacedAt, latestPlanStates, newKeyAsked, ownerChangedAt, ownerWithheld, senderBarOpen, unnamedAccounts } from "../plans/guards.ts";
 import { type PlanAgent, portalPlan } from "../plans/portal-link.ts";
 import { exclusionFindings } from "../roles/exclusions.ts";
 import { cleanTopology, type DecodedTopology, decodeTopology } from "../topology-slice.ts";
@@ -26,7 +26,7 @@ const isoOf = (ms: unknown): string | null => (ms === null || ms === undefined ?
 const runtimeOf = (status: unknown): "running" | "paused" | "gone" => (status === "active" ? "running" : status === "paused" ? "paused" : "gone");
 
 /** One line, no pills: the three axes in plain words. */
-function lineOf(kind: SubjectKind, lifecycle: Lifecycle, effective: Effective, runtime: Row["runtime"], validFrom: unknown, keyEnded = false, needsConnect: "yes" | "not_seen" | null = null): string {
+function lineOf(kind: SubjectKind, lifecycle: Lifecycle, effective: Effective, runtime: Row["runtime"], validFrom: unknown, keyEnded = false, needsConnect: "yes" | "not_seen" | null = null, removed = false): string {
   if (effective === "not_started") return `Starts on ${String(isoOf(validFrom)).slice(0, 10)}`;
   if (kind === "person") {
     return { proposed: "New, not reviewed", active: "Active", suspended: "Access stop asked", leaving: "Leaving", archived: "Closed" }[effective];
@@ -37,7 +37,7 @@ function lineOf(kind: SubjectKind, lifecycle: Lifecycle, effective: Effective, r
   if (effective === "proposed") return runtime === "running" ? "New: working, not reviewed" : "New, not reviewed: paused";
   if (effective === "active") return runtime === "running" ? "Working" : "Paused in Portal";
   const word = effective === "leaving" ? "Stop and remove" : "Stop";
-  return runtime === "running" ? `${word} asked: still running` : effective === "leaving" ? "Stopped, removal waits for you" : keyEnded ? "Stopped" : KEY_STILL_EXISTS;
+  return runtime === "running" ? `${word} asked: still running` : effective === "leaving" ? (removed ? ACCESS_REMOVED : "Stopped, removal waits for you") : keyEnded ? "Stopped" : KEY_STILL_EXISTS;
 }
 
 interface Loaded {
@@ -53,6 +53,7 @@ export function loadColleagues(db: Db, now: number, topology?: DecodedTopology |
   const conflicts = new Set(db.prepare("SELECT DISTINCT h.agent_id FROM fleet_agent_handles h JOIN fleet_handles p ON p.handle = h.handle").all().map((r) => String(r.agent_id)));
   const plans = latestPlanStates(db);
   const keysGone = keyEndedAt(db);
+  const accessGone = accessRemovedAt(db);
   const moved = ownerChangedAt(db);
   const replaced = keyReplacedAt(db);
   const withheld = ownerWithheld(db);
@@ -108,7 +109,7 @@ export function loadColleagues(db: Db, now: number, topology?: DecodedTopology |
       runtime,
       trust: a.trust as Trust,
       owner: owner ? { id: String(a.owner_id), name: owner.name } : null,
-      line: lineOf("agent", lifecycle, effective, runtime, a.valid_from, keyEnded, needsConnect),
+      line: lineOf("agent", lifecycle, effective, runtime, a.valid_from, keyEnded, needsConnect, (accessGone.get(String(a.id)) ?? -1) >= Number(a.lifecycle_at)),
       findings,
       validFrom: isoOf(a.valid_from),
       validUntil: isoOf(a.valid_until),

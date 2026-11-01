@@ -190,6 +190,22 @@ test("e. a stop decision: that agent goes leaving with one offboard step and is 
   assert.equal(w.core.data.agents[SALES]?.keys, 1);
 });
 
+test("e2. a stop decision that Portal applied: the agent's line says its access is gone and no longer that removal waits (C383)", async () => {
+  const w = makeWorld();
+  set(w.db, "person", w.ann.id, "leaving", {}, w.clock.t);
+  const out = await run("plan_send", { kind: "person", id: w.ann.id, decisions: [{ agent: HENRY, decision: "stop" }] }, ctxOf(w));
+  const id = out.plans[0].id as string;
+  w.clock.t = Date.now() + 1000; // plan_send stamps the stop with the real clock
+  await w.tick(id);
+  const line = () => loadColleagues(w.db, w.clock.t).byId.get(`agent:${HENRY}`)?.line;
+  assert.equal(line(), "Stop and remove asked: still running");
+  approveAndDeliver(w, String(w.plan(id).draft_key), HENRY);
+  await w.tick(id);
+  store.syncAgents(w.db, [{ id: HENRY, name: "Henry", mode: "free", status: "paused" }] as never, w.clock.t);
+  await w.tick(id);
+  assert.equal(line(), "Stopped. Portal removed its access and key.");
+});
+
 test("f. the cap: a person with ten agents counts as one; ten explicit stop decisions count ten", async () => {
   const ten = (w: World) => {
     const ids = Array.from({ length: 10 }, (_, i) => agentId(100 + i));

@@ -50,6 +50,9 @@ export const CONNECT_UNSEEN_MS = 14 * 86_400_000;
 /** An agent with its own stop: a paused agent's key is refused, and the key itself stays until the owner chooses. Said the same on the row, the plan and the finding. */
 export const KEY_STILL_EXISTS = "Paused. The key still exists. Resume this agent, or use Stop and remove access.";
 
+/** C383: an agent's stop that Portal applied, from its own plan or its owner's: nothing is left to prepare. */
+export const ACCESS_REMOVED = "Stopped. Portal removed its access and key.";
+
 const f = (code: string, text: string): Finding => ({ code, text });
 
 // A finding may know since when it holds, so an acceptance older than that does not cover it. It is kept beside the finding, not in it: the
