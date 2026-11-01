@@ -2,6 +2,20 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
+## 0.4.1 - 2026-11-01
+
+From the review of the 0.4.0 cut (C383). DEV only: no stable until Martin decides on D11. No migration. Updates from 0.2.x, 0.3.x, 0.4.0 and the 0.4.0 dev versions.
+
+- A delete no longer lifts a refusal. person_delete is refused for a blocked person or outside agent (`blocked_stays`: record a new review first) and for a person whose start date has not come (`lifecycle_open`: remove the date first). A person whose start date has not come can also not become an outside agent.
+- A person whose start date has not come keeps their handles, as a stopped person does (`handles_stay`). Adding one still works.
+- A wrong handle no longer waits until a person is brought back. On a person that Rules refuses by their handles, Save first says why the handle stays, and then asks why it is wrong. With a reason the handle comes off, Rules stops refusing that handle, the other handles and the stop stay, and the person's history says so, without the handle. A sender bar already set in Connect stays until the owner removes it there. New input on person_set: `handleFix`. A blocked outside agent keeps its handles: it has no page or history here, so the way out is a new review.
+- Any person Rules refuses who has no handle now has the finding `no_handle_to_bar`. It was only for a person marked leaving.
+- A handle of an agent that Rules refuses cannot become a person's (`handle_taken`). The feed gives a person's handle to the person, so this would have lifted the refusal on that handle.
+- An agent that Portal removed and then reinstated with a new key, or gave app access again, reads "Paused. Portal shows a new key or app access for it. Governance still says stop." with finding `access_back`, not "Portal removed its access and key". A new request asks Portal to remove it again. This needs the See who has access consent and a whole list: with neither, Governance cannot see the new key and the line stays.
+- "Still has access after leaving" does not count an agent's read of its owner's personal memory once Core removed its access since the stop or Portal no longer lists it. Knowledge lists what the directory says the agent would reach; only a call with a key can read it. This reading also holds after a Close. A new key or app access in Portal ends it: the agent's own area, Buzz identity and owner's memory count again.
+
+Known limit, D11: OPEN (C384b). All apps share one web address. It is not accepted: the acceptance in C384 was withdrawn. With a live session of an app in the same browser, a script on another app's page can do what the owner can do on that app's page, including reading its data and changing app-level scopes under Portal's connection. Portal approvals stay out of reach because Portal is another site. QA A17b proved the Fleet read and stop path live. A full evaluation runs first (threat paths, real exposure, smaller controls). Fleet 0.4.x does not go to stable until Martin decides.
+
 ## 0.4.0 - 2026-11-01
 
 The final version of the 0.4.0-dev series: C380 lifecycle and C381, a person's change bars that person and their agents keep working. See the dev entries below for what is in it. New in this cut, from the C383 QA run and the C381 review:
@@ -20,7 +34,7 @@ The final version of the 0.4.0-dev series: C380 lifecycle and C381, a person's c
 
 Upgrade: Core's companion gate refuses this version until the apps it reads are new enough. Update, where installed: bridge 0.2.14, Connect 0.7.14, Rules 0.7.0, Knowledge 0.1.31, Task Board 0.1.17, Evolution 0.4.3, and then Governance 0.4.0. So the page Who is refused cannot be read before Rules 0.7. Read People on Governance 0.3.2 first: the rows with `departed`, and each Blocked trust tag on People and Agents. That is the whole list that starts to refuse with Rules 0.7. An older note here said to read Who is refused before Rules; that order cannot run. Rules 0.7 on Governance 0.3.2 passes the gate, and it refuses those entries at its first feed read, so read the list before you update Rules.
 
-Known limit, D11 (C384, corrected by C384a): all apps share one web address. With a live session of an app in the same browser, a script on another app's page can do what the owner can do on that app's page, including reading its data and changing app-level scopes under Portal's connection. Portal approvals stay out of reach because Portal is another site. QA A17b proved the Fleet read and stop path live. Each app gets its own web address as the next platform job; this limit stays until then.
+Known limit, D11: OPEN (C384b), see 0.4.1. The acceptance this note first gave (C384, C384a) was withdrawn. The limit itself is the same: all apps share one web address.
 
 ## 0.4.0-dev.103 - 2026-11-01
 

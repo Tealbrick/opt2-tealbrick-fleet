@@ -22,9 +22,13 @@ function PersonDialog({ person, onClose, reload }: { person: Person | "new"; onC
   const outside = p?.kind === "outside_agent";
   // QA D11: the name of someone in the directory. Two people can share a name, so the owner may go on, but only after reading this.
   const [sameName, setSameName] = useState(false);
+  // C383 review: Governance refused to take a handle off someone Rules refuses by it. If the handle is wrong, the owner says why, and that goes on the history.
+  const [fixAsked, setFixAsked] = useState(false);
+  const [fixWhy, setFixWhy] = useState("");
   const save = async () => {
     const input: PersonSetInput = { name, email: email.trim() || null, title, status, tags: csv(tags), handles: csv(handles) };
     if (sameName) input.sameName = true;
+    if (fixAsked && fixWhy.trim()) input.handleFix = fixWhy.trim();
     if (outside) {
       input.org = org;
       input.relationship = relationship;
@@ -33,13 +37,15 @@ function PersonDialog({ person, onClose, reload }: { person: Person | "new"; onC
     try {
       await callOp("person_set", input);
     } catch (e) {
-      if ((e as { code?: unknown } | null)?.code === "person_name_taken") setSameName(true);
+      const code = (e as { code?: unknown } | null)?.code;
+      if (code === "person_name_taken") setSameName(true);
+      if (code === "handles_stay" && !outside) setFixAsked(true);
       throw e;
     }
     await reload();
   };
   return (
-    <EditDialog title={p ? `Edit ${p.name}` : "New person"} onClose={onClose} save={save} saveLabel={sameName ? "Add a second person" : undefined}>
+    <EditDialog title={p ? `Edit ${p.name}` : "New person"} onClose={onClose} save={save} saveLabel={sameName ? "Add a second person" : fixAsked ? "Take the handle off" : undefined}>
       <Field label="Name">
         <TextInput
           value={name}
@@ -88,6 +94,11 @@ function PersonDialog({ person, onClose, reload }: { person: Person | "new"; onC
       <Field label="Channel handles" hint="One per line: buzz:npub1…, slack:U01234ABC, telegram:123456789.">
         <Textarea rows={4} value={handles} onChange={(e) => setHandles(e.target.value)} />
       </Field>
+      {fixAsked ? (
+        <Field label="Why is this handle wrong?" hint="Rules stops refusing this handle, and this goes on the person's history. A sender bar set in Connect stays until you remove it there, on the Accounts page.">
+          <TextInput value={fixWhy} maxLength={200} onChange={(e) => setFixWhy(e.target.value)} />
+        </Field>
+      ) : null}
     </EditDialog>
   );
 }

@@ -158,5 +158,6 @@ test("S3-5: an agent's own memory area is not access held once Core removed its 
   w.core.apply(String(w.plan(id).draft_key));
   w.core.deliver();
   await w.tick(id);
+  w.db.prepare("UPDATE fleet_agents SET status = 'paused' WHERE id = ?").run(SALES); // what the slice writes
   assert.equal(accessAfterLeave(w.db).has(`agent:${SALES}`), false);
 });

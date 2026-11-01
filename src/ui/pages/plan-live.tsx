@@ -111,7 +111,7 @@ export async function sendPlan(input: PlanSendInput): Promise<string | null> {
   }
 }
 
-export function PlanLive({ kind, id, since, portalHref, sendFailure, onEnded, removed = false }: { kind: "person" | "agent"; id: string; since?: string | null; portalHref?: string; sendFailure?: string | null; onEnded?: () => void; removed?: boolean }) {
+export function PlanLive({ kind, id, since, portalHref, sendFailure, onEnded, removed = false, accessBack = false }: { kind: "person" | "agent"; id: string; since?: string | null; portalHref?: string; sendFailure?: string | null; onEnded?: () => void; removed?: boolean; accessBack?: boolean }) {
   const [plans, setPlans] = useState<Plan[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -204,6 +204,14 @@ export function PlanLive({ kind, id, since, portalHref, sendFailure, onEnded, re
       ) : (
         latest.map((p) => <PlanCard key={p.id} plan={p} busy={busy} onRetry={(pid) => void act("plan_retry", pid)} onCancel={(pid) => void act("plan_cancel", pid)} portalHref={portalHref} />)
       )}
+      {accessBack && latest.length > 0 && latest.every((p) => p.closedAt !== null) ? (
+        <div className="tb-row">
+          <span className="tb-soft">Portal shows a new key or app access for this agent.</span>
+          <Button disabled={busy} onClick={() => void prepare()}>
+            Ask Portal to remove it again
+          </Button>
+        </div>
+      ) : null}
       {latest[0]?.notChanged.length ? <NotChanged items={latest[0].notChanged} /> : null}
     </div>
   );

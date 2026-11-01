@@ -52,6 +52,15 @@ export interface DecodedTopology {
   truncated?: true;
 }
 
+/**
+ * C383 review: agents with a working key or app access in a whole picture. A cut list or no list says nothing, so it gives nobody: Governance cannot see them there.
+ * Core removes both when it offboards an agent, so one of these after that means Portal gave it back: Reinstate, then a new pairing or grant.
+ */
+export function accessShown(top: DecodedTopology | null | undefined): ReadonlySet<string> {
+  if (!top || top.truncated) return new Set();
+  return new Set([...top.connections.filter((c) => c.status === "active").map((c) => c.agt), ...top.edges.map((e) => e.agent)]);
+}
+
 const CRUD_LETTERS: readonly [string, Crud][] = [
   ["c", "create"],
   ["r", "read"],

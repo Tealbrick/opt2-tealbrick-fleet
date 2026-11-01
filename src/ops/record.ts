@@ -7,6 +7,7 @@ import { findingsList } from "../access/differences.ts";
 import { appendEvent } from "../lifecycle/events.ts";
 import { loadColleagues, portalReadState, readTopology } from "../lifecycle/view.ts";
 import { buildRecord } from "../record/index.ts";
+import { accessShown } from "../topology-slice.ts";
 import { assertOwner } from "./lifecycle.ts";
 import { op } from "./op.ts";
 
@@ -18,7 +19,7 @@ export const recordOps = {
       assertOwner(ctx.caller);
       const now = Date.now();
       const rows = loadColleagues(ctx.db, now, readTopology(ctx as SdkOpContext)).rows.map((r) => ({ kind: r.kind, id: r.id, name: r.name, at: r.at, findings: r.findings }));
-      const findings = findingsList(ctx.db, rows, portalReadState(readTopology(ctx as SdkOpContext)), now);
+      const findings = findingsList(ctx.db, rows, portalReadState(readTopology(ctx as SdkOpContext)), now, accessShown(readTopology(ctx as SdkOpContext)));
       const made = await buildRecord(ctx.db, input, { findings, version: VERSION, now });
       appendEvent(ctx.db, {
         subject: { kind: "workspace", id: "", name: "Governance" },

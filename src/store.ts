@@ -6,7 +6,8 @@
 import { handleChannel, normalizeHandle, ulid } from "@opt2-tealbrick/manifest";
 import type { Db, SliceAgent } from "@opt2-tealbrick/miniapp-sdk";
 import { appendEvent } from "./lifecycle/events.ts";
-import { beforePersonDelete, initPerson, kindChanged, setDates, statusRequested } from "./lifecycle/transitions.ts";
+import { effectiveAgent, floorOf, type Lifecycle } from "./lifecycle/states.ts";
+import { beforePersonDelete, initPerson, kindChanged, personFloor, setDates, statusRequested } from "./lifecycle/transitions.ts";
 import { bump, fail, revision } from "./meta.ts";
 import { ownerWithheldFor } from "./plans/guards.ts";
 import { endAssignmentsOf } from "./roles/roles.ts";
@@ -339,11 +340,21 @@ export interface PersonInput {
   handles?: string[];
   /** QA D11: the owner read that this name is in the directory, and this is another person. */
   sameName?: boolean;
+  /** C383 review: why a handle comes off an entry Rules refuses by its handles. Only a wrong handle: the refusal on that handle ends. It goes on the entry's history. */
+  handleFix?: string;
   /** A person's end date (C380 T2-d, a contractor). Saved in the same transaction as the person. A date that has passed is refused; null clears it. Not for an outside agent. */
   validUntil?: string | null;
 }
 
 const OWNER = { kind: "owner", id: null } as const;
+
+/** An agent Rules refuses now that Connect gives this handle. */
+function agentFloorOnHandle(db: Db, handle: string): boolean {
+  return db
+    .prepare("SELECT a.lifecycle, a.valid_from, a.trust, a.migrated_note FROM fleet_agent_handles h JOIN fleet_agents a ON a.id = h.agent_id WHERE h.handle = ?")
+    .all(handle)
+    .some((a) => floorOf(effectiveAgent({ lifecycle: a.lifecycle as Lifecycle, validFrom: a.valid_from === null ? null : Number(a.valid_from) }), a.trust as Trust, a.migrated_note === "no_card"));
+}
 
 export function setPerson(db: Db, input: PersonInput, now = Date.now()): Person {
   return db.transaction(() => {
@@ -421,14 +432,26 @@ export function setPerson(db: Db, input: PersonInput, now = Date.now()): Person 
       setDates(db, { kind: "person", id, validUntil: input.validUntil, actor: OWNER }, now);
     }
     if (handles) {
+      const held = new Set(handlesOf(db, id as string));
       for (const h of handles) {
         const owner = db.prepare("SELECT person_id FROM fleet_handles WHERE handle = ?").get(h);
         if (owner && owner.person_id !== id) fail("handle_taken", `${h} belongs to another person`, 409);
+        // C383 review S2: the feed leaves a handle a person has out for the agent, so this would lift the refusal on an agent that is stopped or blocked and make its handle a known contact.
+        if (!held.has(h) && agentFloorOnHandle(db, h)) fail("handle_taken", `${h} belongs to an agent that Rules refuses`, 409);
       }
-      // C381 lead S3: the floor and the sender bar refuse by handle. Taking one off a person who is stopped, leaving, closed or blocked would lift that refusal with no step on record. New handles are welcome.
-      const stays = db.prepare("SELECT lifecycle, trust FROM fleet_people WHERE id = ?").get(id);
-      if (stays && (stays.trust === "blocked" || (stays.lifecycle !== null && stays.lifecycle !== "active" && stays.lifecycle !== "proposed")) && handlesOf(db, id as string).some((h) => !(handles as string[]).includes(h)))
-        fail("handles_stay", "A handle stays while this person is stopped, leaving, closed or blocked: Rules refuses them by it. You can add a handle. To take one off, give their access back first.", 409);
+      // C381 lead S3: the floor and the sender bar refuse by handle. Taking one off an entry Rules refuses (a stop, blocked, a start date that has not come) would lift that refusal with no step on record. New handles are welcome.
+      // C383 review: a wrong handle may belong to someone who did nothing, and must not wait until the stop ends. The owner says why, and that step is on the record.
+      const gone = handlesOf(db, id as string).filter((h) => !(handles as string[]).includes(h));
+      if (gone.length > 0 && personFloor(db, id as string)) {
+        // C383 review S2: an outside agent has no page, history or finding here, and its handle is all Rules knows it by. The way out is a new review, and the review says it.
+        if (String(db.prepare("SELECT kind FROM fleet_people WHERE id = ?").get(id)?.kind) !== "person") fail("handles_stay", "A handle stays on a blocked outside agent: Rules refuses it by it. If the block or the handle is wrong, record a new review first.", 409);
+        const why = Array.from(cleanText(input.handleFix ?? "")).slice(0, 200).join("");
+        if (why === "") fail("handles_stay", "A handle stays while this person is stopped, leaving, closed, blocked or not started: Rules refuses them by it. If a handle is wrong, say why and save again. You can add a handle without this.", 409);
+        const row = db.prepare("SELECT name, lifecycle FROM fleet_people WHERE id = ?").get(id);
+        // No handle in the note: the access record lists notes, and it says it lists no handles (N2-T3).
+        const channels = [...new Set(gone.map((h) => h.slice(0, h.indexOf(":"))))].join(", ");
+        appendEvent(db, { subject: { kind: "person", id: id as string, name: String(row?.name) }, kind: "changed", from: row?.lifecycle === null ? null : String(row?.lifecycle), to: row?.lifecycle === null ? null : String(row?.lifecycle), actor: OWNER, note: `${gone.length === 1 ? "A wrong handle was" : `${gone.length} wrong handles were`} taken off (${channels}). Why: ${why}`.slice(0, 500), at: now });
+      }
       db.prepare("DELETE FROM fleet_handles WHERE person_id = ?").run(id);
       for (const h of handles) db.prepare("INSERT INTO fleet_handles (handle, person_id, created_at) VALUES (?, ?, ?)").run(h, id, now);
     }
