@@ -52,7 +52,7 @@ const keysSeen = (topology: DecodedTopology | null | undefined): ReadonlySet<str
 
 /** Every person and workspace agent, sorted by name. Outside agents have no lifecycle and are not listed. */
 export function loadColleagues(db: Db, now: number, topology?: DecodedTopology | null): Loaded {
-  const conflicts = new Set(db.prepare("SELECT DISTINCT h.agent_id FROM fleet_agent_handles h JOIN fleet_handles p ON p.handle = h.handle").all().map((r) => String(r.agent_id)));
+  const conflicts = new Set(db.prepare("SELECT DISTINCT h.agent_id FROM fleet_agent_handles_all h JOIN fleet_handles p ON p.handle = h.handle").all().map((r) => String(r.agent_id)));
   const plans = latestPlanStates(db);
   const keysGone = keyEndedAt(db);
   const accessGone = accessRemovedAt(db);

@@ -4,8 +4,8 @@
   "id": "fleet",
   "name": "Governance",
   "summary": "Governance: who is who in your workspace, who owns which agent, and how far each person, outside agent and agent is trusted.",
-  "description": "Governance is the workspace's record of who should have access: one state per person and agent, with reasons and dates, and what no longer matches. It holds no grant and no credential, and it decides no call: Portal and Rules & Approvals do that.\n\n- **Summary:** how many agents you have, which have no owner, which can write or send, what no longer matches, and if you are ready to stop an agent.\n- **People and agents:** one line per person and agent: working, not reviewed, needs an owner, paused. Each change has a reason and stays in the history.\n- **When a person leaves:** a short flow. The person is barred and loses what they hold. Their agents keep working: move each to a new owner, with a new key if the person may hold the old one. Each screen says what does not change: their own logins, the agent's machine, copies already made.\n- **Stop an agent:** one dialog for one agent. Governance records the stop and lists what to do in Portal.\n- **Who is refused:** who Rules & Approvals refuses before any rule, and why.\n- **See what would change:** a preview per app that changes nothing. Each app says what it reports; what could not be read says so, and is never shown as nothing.\n- **Differences:** what no longer matches. You can accept one with a reason until a date.\n- **Add people:** one person or a pasted list. Adding someone gives no access.\n- **Roles and Cannot hold both:** roles with dates, and pairs of roles one holder cannot hold. A role allows and stops nothing by itself. This checks roles only: Portal grants are not checked.\n- **Review rounds and Access record:** one review of each person and agent, and one file of what your apps reported for a period. The record is not proof of compliance.\n- **Reviews:** an agent can ask for a review and say why; only you decide. Each verdict is kept with a copy of what the subject could do at that time.\n- **Who owns what:** who owns which agent and who is in which team, as a table you can print for a security review.\n- **Contact rules:** you can propose a rule from a fixed template. It is sent to Rules & Approvals as a draft; you approve it there.\n- **Feed for apps:** Rules & Approvals and Knowledge read a small, versioned directory feed. It has no email addresses and no job titles.\n\nGovernance finds no agent you do not know about. People are directory entries, not sign-ins. This is a record for your own review, not proof of compliance.",
-  "version": "0.4.1",
+  "description": "Governance is the workspace's record of who should have access: one state per person and agent, with reasons and dates, and what no longer matches. It holds no grant and no credential, and it decides no call: Portal and Rules & Approvals do that.\n\n- **Summary:** how many agents you have, which have no owner, which can write or send, what no longer matches, and if you are ready to stop an agent.\n- **People and agents:** one line per person and agent: working, not reviewed, needs an owner, paused. Each change has a reason and stays in the history.\n- **When a person leaves:** a short flow. The person is barred and loses what they hold. Their agents keep working: move each to a new owner, with a new key if the person may hold the old one. Each screen says what does not change: their own logins, the agent's machine, copies already made.\n- **Stop an agent:** one dialog for one agent. Governance records the stop and lists what to do in Portal.\n- **Who is refused:** who Rules & Approvals refuses before any rule, and why.\n- **See what would change:** a preview per app that changes nothing. Each app says what it reports; what could not be read says so, and is never shown as nothing.\n- **Differences:** what no longer matches. You can accept one with a reason until a date.\n- **Add people:** one person or a pasted list. Adding someone gives no access.\n- **Roles and Cannot hold both:** roles with dates, and pairs of roles one holder cannot hold. A role allows and stops nothing by itself. This checks roles only: Portal grants are not checked.\n- **Review rounds and Access record:** one review of each person and agent, and one file of what your apps reported for a period. The record is not proof of compliance.\n- **Reviews:** an agent can ask for a review and say why; only you decide. Each verdict is kept with a copy of what the subject could do at that time.\n- **Who owns what:** who owns which agent and who is in which team, as a table you can print for a security review.\n- **Contact rules:** you can propose a rule from a fixed template. It is sent to Rules & Approvals as a draft; you approve it there.\n- **Feed for apps:** Rules & Approvals, Knowledge and Workspace read a small, versioned directory feed. Workspace also reports the chat handles it creates for agents. It has no email addresses and no job titles.\n\nGovernance finds no agent you do not know about. People are directory entries, not sign-ins. This is a record for your own review, not proof of compliance.",
+  "version": "0.4.2",
   "sdkMajor": 1,
   "requires": {
     "bridge": "0.2.14"
@@ -876,7 +876,7 @@
     {
       "id": "directory_feed",
       "title": "Directory feed for apps",
-      "description": "For the reader apps only (Rules & Approvals, Knowledge), contract fleet.directory_feed/1: team member ids and roles, contacts (people and outside agents) with canonical handles, status and trust, and agents with status, trust and owner id. No email, no titles, no tags. Agents get no_access. Pass accept: [\"agent_handles\"] to also get each agent's channel handles (from Connect, cached). Pass sinceRevision; the answer is {v, revision, unchanged:true} when nothing changed.",
+      "description": "For the reader apps only (Rules & Approvals, Knowledge, Workspace), contract fleet.directory_feed/1: team member ids and roles, contacts (people and outside agents) with canonical handles, status and trust, and agents with status, trust and owner id. No email, no titles, no tags. Agents get no_access. Pass accept: [\"agent_handles\"] to also get each agent's channel handles (from Connect, cached, and the ones Workspace reported with agent_handle_report). Pass sinceRevision; the answer is {v, revision, unchanged:true} when nothing changed.",
       "input": {
         "type": "object",
         "additionalProperties": false,
@@ -895,7 +895,7 @@
               "minLength": 1,
               "maxLength": 64
             },
-            "description": "Optional extras the reader understands. \"agent_handles\": every agents[] entry also carries handles (canonical channel handles Connect issued to the agent, sorted, at most 16). \"lifecycle\": agents[] and person contacts[] also carry the effective lifecycle, and agents[] and contacts[] carry floor (true: the reader refuses this entry before any rule). \"roles\": the answer also carries a top-level roles list: each role that is not archived with its id, name and the agents and contacts that hold it now (started, not ended). Unknown values are ignored."
+            "description": "Optional extras the reader understands. \"agent_handles\": every agents[] entry also carries handles (canonical channel handles Connect issued to the agent and the handles Workspace reported for it, sorted, at most 16). \"lifecycle\": agents[] and person contacts[] also carry the effective lifecycle, and agents[] and contacts[] carry floor (true: the reader refuses this entry before any rule). \"roles\": the answer also carries a top-level roles list: each role that is not archived with its id, name and the agents and contacts that hold it now (started, not ended). Unknown values are ignored."
           }
         }
       },
@@ -1203,6 +1203,65 @@
       "effect": "read",
       "idempotency": "none",
       "receipt": false,
+      "audience": "agent"
+    },
+    {
+      "id": "agent_handle_report",
+      "title": "Report the chat handles of an agent",
+      "description": "For Workspace only. Tell Governance which chat handles Workspace created for one agent. The list replaces what Workspace reported before for that agent; an empty list removes it. Handles that Connect issued stay as they are. Governance gives the handles to the feed readers that ask for accept: [\"agent_handles\"]. The agent must be in the directory. Asking again with the same list changes nothing. Agents and people get no_access.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "v",
+          "agent",
+          "handles"
+        ],
+        "properties": {
+          "v": {
+            "const": 1
+          },
+          "agent": {
+            "type": "string",
+            "pattern": "^agt_[0-9A-HJKMNP-TV-Z]{26}$",
+            "description": "The agent id as the directory feed lists it."
+          },
+          "handles": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 200,
+              "pattern": "^(buzz:npub1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]{58}|slack:[UW][A-Z0-9]{2,30}|telegram:-?[1-9][0-9]{0,19})$"
+            },
+            "description": "Every chat handle Workspace holds for this agent, in the canonical form <channel>:<value> (buzz:npub1…, slack:U…, telegram:<number>). At most 16."
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "revision"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "crud": [
+        "update"
+      ],
+      "effect": "write",
+      "idempotency": "supported",
+      "receipt": true,
       "audience": "agent"
     },
     {

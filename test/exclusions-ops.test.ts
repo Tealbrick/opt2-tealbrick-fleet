@@ -36,7 +36,7 @@ test("the two ops are person ops, appended last, with the roles-only line in the
   assert.equal(specOf("exclusions_list").effect, "read");
   assert.deepEqual(
     manifest.operations.filter((o) => (o as { audience?: string }).audience !== "person").map((o) => o.id),
-    ["teams_list", "team_get", "directory_get", "resolve_sender", "review_request", "directory_feed"],
+    ["teams_list", "team_get", "directory_get", "resolve_sender", "review_request", "directory_feed", "agent_handle_report"],
   );
 });
 

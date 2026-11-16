@@ -6,10 +6,14 @@
 //
 // Failure rule: Connect down, not granted, a hold, a malformed page or paging that does not finish keeps the LAST cache.
 // The cache is replaced only by a COMPLETE answer; an empty complete answer is a real "no identities" and clears it.
+//
+// A second source (0.4.2): an app that creates chat handles for agents (Workspace, product `kanban`) reports them with the
+// op `agent_handle_report`. Those rows live in their own table `fleet_agent_handles_app`, so the Connect refresh below
+// replaces only the Connect cache and never touches them. The feed merges both.
 import { normalizeHandle } from "@opt2-tealbrick/manifest";
 import { type Db, type OpContext, TbError } from "@opt2-tealbrick/miniapp-sdk";
 import { AGENT_ID_PATTERN, cachedAgentHandles, FEED_CAPS, HANDLE_PATTERN } from "./feed.ts";
-import { bump } from "./store.ts";
+import { bump, fail, revision } from "./store.ts";
 
 type CallApp = OpContext["callApp"];
 
@@ -69,7 +73,7 @@ export async function refreshAgentHandles(db: Db, callApp: CallApp, now = Date.n
   for (const [agent, set] of read) next.set(agent, [...set].sort().slice(0, FEED_CAPS.handlesPerContact));
   let changed = false;
   db.transaction(() => {
-    // compare inside the transaction: the read and the write see the same rows
+    // compare inside the transaction: the read and the write see the same rows. Only the Connect cache is read and replaced here: handles an app reported (fleet_agent_handles_app) stay.
     if (fingerprint(cachedAgentHandles(db)) !== fingerprint(next)) {
       db.prepare("DELETE FROM fleet_agent_handles").run();
       const ins = db.prepare("INSERT INTO fleet_agent_handles (agent_id, handle) VALUES (?, ?)");
@@ -82,6 +86,47 @@ export async function refreshAgentHandles(db: Db, callApp: CallApp, now = Date.n
   let handles = 0;
   for (const l of next.values()) handles += l.length;
   return { status: changed ? "updated" : "unchanged", agents: next.size, handles };
+}
+
+/** What `agent_handle_report` answers. */
+export interface HandleReportOutput {
+  ok: true;
+  revision: number;
+}
+
+/**
+ * An app reports the chat handles it created for ONE agent. The list REPLACES that app's rows for that agent (an empty list removes
+ * them); the rows of another app and the Connect cache stay. Idempotent: the same list again changes nothing and does not move the
+ * revision; a change does, so a feed reader that holds the old revision reads again. `product` is the VERIFIED product of the caller
+ * (assertHandleReporter has run). Refusals: `agent_not_found` 404 (the agent is not in this workspace's directory), `invalid_handle` 400
+ * (not a canonical handle of the feed contract), `too_many_handles` 400 (more than the feed carries for one agent).
+ */
+export function reportAgentHandles(db: Db, product: string, input: { agent: string; handles: string[] }, now = Date.now()): HandleReportOutput {
+  const { agent } = input;
+  if (!AGENT_ID_PATTERN.test(agent)) fail("agent_not_found", "No agent with this id is in the directory.", 404);
+  const handles = new Set<string>();
+  for (const h of input.handles) {
+    if (canonicalAgentHandle(h) !== h) fail("invalid_handle", "A handle must be in the canonical form <channel>:<value>, for example buzz:npub1…, slack:U… or telegram:<number>.", 400);
+    handles.add(h);
+  }
+  if (handles.size > FEED_CAPS.handlesPerContact) fail("too_many_handles", `At most ${FEED_CAPS.handlesPerContact} handles for one agent.`, 400);
+  return db.transaction(() => {
+    if (db.prepare("SELECT 1 FROM fleet_agents WHERE id = ?").get(agent) === undefined) fail("agent_not_found", "No agent with this id is in the directory.", 404);
+    const have = new Set(
+      db
+        .prepare("SELECT handle FROM fleet_agent_handles_app WHERE agent_id = ? AND source_product = ?")
+        .all(agent, product)
+        .map((r) => String(r.handle)),
+    );
+    const same = have.size === handles.size && [...handles].every((h) => have.has(h));
+    if (!same) {
+      db.prepare("DELETE FROM fleet_agent_handles_app WHERE agent_id = ? AND source_product = ?").run(agent, product);
+      const ins = db.prepare("INSERT INTO fleet_agent_handles_app (agent_id, handle, source_product, updated_at) VALUES (?, ?, ?, ?)");
+      for (const h of [...handles].sort()) ins.run(agent, h, product, now);
+      bump(db);
+    }
+    return { ok: true as const, revision: revision(db) };
+  });
 }
 
 /** The timer (started in onStart, stopped in onStop): first refresh after FIRST_REFRESH_MS, then every `everyMs`. */

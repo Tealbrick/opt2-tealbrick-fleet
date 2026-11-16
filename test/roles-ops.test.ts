@@ -31,7 +31,7 @@ test("the role ops are person ops, appended last; the agent surface did not chan
   assert.deepEqual(ids.slice(at, at + ROLE_OPS.length), ROLE_OPS, "appended after every op of the lanes before");
   assert.deepEqual(ids.slice(at + ROLE_OPS.length), ["round_create", "round_get", "round_verdict", "round_set", "record_export", "exclusions_list", "exclusion_set", "refusals_get"]);
   for (const id of ROLE_OPS) assert.equal(specOf(id).audience, "person", id);
-  assert.deepEqual(manifest.operations.filter((o) => (o as { audience?: string }).audience !== "person").map((o) => o.id), ["teams_list", "team_get", "directory_get", "resolve_sender", "review_request", "directory_feed"]);
+  assert.deepEqual(manifest.operations.filter((o) => (o as { audience?: string }).audience !== "person").map((o) => o.id), ["teams_list", "team_get", "directory_get", "resolve_sender", "review_request", "directory_feed", "agent_handle_report"]);
   assert.equal(specOf("role_assign").idempotency, "required");
   assert.equal(specOf("role_set").idempotency, "required");
 });
