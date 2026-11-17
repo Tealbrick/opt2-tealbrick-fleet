@@ -85,11 +85,11 @@ test("directory_feed: an agent caller gets no_access 403; a person caller too; a
   assert.doesNotThrow(() => assertFeedCaller({ type: "app", product: "rules", listed: true }));
 });
 
-test("directory_feed: only a listed app whose VERIFIED product is in FEED_READERS (rules, knowledge, kanban) reads the feed (C373 §2, C373e)", async () => {
+test("directory_feed: only a listed app whose VERIFIED product is in FEED_READERS (rules, knowledge, worklayer) reads the feed (C373 §2, C373e)", async () => {
   const db = migratedDb();
   seed(db);
   const { product: _p, listed: _l, ...bare } = APP;
-  assert.deepEqual([...FEED_READERS], ["rules", "knowledge", "kanban"]);
+  assert.deepEqual([...FEED_READERS], ["rules", "knowledge", "worklayer"]);
   assert.ok(Object.isFrozen(FEED_READERS), "the list cannot be changed at run time");
   // quiet on good: Rules and Knowledge with a verified product, listed in the current slice; the same feed for both
   const rules = (await feedOp(db, APP)) as { teams: unknown[] };

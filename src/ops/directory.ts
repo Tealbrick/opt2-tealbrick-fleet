@@ -60,14 +60,14 @@ export const directoryOps = {
     },
   }),
   [OP.directoryFeed]: op<DirectoryFeedInput, DirectoryFeedOutput>({
-    // Contract fleet.directory_feed/1, for the reader apps (FEED_READERS: Rules, Knowledge, Workspace). Agents get no_access until the manifest has an `app` audience (G-1).
+    // Contract fleet.directory_feed/1, for the reader apps (FEED_READERS: Rules, Knowledge, Worklayer). Agents get no_access until the manifest has an `app` audience (G-1).
     async run(input, ctx) {
       assertFeedCaller(ctx.caller);
       return directoryFeed(ctx.db, input, (msg, fields) => ctx.log.warn(msg, fields));
     },
   }),
   [OP.agentHandleReport]: op<AgentHandleReportInput, AgentHandleReportOutput>({
-    // For Workspace only (HANDLE_REPORTERS): the full list replaces that app's handles for one agent. Same caller guard as the feed; agents get no_access.
+    // For Worklayer only (HANDLE_REPORTERS): the full list replaces that app's handles for one agent. Same caller guard as the feed; agents get no_access.
     async run(input, ctx) {
       assertHandleReporter(ctx.caller);
       return reportAgentHandles(ctx.db, String(ctx.caller.product), input);

@@ -113,16 +113,16 @@ function skip(warn: Warn | undefined, what: string, id: string): void {
 
 /**
  * The VERIFIED products allowed to read the feed: Rules (its read model, C243, C373 §2), Knowledge (C373e, a second
- * reader) and Workspace (product id `kanban`), which reads the feed to see which agents exist and which handles they hold.
+ * reader) and Worklayer (product id `worklayer`), which reads the feed to see which agents exist and which handles they hold.
  * Exact product ids only; never a manifest name.
  */
-export const FEED_READERS: readonly string[] = Object.freeze(["rules", "knowledge", "kanban"]);
+export const FEED_READERS: readonly string[] = Object.freeze(["rules", "knowledge", "worklayer"]);
 
 /**
- * The VERIFIED products allowed to report chat handles for an agent with `agent_handle_report`: Workspace (`kanban`) only.
- * Governance decides which agents exist and what they may do; Workspace creates the handles and tells Governance. Exact product ids only.
+ * The VERIFIED products allowed to report chat handles for an agent with `agent_handle_report`: Worklayer (`worklayer`) only.
+ * Governance decides which agents exist and what they may do; Worklayer creates the handles and tells Governance. Exact product ids only.
  */
-export const HANDLE_REPORTERS: readonly string[] = Object.freeze(["kanban"]);
+export const HANDLE_REPORTERS: readonly string[] = Object.freeze(["worklayer"]);
 
 /** Refusal text for an app caller the SDK could not verify (same words as the SDK's own `caller_unverified`). */
 export const FEED_UNVERIFIED_MESSAGE = "the calling app is not verified for this workspace yet: update the bridge, or retry after the workspace config refreshes";
@@ -148,14 +148,14 @@ function assertListedApp(caller: { type: string; product?: unknown; listed?: unk
   if (caller.listed !== true) throw new TbError("caller_unverified", FEED_UNVERIFIED_MESSAGE, 403, { retryable: true });
 }
 
-/** The feed guard: the reader apps in FEED_READERS (Rules, Knowledge, Workspace). See assertListedApp. */
+/** The feed guard: the reader apps in FEED_READERS (Rules, Knowledge, Worklayer). See assertListedApp. */
 export function assertFeedCaller(caller: { type: string; product?: unknown; listed?: unknown }): void {
-  assertListedApp(caller, FEED_READERS, "directory_feed", "the reader apps (Rules, Knowledge, Workspace)");
+  assertListedApp(caller, FEED_READERS, "directory_feed", "the reader apps (Rules, Knowledge, Worklayer)");
 }
 
-/** The guard of `agent_handle_report`: the apps in HANDLE_REPORTERS (Workspace). See assertListedApp. */
+/** The guard of `agent_handle_report`: the apps in HANDLE_REPORTERS (Worklayer). See assertListedApp. */
 export function assertHandleReporter(caller: { type: string; product?: unknown; listed?: unknown }): void {
-  assertListedApp(caller, HANDLE_REPORTERS, "agent_handle_report", "Workspace");
+  assertListedApp(caller, HANDLE_REPORTERS, "agent_handle_report", "Worklayer");
 }
 
 /**

@@ -7,7 +7,7 @@
 // Failure rule: Connect down, not granted, a hold, a malformed page or paging that does not finish keeps the LAST cache.
 // The cache is replaced only by a COMPLETE answer; an empty complete answer is a real "no identities" and clears it.
 //
-// A second source (0.4.2): an app that creates chat handles for agents (Workspace, product `kanban`) reports them with the
+// A second source (0.4.2): an app that creates chat handles for agents (Worklayer, product `worklayer`) reports them with the
 // op `agent_handle_report`. Those rows live in their own table `fleet_agent_handles_app`, so the Connect refresh below
 // replaces only the Connect cache and never touches them. The feed merges both.
 import { normalizeHandle } from "@opt2-tealbrick/manifest";
