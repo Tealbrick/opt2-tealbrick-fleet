@@ -76,10 +76,22 @@ export const ID_MAX = 64;
 export const TEAM_NAME_MAX = 80;
 const validId = (id: string): boolean => id.length >= 1 && id.length <= ID_MAX;
 
-/** The cached Connect handles per agent (table fleet_agent_handles, written only by the timer in agent-handles.ts). */
+/** The cached Connect handles per agent (table fleet_agent_handles, written only by the timer in agent-handles.ts; the Connect timer reads and replaces only this table). */
 export function cachedAgentHandles(db: Db): Map<string, string[]> {
   const out = new Map<string, string[]>();
   for (const r of db.prepare("SELECT agent_id, handle FROM fleet_agent_handles ORDER BY agent_id, handle").all()) {
+    const id = String(r.agent_id);
+    const list = out.get(id) ?? [];
+    list.push(String(r.handle));
+    out.set(id, list);
+  }
+  return out;
+}
+
+/** The handles apps reported per agent (table fleet_agent_handles_app, written only by agent_handle_report), sorted. */
+export function reportedAgentHandles(db: Db): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const r of db.prepare("SELECT agent_id, handle FROM fleet_agent_handles_app GROUP BY agent_id, handle ORDER BY agent_id, handle").all()) {
     const id = String(r.agent_id);
     const list = out.get(id) ?? [];
     list.push(String(r.handle));
@@ -100,20 +112,27 @@ function skip(warn: Warn | undefined, what: string, id: string): void {
 }
 
 /**
- * The VERIFIED products allowed to read the feed: Rules (its read model, C243, C373 §2) and Knowledge (C373e, a second
- * reader). Exact product ids only; never a manifest name.
+ * The VERIFIED products allowed to read the feed: Rules (its read model, C243, C373 §2), Knowledge (C373e, a second
+ * reader) and Worklayer (product id `worklayer`), which reads the feed to see which agents exist and which handles they hold.
+ * Exact product ids only; never a manifest name.
  */
-export const FEED_READERS: readonly string[] = Object.freeze(["rules", "knowledge"]);
+export const FEED_READERS: readonly string[] = Object.freeze(["rules", "knowledge", "worklayer"]);
+
+/**
+ * The VERIFIED products allowed to report chat handles for an agent with `agent_handle_report`: Worklayer (`worklayer`) only.
+ * Governance decides which agents exist and what they may do; Worklayer creates the handles and tells Governance. Exact product ids only.
+ */
+export const HANDLE_REPORTERS: readonly string[] = Object.freeze(["worklayer"]);
 
 /** Refusal text for an app caller the SDK could not verify (same words as the SDK's own `caller_unverified`). */
 export const FEED_UNVERIFIED_MESSAGE = "the calling app is not verified for this workspace yet: update the bridge, or retry after the workspace config refreshes";
 
 /**
- * Only the reader apps in FEED_READERS read the feed (C243, C373 RULES-INTERFACE §2, C373e). The check uses ONLY the
+ * Only the apps in `allowed` call an app-only op (the feed readers; the handle reporters). The check uses ONLY the
  * verified caller fields the SDK sets (SDK-CALLER-PRODUCT, spec `Caller`):
  *  - `caller.type` must be `app`; an agent, a person or anything else gets `no_access` 403;
  *  - `caller.product` is the VERIFIED product (the signed grant `prd`, else the signed slice `companionCallers` entry);
- *    it must be exactly one of FEED_READERS. Never the display `name` or any self-claimed string;
+ *    it must be exactly one of `allowed`. Never the display `name` or any self-claimed string;
  *  - `caller.listed` must be `true`: the caller instance is in the CURRENT signed slice `companionCallers` under that
  *    product (the spec asks apps that share data with a calling app to re-check it at use time; false when the slice is
  *    expired or the companion edge was removed after the grant was minted).
@@ -121,12 +140,22 @@ export const FEED_UNVERIFIED_MESSAGE = "the calling app is not verified for this
  * slice or bridge fixes it), like the SDK's central guard (SDK 0.1.35, C261) when the slice flag `appCallers: "verified"`
  * is set. A verified app of another product gets `no_access` 403. No refusal carries feed data.
  */
-export function assertFeedCaller(caller: { type: string; product?: unknown; listed?: unknown }): void {
-  if (caller.type !== "app") throw new TbError("no_access", "directory_feed is for apps only", 403);
+function assertListedApp(caller: { type: string; product?: unknown; listed?: unknown }, allowed: readonly string[], op: string, who: string): void {
+  if (caller.type !== "app") throw new TbError("no_access", `${op} is for apps only`, 403);
   const product = caller.product;
   if (product === undefined || product === null || product === "") throw new TbError("caller_unverified", FEED_UNVERIFIED_MESSAGE, 403, { retryable: true });
-  if (typeof product !== "string" || !FEED_READERS.includes(product)) throw new TbError("no_access", "directory_feed is for the reader apps only (Rules, Knowledge)", 403);
+  if (typeof product !== "string" || !allowed.includes(product)) throw new TbError("no_access", `${op} is for ${who} only`, 403);
   if (caller.listed !== true) throw new TbError("caller_unverified", FEED_UNVERIFIED_MESSAGE, 403, { retryable: true });
+}
+
+/** The feed guard: the reader apps in FEED_READERS (Rules, Knowledge, Worklayer). See assertListedApp. */
+export function assertFeedCaller(caller: { type: string; product?: unknown; listed?: unknown }): void {
+  assertListedApp(caller, FEED_READERS, "directory_feed", "the reader apps (Rules, Knowledge, Worklayer)");
+}
+
+/** The guard of `agent_handle_report`: the apps in HANDLE_REPORTERS (Worklayer). See assertListedApp. */
+export function assertHandleReporter(caller: { type: string; product?: unknown; listed?: unknown }): void {
+  assertListedApp(caller, HANDLE_REPORTERS, "agent_handle_report", "Worklayer");
 }
 
 /**
@@ -139,7 +168,7 @@ export function assertFeedCaller(caller: { type: string; product?: unknown; list
  * listed only while a team still names them (so a reader can drop the member); they do not count against the cap.
  *
  * `accept: ["agent_handles"]` (C373 §3, additive): every agents[] entry also carries `handles` (the cached Connect
- * handles, canonical, sorted, <= 16; [] when none). One more indexed read; nothing is called. Without it (or with only
+ * handles plus the handles an app reported with `agent_handle_report`, canonical, sorted, <= 16; [] when none). Two more indexed reads; nothing is called. Without it (or with only
  * unknown values) the answer is byte-for-byte the fleet.directory_feed/1 shape of 0.2.x.
  *
  * `accept: ["lifecycle"]` (C380, spec 0.1.89): agents[] and person contacts[] carry the effective lifecycle, and agents[] and contacts[]
@@ -155,7 +184,9 @@ export function directoryFeed(db: Db, input: FeedInput, warn?: Warn): DirectoryF
   const origin = input.accept?.includes(ACCEPT_LIFECYCLE) ? { epoch: feedEpoch(db) } : {};
   if (input.sinceRevision !== undefined && input.sinceRevision === rev) return { v: 1, revision: rev, unchanged: true, ...origin };
   // C373 §3: agent handles only when the reader asks for them; without `accept` the answer is exactly the old shape
-  const agentHandles = Array.isArray(input.accept) && input.accept.includes(ACCEPT_AGENT_HANDLES) ? cachedAgentHandles(db) : null;
+  const wantsHandles = Array.isArray(input.accept) && input.accept.includes(ACCEPT_AGENT_HANDLES);
+  const agentHandles = wantsHandles ? cachedAgentHandles(db) : null;
+  const reported = wantsHandles ? reportedAgentHandles(db) : null;
   // C380: lifecycle and floor only when the reader asks; without `accept` the answer is exactly the old shape
   const lifecycle = Array.isArray(input.accept) && input.accept.includes(ACCEPT_LIFECYCLE);
 
@@ -210,7 +241,11 @@ export function directoryFeed(db: Db, input: FeedInput, warn?: Warn): DirectoryF
     const agent: FeedAgent = { id, status: a.status as FeedAgent["status"], trust: a.trust as Trust, owner: owner !== null && contactIds.has(owner) && !withheld.has(id) ? owner : null };
     if (agentHandles) {
       const list: string[] = [];
-      for (const h of agentHandles.get(id) ?? []) {
+      // The Connect handles come first and fill the cap; a handle an app reported fills what is left. One handle is listed once. The list is sorted.
+      const seen = new Set<string>();
+      for (const h of [...(agentHandles.get(id) ?? []), ...(reported?.get(id) ?? [])]) {
+        if (seen.has(h)) continue;
+        seen.add(h);
         if (normalizeHandle(h) !== h || !HANDLE_PATTERN.test(h)) {
           skip(warn, "an agent handle", h);
           continue;
@@ -219,7 +254,7 @@ export function directoryFeed(db: Db, input: FeedInput, warn?: Warn): DirectoryF
         if (personHandles.has(h)) continue;
         if (list.length < FEED_CAPS.handlesPerContact) list.push(h);
       }
-      agent.handles = list;
+      agent.handles = list.sort();
     }
     if (lifecycle) {
       const effective = effectiveAgent({ lifecycle: a.lifecycle as Lifecycle, validFrom: a.valid_from === null ? null : Number(a.valid_from) });

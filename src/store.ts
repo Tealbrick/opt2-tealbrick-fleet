@@ -351,7 +351,7 @@ const OWNER = { kind: "owner", id: null } as const;
 /** An agent Rules refuses now that Connect gives this handle. */
 function agentFloorOnHandle(db: Db, handle: string): boolean {
   return db
-    .prepare("SELECT a.lifecycle, a.valid_from, a.trust, a.migrated_note FROM fleet_agent_handles h JOIN fleet_agents a ON a.id = h.agent_id WHERE h.handle = ?")
+    .prepare("SELECT a.lifecycle, a.valid_from, a.trust, a.migrated_note FROM fleet_agent_handles_all h JOIN fleet_agents a ON a.id = h.agent_id WHERE h.handle = ?")
     .all(handle)
     .some((a) => floorOf(effectiveAgent({ lifecycle: a.lifecycle as Lifecycle, validFrom: a.valid_from === null ? null : Number(a.valid_from) }), a.trust as Trust, a.migrated_note === "no_card"));
 }

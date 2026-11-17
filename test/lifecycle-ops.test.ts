@@ -36,11 +36,11 @@ test("A16: the new ops are person ops, last in the manifest; the agent surface i
   assert.equal(validateManifest(manifest).ok, true);
   const ids = manifest.operations.map((o) => o.id as string);
   assert.deepEqual(ids.slice(ids.indexOf(NEW_OPS[0] as string), ids.indexOf(NEW_OPS[0] as string) + NEW_OPS.length), NEW_OPS, "appended after every op of 0.3.2");
-  assert.equal(ids.indexOf(NEW_OPS[0] as string), 23);
+  assert.equal(ids.indexOf(NEW_OPS[0] as string), 24, "the 23 ops of 0.3.2 and agent_handle_report (0.4.2, next to directory_feed) come first");
   for (const id of NEW_OPS) assert.equal(specOf(id).audience, "person", id);
   const agentOps = manifest.operations.filter((o) => (o as { audience?: string }).audience !== "person").map((o) => o.id);
-  assert.deepEqual(agentOps, ["teams_list", "team_get", "directory_get", "resolve_sender", "review_request", "directory_feed"]);
-  assert.deepEqual(manifest.operations.filter((o) => (o as { audience?: string }).audience !== "person" && (o as { effect?: string }).effect !== "read").map((o) => o.id), ["review_request"]);
+  assert.deepEqual(agentOps, ["teams_list", "team_get", "directory_get", "resolve_sender", "review_request", "directory_feed", "agent_handle_report"]);
+  assert.deepEqual(manifest.operations.filter((o) => (o as { audience?: string }).audience !== "person" && (o as { effect?: string }).effect !== "read").map((o) => o.id), ["review_request", "agent_handle_report"]);
 });
 
 test("A16: an agent or an app calling a lifecycle op is refused by the handler too, and nothing changes", async () => {

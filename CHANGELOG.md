@@ -2,6 +2,18 @@
 
 Versions follow `package.json` and `tealbrick.manifest.json` (product id `fleet`).
 
+## 0.4.2 - 2026-11-16
+
+Governance is the control plane for agents; other apps read it and execute. Worklayer (product `worklayer`) now reads the directory feed and reports the chat handles it creates for agents. Migration 0015 (one new table and one view; no row changes). Updates from 0.4.1 and the versions before it. Needs the same apps as 0.4.1.
+
+- Worklayer may read the directory feed. `directory_feed` answers a listed app of the product `worklayer` like it answers Rules and Knowledge: same guard (verified product, listed in the current slice), same answer, same `accept` extras. Any other app, every agent and every person is refused as before.
+- New op `agent_handle_report`, for Worklayer only (audience `agent`, like `directory_feed`: the handler refuses agents and people with `no_access`). Input `{v: 1, agent, handles}`: the full list of chat handles Worklayer holds for one agent. It replaces what Worklayer reported for that agent; an empty list removes it. Output `{ok: true, revision}`. The agent must be in the directory (`agent_not_found`, 404); each handle must be canonical (`invalid_handle`, 400; the feed's pattern); at most 16 (`too_many_handles`, 400). The same list again changes nothing and does not move the revision.
+- The reported handles are stored in a new table, `fleet_agent_handles_app` (agent, handle, source product, time). The Connect timer replaces only its own cache (`fleet_agent_handles`) and never deletes these rows, also not on an empty complete answer.
+- With `accept: ["agent_handles"]`, `agents[].handles` lists the Connect handles and the reported ones, once each, sorted, at most 16 (Connect's first). A handle a person holds still stays the person's. A report that changes the list moves the feed revision.
+- A reported handle counts like a Connect handle in Governance's own checks: the finding `agent_handle_conflict`, `handle_taken` and the no-self-request rule read the view `fleet_agent_handles_all`.
+- Not changed: the agent ops, the `fleet_facts` hook and the lifecycle `accept` values. No agent op or hook fact carries an agent handle.
+- Worklayer must list `directory_feed` and `agent_handle_report` as companion operations of Governance in its own manifest, and the owner must grant them.
+
 ## 0.4.1 - 2026-11-01
 
 From the review of the 0.4.0 cut (C383). DEV only: no stable until Martin decides on D11. No migration. Updates from 0.2.x, 0.3.x, 0.4.0 and the 0.4.0 dev versions.

@@ -273,10 +273,10 @@ function assertNotSelf(db: Db, agent: string, subject: RequestInput["subject"]):
     if (subject.id === agent) refuse();
     return;
   }
-  const own = (handle: string) => db.prepare("SELECT 1 FROM fleet_agent_handles WHERE agent_id = ? AND handle = ?").get(agent, handle) !== undefined;
+  const own = (handle: string) => db.prepare("SELECT 1 FROM fleet_agent_handles_all WHERE agent_id = ? AND handle = ?").get(agent, handle) !== undefined;
   // the same order as requestReview: an id wins when it is not empty, else the handle
   if (subject.id) {
-    if (db.prepare("SELECT 1 FROM fleet_handles h JOIN fleet_agent_handles a ON a.handle = h.handle WHERE h.person_id = ? AND a.agent_id = ?").get(subject.id, agent)) refuse();
+    if (db.prepare("SELECT 1 FROM fleet_handles h JOIN fleet_agent_handles_all a ON a.handle = h.handle WHERE h.person_id = ? AND a.agent_id = ?").get(subject.id, agent)) refuse();
   } else if (subject.handle !== undefined && own(fleetHandle(subject.handle) ?? "")) refuse();
 }
 

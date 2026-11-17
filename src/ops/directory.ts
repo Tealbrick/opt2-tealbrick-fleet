@@ -2,6 +2,8 @@
 // Own file per op group (C380 B9-0): a later lane adds its op here (or in a new file under src/ops/) and registers the map in src/app.ts.
 import type { HandlerSpec } from "@opt2-tealbrick/miniapp-sdk";
 import {
+  type AgentHandleReportInput,
+  type AgentHandleReportOutput,
   type AgentSetInput,
   type AgentSetOutput,
   type DirectoryFeedInput,
@@ -31,7 +33,8 @@ import {
   type TeamsListInput,
   type TeamsListOutput,
 } from "#kit";
-import { assertFeedCaller, directoryFeed } from "../feed.ts";
+import { reportAgentHandles } from "../agent-handles.ts";
+import { assertFeedCaller, assertHandleReporter, directoryFeed } from "../feed.ts";
 import { identitiesView } from "../identities.ts";
 import { leanDirectory, leanResolveSender, leanTeamGet, leanTeamsList } from "../lean.ts";
 import { setAgentMoved, setMembersMoved } from "../lifecycle/moved.ts";
@@ -57,10 +60,17 @@ export const directoryOps = {
     },
   }),
   [OP.directoryFeed]: op<DirectoryFeedInput, DirectoryFeedOutput>({
-    // Contract fleet.directory_feed/1, for the reader apps (FEED_READERS: Rules, Knowledge). Agents get no_access until the manifest has an `app` audience (G-1).
+    // Contract fleet.directory_feed/1, for the reader apps (FEED_READERS: Rules, Knowledge, Worklayer). Agents get no_access until the manifest has an `app` audience (G-1).
     async run(input, ctx) {
       assertFeedCaller(ctx.caller);
       return directoryFeed(ctx.db, input, (msg, fields) => ctx.log.warn(msg, fields));
+    },
+  }),
+  [OP.agentHandleReport]: op<AgentHandleReportInput, AgentHandleReportOutput>({
+    // For Worklayer only (HANDLE_REPORTERS): the full list replaces that app's handles for one agent. Same caller guard as the feed; agents get no_access.
+    async run(input, ctx) {
+      assertHandleReporter(ctx.caller);
+      return reportAgentHandles(ctx.db, String(ctx.caller.product), input);
     },
   }),
   [OP.resolveSender]: op<ResolveSenderInput, ResolveSenderOutput>({

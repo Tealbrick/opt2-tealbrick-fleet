@@ -327,6 +327,7 @@ test("i. an upgrade from dev.100 data: the revision moves, the agent of a leavin
   assert.deepEqual({ ...note }, { subject_kind: "workspace", kind: "migrated", actor_kind: "system", note: "From this version an owner's change no longer stops the owner's agents. Agents keep working, and a finding says when an agent needs an owner." });
   assert.equal(Number(db.prepare("SELECT COUNT(*) AS n FROM fleet_lifecycle_events").get()?.n), rows + 1, "one row");
   assert.deepEqual(verifyChain(db), { ok: true, rows: rows + 1 });
+  db.exec(`BEGIN;\n${migrationFiles()[14]?.sql}\nCOMMIT;`); // 0015 (0.4.2): the reads of the findings use its view
   assert.ok(codes({ db }, left).includes("owner_inactive"), "the finding says it needs an owner");
   // a fresh install has no record to correct
   const fresh = migratedDb();

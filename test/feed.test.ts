@@ -85,11 +85,11 @@ test("directory_feed: an agent caller gets no_access 403; a person caller too; a
   assert.doesNotThrow(() => assertFeedCaller({ type: "app", product: "rules", listed: true }));
 });
 
-test("directory_feed: only a listed app whose VERIFIED product is in FEED_READERS (rules, knowledge) reads the feed (C373 §2, C373e)", async () => {
+test("directory_feed: only a listed app whose VERIFIED product is in FEED_READERS (rules, knowledge, worklayer) reads the feed (C373 §2, C373e)", async () => {
   const db = migratedDb();
   seed(db);
   const { product: _p, listed: _l, ...bare } = APP;
-  assert.deepEqual([...FEED_READERS], ["rules", "knowledge"]);
+  assert.deepEqual([...FEED_READERS], ["rules", "knowledge", "worklayer"]);
   assert.ok(Object.isFrozen(FEED_READERS), "the list cannot be changed at run time");
   // quiet on good: Rules and Knowledge with a verified product, listed in the current slice; the same feed for both
   const rules = (await feedOp(db, APP)) as { teams: unknown[] };
@@ -365,7 +365,7 @@ test("no agent operation writes trust: every agent op on a blocked contact leave
   db.prepare("UPDATE fleet_people SET trust = 'blocked' WHERE id = ?").run(s.cy.id);
   const before = JSON.stringify(db.prepare("SELECT id, trust FROM fleet_people ORDER BY id").all());
   const ctx = ctxOf(db, AGENT);
-  for (const op of manifest.operations.filter((o) => (o as { audience?: string }).audience === "agent" && o.id !== "directory_feed")) {
+  for (const op of manifest.operations.filter((o) => (o as { audience?: string }).audience === "agent" && o.id !== "directory_feed" && o.id !== "agent_handle_report")) {
     const h = (handlers as unknown as Record<string, { run(i: unknown, c: OpContext): Promise<unknown> }>)[op.id] as { run(i: unknown, c: OpContext): Promise<unknown> };
     const input = op.id === "resolve_sender" ? { handle: "slack:UCY00001" } : op.id === "team_get" ? { team: s.support.id } : op.id === "review_request" ? { subject: { kind: "person", id: s.cy.id }, why: "check" } : {};
     await h.run(input, ctx);
